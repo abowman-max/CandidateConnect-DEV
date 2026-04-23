@@ -26,7 +26,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
 
 # R2 public-read setup
-R2_BASE = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
+R2_BASE = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
 R2_BUCKET = "candidate-connect-data-dev"
 
 LOCAL_ROOT = Path("/tmp/candidate_connect_r2")
