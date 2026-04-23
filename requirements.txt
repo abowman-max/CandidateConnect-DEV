@@ -1,0 +1,8 @@
+altair
+duckdb
+pandas
+requests
+streamlit
+reportlab
+boto3
+openpyxl
