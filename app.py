@@ -4257,38 +4257,67 @@ def render_area_intelligence_workspace():
     divider()
 
     chart_col1, chart_col2 = st.columns(2, gap="medium")
+
     with chart_col1:
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+        st.markdown('<div class="small-header">Party Breakdown</div>', unsafe_allow_html=True)
         party_chart = pd.DataFrame({
             "Party": ["Democratic", "Republican", "Other"],
             "Voters": [dem, rep, other],
         })
+        party_chart["Voters"] = pd.to_numeric(party_chart["Voters"], errors="coerce").fillna(0)
         party_chart["Percent"] = party_chart["Voters"].apply(lambda x: 0 if total <= 0 else (float(x) / float(total)) * 100)
+        party_colors = ["#1565c0", "#c62828", "#2e7d32"]  # D blue, R red, Other green
+
         if party_chart["Voters"].sum() > 0:
-            chart = alt.Chart(party_chart).mark_bar().encode(
-                x=alt.X("Party:N", title="Party"),
-                y=alt.Y("Voters:Q", title="Voters"),
-                tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
-            ).properties(height=240)
+            chart = alt.Chart(party_chart).mark_arc(innerRadius=58, outerRadius=92).encode(
+                theta=alt.Theta(field="Voters", type="quantitative"),
+                color=alt.Color(
+                    field="Party",
+                    type="nominal",
+                    scale=alt.Scale(domain=party_chart["Party"].tolist(), range=party_colors),
+                    legend=alt.Legend(title="Party")
+                ),
+                tooltip=[
+                    alt.Tooltip("Party:N"),
+                    alt.Tooltip("Voters:Q", format=","),
+                    alt.Tooltip("Percent:Q", format=".1f", title="Percent")
+                ],
+            ).properties(height=255)
             st.altair_chart(chart, use_container_width=True)
+            st.markdown(make_summary_table(party_chart, "Party", "Voters", party_colors), unsafe_allow_html=True)
         else:
             st.caption("No party data available.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with chart_col2:
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+        st.markdown('<div class="small-header">Gender Breakdown</div>', unsafe_allow_html=True)
         gender_chart = pd.DataFrame({
             "Gender": ["Male", "Female", "Unknown"],
             "Voters": [male, female, unknown_gender],
         })
+        gender_chart["Voters"] = pd.to_numeric(gender_chart["Voters"], errors="coerce").fillna(0)
         gender_chart["Percent"] = gender_chart["Voters"].apply(lambda x: 0 if total <= 0 else (float(x) / float(total)) * 100)
+        gender_colors = ["#4b4f54", "#b98088", "#9b9da1"]  # existing Candidate Connect gender palette
+
         if gender_chart["Voters"].sum() > 0:
-            chart = alt.Chart(gender_chart).mark_bar().encode(
-                x=alt.X("Gender:N", title="Gender"),
-                y=alt.Y("Voters:Q", title="Voters"),
-                tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
-            ).properties(height=240)
+            chart = alt.Chart(gender_chart).mark_arc(innerRadius=58, outerRadius=92).encode(
+                theta=alt.Theta(field="Voters", type="quantitative"),
+                color=alt.Color(
+                    field="Gender",
+                    type="nominal",
+                    scale=alt.Scale(domain=gender_chart["Gender"].tolist(), range=gender_colors),
+                    legend=alt.Legend(title="Gender")
+                ),
+                tooltip=[
+                    alt.Tooltip("Gender:N"),
+                    alt.Tooltip("Voters:Q", format=","),
+                    alt.Tooltip("Percent:Q", format=".1f", title="Percent")
+                ],
+            ).properties(height=255)
             st.altair_chart(chart, use_container_width=True)
+            st.markdown(make_summary_table(gender_chart, "Gender", "Voters", gender_colors), unsafe_allow_html=True)
         else:
             st.caption("No gender data available.")
         st.markdown('</div>', unsafe_allow_html=True)
