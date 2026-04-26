@@ -4382,7 +4382,69 @@ def render_area_intelligence_workspace():
             st.caption("No gender data available.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.expander("View raw rows used for this area", expanded=False):
+    # Show an understandable breakdown table instead of raw source rows.
+    st.markdown('<div class="section-card"><div class="small-header">Area Breakdown</div><div class="tiny-muted">These are the summarized areas included in the selected profile.</div></div>', unsafe_allow_html=True)
+
+    breakdown_df = profile_df.copy()
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Voters", "Avg_Age"]:
+        if col in breakdown_df.columns:
+            breakdown_df[col] = pd.to_numeric(breakdown_df[col], errors="coerce").fillna(0)
+        else:
+            breakdown_df[col] = 0
+
+    if area_level == "County":
+        breakdown_mode = st.radio(
+            "Breakdown View",
+            ["By Municipality", "By Precinct"],
+            horizontal=True,
+            key="ai_county_breakdown_mode",
+        )
+        group_cols = ["County", "Municipality"] if breakdown_mode == "By Municipality" else ["County", "Municipality", "Precinct"]
+    elif area_level == "Municipality":
+        breakdown_mode = "By Precinct"
+        group_cols = ["County", "Municipality", "Precinct"]
+    else:
+        breakdown_mode = "Selected Precinct"
+        group_cols = ["County", "Municipality", "Precinct"]
+
+    display_df = (
+        breakdown_df.groupby(group_cols, dropna=False)
+        .agg(
+            Total_Voters=("Total_Voters", "sum"),
+            Dem_Voters=("Dem_Voters", "sum"),
+            Rep_Voters=("Rep_Voters", "sum"),
+            Other_Voters=("Other_Voters", "sum"),
+            Male_Voters=("Male_Voters", "sum"),
+            Female_Voters=("Female_Voters", "sum"),
+            Unknown_Gender=("Unknown_Gender", "sum"),
+            New_Registrations=("New_Registrations", "sum"),
+            Mail_Voters=("Mail_Voters", "sum"),
+        )
+        .reset_index()
+    )
+
+    # Recalculate weighted average age for each displayed row.
+    weighted_age = (
+        breakdown_df.assign(_AgeWeight=breakdown_df["Avg_Age"] * breakdown_df["Total_Voters"])
+        .groupby(group_cols, dropna=False)
+        .agg(_AgeWeight=("_AgeWeight", "sum"), _AgeTotal=("Total_Voters", "sum"))
+        .reset_index()
+    )
+    weighted_age["Avg_Age"] = weighted_age.apply(lambda r: 0 if r["_AgeTotal"] <= 0 else round(float(r["_AgeWeight"] / r["_AgeTotal"]), 1), axis=1)
+    display_df = display_df.merge(weighted_age[group_cols + ["Avg_Age"]], on=group_cols, how="left")
+
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Voters"]:
+        display_df[col] = pd.to_numeric(display_df[col], errors="coerce").fillna(0).astype(int)
+
+    display_df["Dem_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Dem_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    display_df["Rep_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Rep_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    display_df["Other_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Other_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+
+    display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Debug: view original precinct summary rows", expanded=False):
+        st.caption("This is the raw precinct_summary.csv source data. Some rows may be tiny because of blank or unusual geography labels. The Area Breakdown table above is the correct campaign-facing summary.")
         st.dataframe(profile_df, use_container_width=True, hide_index=True)
 
 
