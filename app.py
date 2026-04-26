@@ -4155,15 +4155,43 @@ def _metric_html(label: str, value: str, note: str = "") -> str:
     return f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div>{note_html}</div>'
 
 
+def _aggregate_area_profile(profile_df: pd.DataFrame) -> dict:
+    """Aggregate one or more precinct rows into a single area profile."""
+    numeric_cols = [
+        "Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters",
+        "Male_Voters", "Female_Voters", "Unknown_Gender",
+        "New_Registrations", "Mail_Voters"
+    ]
+    out = {}
+    work = profile_df.copy()
+    for col in numeric_cols + ["Avg_Age"]:
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
+        else:
+            work[col] = 0
+
+    for col in numeric_cols:
+        out[col] = float(work[col].sum())
+
+    total = out.get("Total_Voters", 0)
+    if total > 0 and "Avg_Age" in work.columns:
+        out["Avg_Age"] = float((work["Avg_Age"] * work["Total_Voters"]).sum() / total)
+    else:
+        out["Avg_Age"] = 0.0
+
+    out["Precinct_Count"] = int(len(work))
+    return out
+
+
 def render_area_intelligence_workspace():
-    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 precinct profile and strategy foundation.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 area profiles and strategy foundation.</div></div>', unsafe_allow_html=True)
 
     try:
         area_df = load_area_precinct_summary()
     except Exception as e:
         st.error("Area Intelligence file could not be loaded.")
         st.caption(str(e))
-        st.info("Expected file path in R2: area_intelligence/precinct_summary.csv")
+        st.info("Expected file path: area_intelligence/precinct_summary.csv")
         return
 
     required_cols = ["County", "Municipality", "Precinct"]
@@ -4179,29 +4207,61 @@ def render_area_intelligence_workspace():
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="small-header">Select Area</div>', unsafe_allow_html=True)
 
+    area_level = st.selectbox(
+        "Report Level",
+        ["County", "Municipality", "Precinct"],
+        index=2,
+        key="ai_area_level",
+        help="Choose whether this profile should summarize an entire county, one municipality, or a single precinct."
+    )
+
     c1, c2, c3 = st.columns(3)
     counties = sorted([x for x in area_df["County"].unique().tolist() if str(x).strip()])
     with c1:
         selected_county = st.selectbox("County", counties, key="ai_county") if counties else ""
 
     county_df = area_df[area_df["County"] == selected_county].copy() if selected_county else area_df.copy()
+
+    selected_muni = ""
+    selected_precinct = ""
     municipalities = sorted([x for x in county_df["Municipality"].unique().tolist() if str(x).strip()])
-    with c2:
-        selected_muni = st.selectbox("Municipality", municipalities, key="ai_municipality") if municipalities else ""
+    if area_level in ["Municipality", "Precinct"]:
+        with c2:
+            selected_muni = st.selectbox("Municipality", municipalities, key="ai_municipality") if municipalities else ""
+    else:
+        with c2:
+            st.caption("Municipality not needed for county report")
 
     muni_df = county_df[county_df["Municipality"] == selected_muni].copy() if selected_muni else county_df.copy()
-    precincts = sorted([x for x in muni_df["Precinct"].unique().tolist() if str(x).strip()])
-    with c3:
-        selected_precinct = st.selectbox("Precinct", precincts, key="ai_precinct") if precincts else ""
 
-    profile_df = muni_df[muni_df["Precinct"] == selected_precinct].copy() if selected_precinct else pd.DataFrame()
+    precincts = sorted([x for x in muni_df["Precinct"].unique().tolist() if str(x).strip()])
+    if area_level == "Precinct":
+        with c3:
+            selected_precinct = st.selectbox("Precinct", precincts, key="ai_precinct") if precincts else ""
+    else:
+        with c3:
+            st.caption("Precinct not needed for this report level")
+
+    if area_level == "County":
+        profile_df = county_df.copy()
+        area_name = selected_county
+        title = f"{selected_county} County"
+    elif area_level == "Municipality":
+        profile_df = muni_df.copy() if selected_muni else pd.DataFrame()
+        area_name = selected_muni
+        title = f"{selected_muni} • {selected_county}"
+    else:
+        profile_df = muni_df[muni_df["Precinct"] == selected_precinct].copy() if selected_precinct else pd.DataFrame()
+        area_name = selected_precinct
+        title = f"{selected_precinct} • {selected_muni} • {selected_county}"
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     if profile_df.empty:
         st.warning("No Area Intelligence data found for this selection.")
         return
 
-    row = profile_df.iloc[0]
+    row = _aggregate_area_profile(profile_df)
     total = _area_num(row, "Total_Voters", 0)
     dem = _area_num(row, "Dem_Voters", 0)
     rep = _area_num(row, "Rep_Voters", 0)
@@ -4212,6 +4272,7 @@ def render_area_intelligence_workspace():
     avg_age = _area_num(row, "Avg_Age", 0)
     new_reg = _area_num(row, "New_Registrations", 0)
     mail_voters = _area_num(row, "Mail_Voters", 0)
+    precinct_count = int(_area_num(row, "Precinct_Count", len(profile_df)))
 
     def pct(n):
         return "0%" if total <= 0 else fmt_pct((float(n) / float(total)) * 100)
@@ -4219,8 +4280,7 @@ def render_area_intelligence_workspace():
     def pct_note(n):
         return f"{pct(n)} of voters"
 
-    title = f"{selected_precinct} • {selected_muni} • {selected_county}"
-    st.markdown(f'<div class="section-card"><div class="small-header">Precinct Profile</div><div class="tiny-muted">{title}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-card"><div class="small-header">{area_level} Profile</div><div class="tiny-muted">{title}</div></div>', unsafe_allow_html=True)
 
     r1 = st.columns(4, gap="small")
     cards = [
@@ -4238,7 +4298,7 @@ def render_area_intelligence_workspace():
         ("Male", f"{int(male):,}", pct_note(male)),
         ("Female", f"{int(female):,}", pct_note(female)),
         ("Unknown Gender", f"{int(unknown_gender):,}", pct_note(unknown_gender)),
-        ("Average Age", f"{avg_age:.1f}" if avg_age else "—", ""),
+        ("Average Age", f"{avg_age:.1f}" if avg_age else "—", "weighted by voters" if area_level != "Precinct" else ""),
     ]
     for col, (label, value, note) in zip(r2, cards2):
         with col:
@@ -4248,7 +4308,7 @@ def render_area_intelligence_workspace():
     cards3 = [
         ("New Registrations", f"{int(new_reg):,}", pct_note(new_reg)),
         ("Mail Voters", f"{int(mail_voters):,}", pct_note(mail_voters)),
-        ("Area Type", "Precinct", "Phase 2 base geography"),
+        ("Precincts Included", f"{precinct_count:,}", f"Area Type: {area_level}"),
     ]
     for col, (label, value, note) in zip(r3, cards3):
         with col:
@@ -4322,7 +4382,7 @@ def render_area_intelligence_workspace():
             st.caption("No gender data available.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.expander("View raw precinct summary row", expanded=False):
+    with st.expander("View raw rows used for this area", expanded=False):
         st.dataframe(profile_df, use_container_width=True, hide_index=True)
 
 
