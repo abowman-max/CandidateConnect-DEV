@@ -4114,30 +4114,31 @@ def render_lookup_sidebar(active_filters, columns):
 def load_area_precinct_summary() -> pd.DataFrame:
     """Load the Area Intelligence precinct summary.
 
-    Preferred source is R2/public storage so the deployed DEV/LIVE app can read it.
-    Local file is used as a fallback for local testing.
+    DEV-safe version: load the local repo copy first.
+    This avoids Cloudflare R2 public-read/403 issues for the Area Intelligence CSV.
+    If no local copy exists, it will still try the R2 public URL as a backup.
     """
     local_path = Path("area_intelligence") / "precinct_summary.csv"
     errors = []
 
-    # Try R2/public URL first. This works after uploading:
-    # area_intelligence/precinct_summary.csv
+    # 1) Preferred for DEV: local file committed/uploaded with the app repo.
+    try:
+        if local_path.exists():
+            return pd.read_csv(local_path, dtype=str).fillna("")
+        errors.append(f"Local file missing: {local_path}")
+    except Exception as e:
+        errors.append(f"Local: {e}")
+
+    # 2) Backup: R2 public URL.
     try:
         url = r2_public_url("area_intelligence/precinct_summary.csv")
         return pd.read_csv(url, dtype=str).fillna("")
     except Exception as e:
         errors.append(f"R2: {e}")
 
-    # Local fallback for running from your computer.
-    try:
-        if local_path.exists():
-            return pd.read_csv(local_path, dtype=str).fillna("")
-    except Exception as e:
-        errors.append(f"Local: {e}")
-
     raise FileNotFoundError(
         "Could not load area_intelligence/precinct_summary.csv. "
-        "Upload it to R2 under area_intelligence/ or keep a local copy in the app folder. "
+        "Put precinct_summary.csv in the app folder under area_intelligence/. "
         + " | ".join(errors)
     )
 
