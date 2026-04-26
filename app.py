@@ -23,11 +23,11 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
+st.set_page_config(page_title="Candidate Connect", layout="wide")
 
 # R2 public-read setup
-R2_BASE = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
-R2_BUCKET = "candidate-connect-data-dev"
+R2_BASE = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
+R2_BUCKET = "candidate-connect-data"
 
 LOCAL_ROOT = Path("/tmp/candidate_connect_r2")
 LOCAL_MANIFEST = LOCAL_ROOT / "dataset_manifest.json"
@@ -4105,6 +4105,192 @@ def render_lookup_sidebar(active_filters, columns):
             st.rerun()
 
 
+
+
+# -----------------------------
+# Area Intelligence (Phase 2)
+# -----------------------------
+@st.cache_data(show_spinner=False)
+def load_area_precinct_summary() -> pd.DataFrame:
+    """Load the Area Intelligence precinct summary.
+
+    Preferred source is R2/public storage so the deployed DEV/LIVE app can read it.
+    Local file is used as a fallback for local testing.
+    """
+    local_path = Path("area_intelligence") / "precinct_summary.csv"
+    errors = []
+
+    # Try R2/public URL first. This works after uploading:
+    # area_intelligence/precinct_summary.csv
+    try:
+        url = r2_public_url("area_intelligence/precinct_summary.csv")
+        return pd.read_csv(url, dtype=str).fillna("")
+    except Exception as e:
+        errors.append(f"R2: {e}")
+
+    # Local fallback for running from your computer.
+    try:
+        if local_path.exists():
+            return pd.read_csv(local_path, dtype=str).fillna("")
+    except Exception as e:
+        errors.append(f"Local: {e}")
+
+    raise FileNotFoundError(
+        "Could not load area_intelligence/precinct_summary.csv. "
+        "Upload it to R2 under area_intelligence/ or keep a local copy in the app folder. "
+        + " | ".join(errors)
+    )
+
+
+def _area_num(row, col, default=0.0):
+    try:
+        return float(str(row.get(col, default)).replace(",", "") or default)
+    except Exception:
+        return float(default)
+
+
+def _metric_html(label: str, value: str, note: str = "") -> str:
+    note_html = f'<div class="tiny-muted">{note}</div>' if note else ""
+    return f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div>{note_html}</div>'
+
+
+def render_area_intelligence_workspace():
+    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 precinct profile and strategy foundation.</div></div>', unsafe_allow_html=True)
+
+    try:
+        area_df = load_area_precinct_summary()
+    except Exception as e:
+        st.error("Area Intelligence file could not be loaded.")
+        st.caption(str(e))
+        st.info("Expected file path in R2: area_intelligence/precinct_summary.csv")
+        return
+
+    required_cols = ["County", "Municipality", "Precinct"]
+    missing = [c for c in required_cols if c not in area_df.columns]
+    if missing:
+        st.error("The precinct summary file is missing required columns: " + ", ".join(missing))
+        st.dataframe(pd.DataFrame({"Available Columns": list(area_df.columns)}), use_container_width=True, hide_index=True)
+        return
+
+    for col in required_cols:
+        area_df[col] = area_df[col].astype(str).fillna("").replace({"nan": ""})
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-header">Select Area</div>', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    counties = sorted([x for x in area_df["County"].unique().tolist() if str(x).strip()])
+    with c1:
+        selected_county = st.selectbox("County", counties, key="ai_county") if counties else ""
+
+    county_df = area_df[area_df["County"] == selected_county].copy() if selected_county else area_df.copy()
+    municipalities = sorted([x for x in county_df["Municipality"].unique().tolist() if str(x).strip()])
+    with c2:
+        selected_muni = st.selectbox("Municipality", municipalities, key="ai_municipality") if municipalities else ""
+
+    muni_df = county_df[county_df["Municipality"] == selected_muni].copy() if selected_muni else county_df.copy()
+    precincts = sorted([x for x in muni_df["Precinct"].unique().tolist() if str(x).strip()])
+    with c3:
+        selected_precinct = st.selectbox("Precinct", precincts, key="ai_precinct") if precincts else ""
+
+    profile_df = muni_df[muni_df["Precinct"] == selected_precinct].copy() if selected_precinct else pd.DataFrame()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if profile_df.empty:
+        st.warning("No Area Intelligence data found for this selection.")
+        return
+
+    row = profile_df.iloc[0]
+    total = _area_num(row, "Total_Voters", 0)
+    dem = _area_num(row, "Dem_Voters", 0)
+    rep = _area_num(row, "Rep_Voters", 0)
+    other = _area_num(row, "Other_Voters", 0)
+    male = _area_num(row, "Male_Voters", 0)
+    female = _area_num(row, "Female_Voters", 0)
+    unknown_gender = _area_num(row, "Unknown_Gender", 0)
+    avg_age = _area_num(row, "Avg_Age", 0)
+    new_reg = _area_num(row, "New_Registrations", 0)
+    mail_voters = _area_num(row, "Mail_Voters", 0)
+
+    def pct(n):
+        return "0%" if total <= 0 else fmt_pct((float(n) / float(total)) * 100)
+
+    title = f"{selected_precinct} • {selected_muni} • {selected_county}"
+    st.markdown(f'<div class="section-card"><div class="small-header">Precinct Profile</div><div class="tiny-muted">{title}</div></div>', unsafe_allow_html=True)
+
+    r1 = st.columns(4, gap="small")
+    cards = [
+        ("Total Voters", f"{int(total):,}", ""),
+        ("Democratic", f"{int(dem):,}", pct(dem)),
+        ("Republican", f"{int(rep):,}", pct(rep)),
+        ("Other / Unaffiliated", f"{int(other):,}", pct(other)),
+    ]
+    for col, (label, value, note) in zip(r1, cards):
+        with col:
+            st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
+
+    r2 = st.columns(4, gap="small")
+    cards2 = [
+        ("Male", f"{int(male):,}", pct(male)),
+        ("Female", f"{int(female):,}", pct(female)),
+        ("Unknown Gender", f"{int(unknown_gender):,}", pct(unknown_gender)),
+        ("Average Age", f"{avg_age:.1f}" if avg_age else "—", ""),
+    ]
+    for col, (label, value, note) in zip(r2, cards2):
+        with col:
+            st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
+
+    r3 = st.columns(3, gap="small")
+    cards3 = [
+        ("New Registrations", f"{int(new_reg):,}", pct(new_reg)),
+        ("Mail Voters", f"{int(mail_voters):,}", pct(mail_voters)),
+        ("Area Type", "Precinct", "Phase 2 base geography"),
+    ]
+    for col, (label, value, note) in zip(r3, cards3):
+        with col:
+            st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
+
+    divider()
+
+    chart_col1, chart_col2 = st.columns(2, gap="medium")
+    with chart_col1:
+        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+        party_chart = pd.DataFrame({
+            "Party": ["Democratic", "Republican", "Other"],
+            "Voters": [dem, rep, other],
+        })
+        if party_chart["Voters"].sum() > 0:
+            chart = alt.Chart(party_chart).mark_bar().encode(
+                x=alt.X("Party:N", title="Party"),
+                y=alt.Y("Voters:Q", title="Voters"),
+                tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=",")]
+            ).properties(height=240)
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.caption("No party data available.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with chart_col2:
+        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+        gender_chart = pd.DataFrame({
+            "Gender": ["Male", "Female", "Unknown"],
+            "Voters": [male, female, unknown_gender],
+        })
+        if gender_chart["Voters"].sum() > 0:
+            chart = alt.Chart(gender_chart).mark_bar().encode(
+                x=alt.X("Gender:N", title="Gender"),
+                y=alt.Y("Voters:Q", title="Voters"),
+                tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=",")]
+            ).properties(height=240)
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.caption("No gender data available.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.expander("View raw precinct summary row", expanded=False):
+        st.dataframe(profile_df, use_container_width=True, hide_index=True)
+
+
 if "data_loaded" not in st.session_state:
     st.session_state.data_loaded = False
 if "filters_applied" not in st.session_state:
@@ -4393,6 +4579,13 @@ with st.sidebar:
 
         render_lookup_sidebar(st.session_state.active_filters, cols)
 
+        with st.expander("Area Intelligence", expanded=st.session_state.get("workspace_mode") == "area_intelligence"):
+            if st.button("Show Area Intelligence", use_container_width=True, key="show_area_intelligence_workspace"):
+                st.session_state.workspace_mode = "area_intelligence"
+                st.session_state.lookup_view_active = False
+                st.rerun()
+            st.caption("Precinct profile, summary metrics, and strategy foundation.")
+
 if not st.session_state.data_loaded:
     st.markdown('<div class="section-card empty-shell"><div class="small-header">Ready to load</div><div class="tiny-muted">Click <strong>Load Voter Data</strong> in the sidebar to open the R2 index shards with DuckDB.</div></div>', unsafe_allow_html=True)
     st.stop()
@@ -4406,6 +4599,8 @@ if workspace_mode == "lookup":
         render_voter_lookup_results()
     else:
         render_lookup_empty_workspace()
+elif workspace_mode == "area_intelligence":
+    render_area_intelligence_workspace()
 else:
     if not st.session_state.filters_applied:
         st.markdown('<div class="section-card empty-shell"><div class="small-header">Create Universe</div><div class="tiny-muted">Choose your filters in the left menu and click <strong>Apply Filters</strong> to run counts and charts.</div></div>', unsafe_allow_html=True)
