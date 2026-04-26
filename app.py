@@ -4216,15 +4216,18 @@ def render_area_intelligence_workspace():
     def pct(n):
         return "0%" if total <= 0 else fmt_pct((float(n) / float(total)) * 100)
 
+    def pct_note(n):
+        return f"{pct(n)} of voters"
+
     title = f"{selected_precinct} • {selected_muni} • {selected_county}"
     st.markdown(f'<div class="section-card"><div class="small-header">Precinct Profile</div><div class="tiny-muted">{title}</div></div>', unsafe_allow_html=True)
 
     r1 = st.columns(4, gap="small")
     cards = [
         ("Total Voters", f"{int(total):,}", ""),
-        ("Democratic", f"{int(dem):,}", pct(dem)),
-        ("Republican", f"{int(rep):,}", pct(rep)),
-        ("Other / Unaffiliated", f"{int(other):,}", pct(other)),
+        ("Democratic", f"{int(dem):,}", pct_note(dem)),
+        ("Republican", f"{int(rep):,}", pct_note(rep)),
+        ("Other / Unaffiliated", f"{int(other):,}", pct_note(other)),
     ]
     for col, (label, value, note) in zip(r1, cards):
         with col:
@@ -4232,9 +4235,9 @@ def render_area_intelligence_workspace():
 
     r2 = st.columns(4, gap="small")
     cards2 = [
-        ("Male", f"{int(male):,}", pct(male)),
-        ("Female", f"{int(female):,}", pct(female)),
-        ("Unknown Gender", f"{int(unknown_gender):,}", pct(unknown_gender)),
+        ("Male", f"{int(male):,}", pct_note(male)),
+        ("Female", f"{int(female):,}", pct_note(female)),
+        ("Unknown Gender", f"{int(unknown_gender):,}", pct_note(unknown_gender)),
         ("Average Age", f"{avg_age:.1f}" if avg_age else "—", ""),
     ]
     for col, (label, value, note) in zip(r2, cards2):
@@ -4243,8 +4246,8 @@ def render_area_intelligence_workspace():
 
     r3 = st.columns(3, gap="small")
     cards3 = [
-        ("New Registrations", f"{int(new_reg):,}", pct(new_reg)),
-        ("Mail Voters", f"{int(mail_voters):,}", pct(mail_voters)),
+        ("New Registrations", f"{int(new_reg):,}", pct_note(new_reg)),
+        ("Mail Voters", f"{int(mail_voters):,}", pct_note(mail_voters)),
         ("Area Type", "Precinct", "Phase 2 base geography"),
     ]
     for col, (label, value, note) in zip(r3, cards3):
@@ -4260,11 +4263,12 @@ def render_area_intelligence_workspace():
             "Party": ["Democratic", "Republican", "Other"],
             "Voters": [dem, rep, other],
         })
+        party_chart["Percent"] = party_chart["Voters"].apply(lambda x: 0 if total <= 0 else (float(x) / float(total)) * 100)
         if party_chart["Voters"].sum() > 0:
             chart = alt.Chart(party_chart).mark_bar().encode(
                 x=alt.X("Party:N", title="Party"),
                 y=alt.Y("Voters:Q", title="Voters"),
-                tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=",")]
+                tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
             ).properties(height=240)
             st.altair_chart(chart, use_container_width=True)
         else:
@@ -4277,11 +4281,12 @@ def render_area_intelligence_workspace():
             "Gender": ["Male", "Female", "Unknown"],
             "Voters": [male, female, unknown_gender],
         })
+        gender_chart["Percent"] = gender_chart["Voters"].apply(lambda x: 0 if total <= 0 else (float(x) / float(total)) * 100)
         if gender_chart["Voters"].sum() > 0:
             chart = alt.Chart(gender_chart).mark_bar().encode(
                 x=alt.X("Gender:N", title="Gender"),
                 y=alt.Y("Voters:Q", title="Voters"),
-                tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=",")]
+                tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
             ).properties(height=240)
             st.altair_chart(chart, use_container_width=True)
         else:
