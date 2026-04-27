@@ -4383,6 +4383,12 @@ def _build_area_intelligence_recommendations(area_level, title, totals, display_
                 top_party_votes = float(top["_PartyOpportunity"].sum() or 0)
                 if top_party_votes > 0:
                     recommendations.append(f"Top five party-opportunity rows contain about {top_party_votes:,.0f} likely {party_plural.lower()}; start turf planning there.")
+                    try:
+                        eff_notes = _build_area_intelligence_canvassing_insights(work, candidate_party=candidate_party)
+                        if eff_notes:
+                            recommendations.append(eff_notes[0])
+                    except Exception:
+                        pass
             area_total = float(work["Total_Voters"].sum() or 0)
             top5 = float(work.head(5)["Total_Voters"].sum() or 0)
             top_share = 0 if area_total <= 0 else (top5 / area_total) * 100
@@ -4932,14 +4938,95 @@ def _ai_area_turnout_score_from_row(row, candidate_party="Republican"):
     weighted = (party_opportunity * 2.7) + (total * 0.25) + (mail_chase_score * 1.15) + (turnout_score * 35.0)
     return round(float(turnout_score), 1), round(float(weighted), 1)
 
-def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
-    """Build party-lens, turnout-aware field/turf recommendations from the Area Intelligence breakdown."""
-    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
-    if display_df is None or display_df.empty:
-        return pd.DataFrame(columns=["Priority", "Area", "Voters", "Turnout", "Outstanding", "Recommendation"])
+
+
+def _ai_estimated_doors_from_row(row, voters=None):
+    """Return known/estimated household doors for a breakdown row.
+
+    Area Intelligence currently runs from precinct summary data, which may not always
+    include household/door counts. When a household count is present, use it. When it
+    is not present, estimate doors from voter count using a conservative 1.75 voters
+    per door so the field-efficiency ranking still works without slowing the report.
+    """
+    if voters is None:
+        voters = _ai_safe_float(row.get("Total_Voters", 0), 0)
+    for col in ["Households", "Total_Households", "Doors", "Door_Count", "Household_Doors"]:
+        if col in row:
+            val = _ai_safe_float(row.get(col, 0), 0)
+            if val > 0:
+                return max(1.0, val), "known"
+    return max(1.0, float(voters or 0) / 1.75), "estimated"
+
+
+def _ai_canvassing_efficiency_metrics(row, candidate_party="Republican"):
+    """Compute practical field-efficiency metrics for a single area row."""
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
+    voters = _ai_safe_float(row.get("Total_Voters", 0), 0)
+    party_pct = _ai_safe_float(row.get(party_pct_col, 0), 0)
+    turnout_score, _ = _ai_area_turnout_score_from_row(row, candidate_party=candidate_party)
+    target_voters = voters * (party_pct / 100.0)
+    doors, door_source = _ai_estimated_doors_from_row(row, voters=voters)
+    target_per_door = target_voters / doors if doors > 0 else 0
+
+    # Field value rewards efficient doors, enough volume to matter, and stronger turnout signal.
+    # This is intentionally simple and explainable for client-facing reports.
+    density_score = min(target_per_door / 1.25, 1.0) * 40.0
+    volume_score = min(target_voters / 2500.0, 1.0) * 35.0
+    turnout_component = min(max(turnout_score, 0), 100) * 0.25
+    efficiency_score = density_score + volume_score + turnout_component
+    return {
+        "target_voters": round(float(target_voters), 1),
+        "doors": round(float(doors), 1),
+        "door_source": door_source,
+        "target_per_door": round(float(target_per_door), 2),
+        "efficiency_score": round(float(efficiency_score), 1),
+        "turnout_score": round(float(turnout_score), 1),
+    }
+
+
+def _build_area_intelligence_canvassing_insights(display_df, candidate_party="Republican"):
+    """Build short PDF bullets explaining canvassing efficiency in plain English."""
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
+    if display_df is None or display_df.empty or "Total_Voters" not in display_df.columns:
+        return ["Canvassing efficiency could not be calculated from the current Area Intelligence breakdown."]
 
     work = display_df.copy()
-    for col in ["Total_Voters", "Mail_Ballots_Outstanding", "Mail_Applications_Approved", "Rep_%", "Dem_%", "Other_%", "Mail_Return_%", "Outstanding_%", "Avg_Age", "New_Registrations"]:
+    for col in ["Total_Voters", party_pct_col, "Avg_Age", "New_Registrations", "Mail_Ballots_Outstanding", "Outstanding_%"]:
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
+        else:
+            work[col] = 0
+
+    metrics = work.apply(lambda r: _ai_canvassing_efficiency_metrics(r, candidate_party=candidate_party), axis=1)
+    work["_TargetVoters"] = [m["target_voters"] for m in metrics]
+    work["_Doors"] = [m["doors"] for m in metrics]
+    work["_TargetPerDoor"] = [m["target_per_door"] for m in metrics]
+    work["_EfficiencyScore"] = [m["efficiency_score"] for m in metrics]
+    work["_DoorSource"] = [m["door_source"] for m in metrics]
+    work = work.sort_values(["_EfficiencyScore", "_TargetVoters", "_TargetPerDoor"], ascending=False).reset_index(drop=True)
+
+    total_targets = float(work["_TargetVoters"].sum() or 0)
+    top3_targets = float(work.head(3)["_TargetVoters"].sum() or 0)
+    top_share = 0 if total_targets <= 0 else (top3_targets / total_targets) * 100
+    best_tpd = float(work["_TargetPerDoor"].max() or 0)
+    source_label = "known household counts" if (work["_DoorSource"] == "known").any() else "estimated doors from voter counts"
+
+    notes = [
+        f"Canvassing lens: prioritize areas with the most {party_plural.lower()} per door, not just the largest raw voter totals.",
+        f"Top three efficiency areas contain about {top3_targets:,.0f} target-party voters ({top_share:.1f}% of visible target opportunity).",
+        f"Best visible density is about {best_tpd:.2f} target-party voters per door using {source_label}.",
+        "Use this ranking for door-to-door planning where volunteer time, travel time, and walkability matter."
+    ]
+    return notes
+
+def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
+    """Build party-lens, turnout-aware, canvassing-efficient field/turf recommendations."""
+    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
+    if display_df is None or display_df.empty:
+        return pd.DataFrame(columns=["Priority", "Area", "Target Voters", "Doors", "Target/Door", "Recommendation"])
+
+    work = display_df.copy()
+    for col in ["Total_Voters", "Mail_Ballots_Outstanding", "Mail_Applications_Approved", "Rep_%", "Dem_%", "Other_%", "Mail_Return_%", "Outstanding_%", "Avg_Age", "New_Registrations", "Households", "Total_Households", "Doors", "Door_Count", "Household_Doors"]:
         if col in work.columns:
             work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
         else:
@@ -4958,10 +5045,19 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
     party_pct = pd.to_numeric(work.get(party_pct_col, 0), errors="coerce").fillna(0) if party_pct_col in work.columns else 0
     work["_PartyOpportunity"] = work["Total_Voters"] * (party_pct / 100.0)
 
-    scores = work.apply(lambda r: _ai_area_turnout_score_from_row(r, candidate_party=candidate_party), axis=1)
-    work["_TurnoutScore"] = [x[0] for x in scores]
-    work["_Score"] = [x[1] for x in scores]
-    work = work.sort_values(["_Score", "_PartyOpportunity", "Total_Voters"], ascending=False).head(8).reset_index(drop=True)
+    turnout_scores = work.apply(lambda r: _ai_area_turnout_score_from_row(r, candidate_party=candidate_party), axis=1)
+    work["_TurnoutScore"] = [x[0] for x in turnout_scores]
+    work["_TurnoutWeightedScore"] = [x[1] for x in turnout_scores]
+
+    efficiency = work.apply(lambda r: _ai_canvassing_efficiency_metrics(r, candidate_party=candidate_party), axis=1)
+    work["_TargetVoters"] = [x["target_voters"] for x in efficiency]
+    work["_Doors"] = [x["doors"] for x in efficiency]
+    work["_TargetPerDoor"] = [x["target_per_door"] for x in efficiency]
+    work["_EfficiencyScore"] = [x["efficiency_score"] for x in efficiency]
+    work["_DoorSource"] = [x["door_source"] for x in efficiency]
+
+    # Sort first by real-world canvassing efficiency, then by target-party volume and turnout strength.
+    work = work.sort_values(["_EfficiencyScore", "_TargetVoters", "_TargetPerDoor", "_TurnoutScore"], ascending=False).head(8).reset_index(drop=True)
 
     rows = []
     for idx, row in work.iterrows():
@@ -4970,13 +5066,18 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
         party_pct_val = float(row.get(party_pct_col, 0) or 0)
         turnout_score = float(row.get("_TurnoutScore", 0) or 0)
         return_pct = float(row.get("Mail_Return_%", 0) or 0)
+        target_voters = float(row.get("_TargetVoters", 0) or 0)
+        doors = float(row.get("_Doors", 0) or 0)
+        target_per_door = float(row.get("_TargetPerDoor", 0) or 0)
 
-        if party_pct_val >= 55 and turnout_score >= 65:
+        if target_per_door >= 1.15 and target_voters >= 500:
+            rec = "Best door-density target"
+        elif party_pct_val >= 55 and turnout_score >= 65:
             rec = f"High-propensity {party_label} base"
         elif outstanding >= 100 and return_pct < 35 and party_pct_val >= 40:
             rec = f"{party_label} turnout + mail chase"
-        elif party_pct_val >= 45 and turnout_score >= 55:
-            rec = f"Competitive {party_label} turnout opportunity"
+        elif target_voters >= 1500 and target_per_door >= 0.75:
+            rec = "High-volume efficient walk"
         elif voters >= 5000:
             rec = "Large turf build / review sub-areas"
         elif turnout_score >= 65:
@@ -4987,13 +5088,12 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
         rows.append({
             "Priority": idx + 1,
             "Area": row["_Area"],
-            "Voters": voters,
-            "Turnout": f"{turnout_score:.0f}",
-            "Outstanding": outstanding,
+            "Target Voters": int(round(target_voters)),
+            "Doors": int(round(doors)),
+            "Target/Door": f"{target_per_door:.2f}",
             "Recommendation": rec,
         })
     return pd.DataFrame(rows)
-
 
 def _ai_pdf_draw_bullets(c, items, x, y, w, size=7.8, max_items=6, max_lines_each=2):
     """Draw wrapped bullets and return the new y position."""
@@ -5228,12 +5328,15 @@ def build_area_intelligence_pdf_bytes(
     y = _ai_pdf_draw_bullets(c, turnout_profile.get("notes", []), margin, y, page_w - margin * 2, size=7.8, max_items=4)
     y -= 10
 
-    _ai_pdf_text(c, "Turnout-Aware Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, f"Suggested priority areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate based on party concentration, turnout signal, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
-    y -= 25
+    _ai_pdf_text(c, "Canvassing Efficiency & Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, f"Ranks areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate by target-party voters per estimated door, turnout signal, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
+    y -= 26
+    canvass_notes = _build_area_intelligence_canvassing_insights(display_df, candidate_party=candidate_party)
+    y = _ai_pdf_draw_bullets(c, canvass_notes, margin, y, page_w - margin * 2, size=7.5, max_items=3)
+    y -= 8
     turf_df = _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
     if turf_df is not None and not turf_df.empty:
-        _ai_pdf_table(c, turf_df, margin, y, [38, 190, 56, 54, 66, 120], row_h=17, max_rows=8, font_size=6.6)
+        _ai_pdf_table(c, turf_df, margin, y, [36, 170, 68, 54, 62, 124], row_h=17, max_rows=8, font_size=6.3)
     else:
         _ai_pdf_text(c, "No turf recommendation data available.", margin, y, size=8, color_hex="#64748b")
 
