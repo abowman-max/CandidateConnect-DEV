@@ -4328,8 +4328,18 @@ def _build_strategy_summary(total, dem, rep, other, new_reg, mail_apps, mail_ret
     return badges, notes, return_rate, outstanding_rate, app_pct
 
 
-def _build_area_intelligence_recommendations(area_level, title, totals, display_df):
-    """Auto-generate client-facing recommendations for the Area Intelligence PDF."""
+def _ai_candidate_party_key(candidate_party="Republican"):
+    party = normalize_export_text(candidate_party).strip().lower()
+    if party.startswith("d"):
+        return "D", "Democratic", "Democrats", "Dem_%", "Dem_Voters", "Rep_%"
+    if party.startswith("o") or party.startswith("n") or "ind" in party:
+        return "O", "Other / Nonpartisan", "Other/Unaffiliated", "Other_%", "Other_Voters", "Rep_%"
+    return "R", "Republican", "Republicans", "Rep_%", "Rep_Voters", "Dem_%"
+
+
+def _build_area_intelligence_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
+    """Auto-generate client-facing recommendations using the selected candidate party lens."""
+    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
     total = float(totals.get("total", 0) or 0)
     dem = float(totals.get("dem", 0) or 0)
     rep = float(totals.get("rep", 0) or 0)
@@ -4340,8 +4350,10 @@ def _build_area_intelligence_recommendations(area_level, title, totals, display_
     mail_outstanding = float(totals.get("mail_outstanding", 0) or 0)
     new_reg = float(totals.get("new_reg", 0) or 0)
 
-    dem_pct = 0 if total <= 0 else (dem / total) * 100
-    rep_pct = 0 if total <= 0 else (rep / total) * 100
+    party_votes = rep if party_key == "R" else dem if party_key == "D" else other
+    opp_votes = dem if party_key == "R" else rep if party_key == "D" else max(rep, dem)
+    party_pct = 0 if total <= 0 else (party_votes / total) * 100
+    opp_pct = 0 if total <= 0 else (opp_votes / total) * 100
     other_pct = 0 if total <= 0 else (other / total) * 100
     unknown_gender_pct = 0 if total <= 0 else (unknown_gender / total) * 100
     new_reg_pct = 0 if total <= 0 else (new_reg / total) * 100
@@ -4350,49 +4362,56 @@ def _build_area_intelligence_recommendations(area_level, title, totals, display_
 
     recommendations = []
 
-    if rep_pct >= 55:
-        recommendations.append("Prioritize Republican base turnout and mail-ballot chase in this area before expanding persuasion resources.")
-    elif dem_pct >= 55:
-        recommendations.append("Treat this as a Democratic-advantage area; use selective persuasion, opposition awareness, and defensive monitoring.")
-    elif abs(rep_pct - dem_pct) <= 8:
-        recommendations.append("Party balance is close enough for persuasion; compare precincts or municipalities before assigning field resources.")
+    recommendations.append(f"{party_label} turnout lens: {party_votes:,.0f} {party_plural.lower()} are visible in this profile ({party_pct:.1f}% of voters).")
+    if party_pct >= 55:
+        recommendations.append(f"Strong {party_label.lower()} base area. Prioritize turnout operations and make sure high-volume {party_plural.lower()} are covered first.")
+    elif party_pct >= 45:
+        recommendations.append(f"Competitive {party_label.lower()} opportunity area. Focus first on the largest sub-areas where {party_plural.lower()} are concentrated.")
+    elif party_pct + 8 >= opp_pct:
+        recommendations.append(f"Close statistical path. Use the breakdown table to find sub-areas where {party_plural.lower()} are strongest rather than treating the full area the same way.")
     else:
-        recommendations.append("Use sub-area targeting rather than a one-size-fits-all plan because the overall party mix is mixed.")
-
-    if mail_apps_approved > 0:
-        if mail_return_rate < 35:
-            recommendations.append(f"Launch immediate mail-ballot chase: {int(mail_outstanding):,} approved mail voters are still outstanding.")
-        elif outstanding_rate >= 25:
-            recommendations.append(f"Keep this area on the chase list; {outstanding_rate:.1f}% of approved mail voters remain outstanding.")
-        else:
-            recommendations.append("Mail returns are comparatively healthy; shift chase resources toward lower-return areas first.")
-    else:
-        recommendations.append("Mail application volume is low; focus on direct voter contact, doors, phones, and turnout messaging.")
+        recommendations.append(f"Challenging overall party mix for a {party_label.lower()} candidate. Concentrate resources on the best-performing sub-areas and avoid spreading field capacity too thin.")
 
     try:
         if display_df is not None and not display_df.empty and "Total_Voters" in display_df.columns:
             work = display_df.copy()
             work["Total_Voters"] = pd.to_numeric(work["Total_Voters"], errors="coerce").fillna(0)
+            if party_pct_col in work.columns:
+                work[party_pct_col] = pd.to_numeric(work[party_pct_col], errors="coerce").fillna(0)
+                work["_PartyOpportunity"] = work["Total_Voters"] * (work[party_pct_col] / 100.0)
+                top = work.sort_values(["_PartyOpportunity", "Total_Voters"], ascending=False).head(5)
+                top_party_votes = float(top["_PartyOpportunity"].sum() or 0)
+                if top_party_votes > 0:
+                    recommendations.append(f"Top five party-opportunity rows contain about {top_party_votes:,.0f} likely {party_plural.lower()}; start turf planning there.")
             area_total = float(work["Total_Voters"].sum() or 0)
             top5 = float(work.head(5)["Total_Voters"].sum() or 0)
             top_share = 0 if area_total <= 0 else (top5 / area_total) * 100
             if top_share >= 35:
-                recommendations.append(f"Top five breakdown rows contain {top_share:.1f}% of voters; start turfing and meeting prep there.")
+                recommendations.append(f"Top five breakdown rows contain {top_share:.1f}% of all voters; these should be reviewed first for staffing and meeting prep.")
             elif len(work) >= 20:
                 recommendations.append("Voters are spread across many areas; build multiple smaller turfs instead of one central push.")
     except Exception:
         pass
 
+    if mail_apps_approved > 0:
+        if mail_return_rate < 35:
+            recommendations.append(f"Mail-ballot chase remains urgent: {int(mail_outstanding):,} approved mail voters are still outstanding.")
+        elif outstanding_rate >= 25:
+            recommendations.append(f"Keep mail follow-up active; {outstanding_rate:.1f}% of approved mail voters remain outstanding.")
+        else:
+            recommendations.append("Mail returns are comparatively healthy; shift chase resources toward lower-return areas first.")
+    else:
+        recommendations.append("Mail application volume is low; field planning should rely more heavily on doors, phones, and direct turnout contact.")
+
+    if other_pct >= 20 and party_key != "O":
+        recommendations.append(f"Other/unaffiliated voters are {other_pct:.1f}% of the universe; flag this as a broad turnout environment factor for the campaign team.")
+
     if unknown_gender_pct >= 12:
-        recommendations.append(f"Unknown gender is {unknown_gender_pct:.1f}% of voters; consider data enrichment before gender-based targeting.")
+        recommendations.append(f"Unknown gender is {unknown_gender_pct:.1f}% of voters; consider data enrichment before using gender as a planning filter.")
 
     if new_reg_pct >= 1.5:
-        recommendations.append(f"New registrations are {new_reg_pct:.1f}% of the universe; add first-time/new-voter education messaging.")
+        recommendations.append(f"New registrations are {new_reg_pct:.1f}% of the universe; include new-voter education in the field plan.")
 
-    if other_pct >= 20:
-        recommendations.append(f"Other/unaffiliated voters are {other_pct:.1f}% of the universe; consider persuasion messaging for this segment.")
-
-    # Keep the printed PDF section tight and client-readable.
     deduped = []
     seen = set()
     for item in recommendations:
@@ -4401,7 +4420,6 @@ def _build_area_intelligence_recommendations(area_level, title, totals, display_
             deduped.append(item)
             seen.add(key)
     return deduped[:6]
-
 
 def _ai_pdf_num(value, decimals=0):
     try:
@@ -4691,7 +4709,7 @@ def _ai_build_area_filter_lines(area_level, title, selected_county="", selected_
 
 
 
-def _ai_draw_cover_page(c, page_w, page_h, margin, title, area_level, client_name="", candidate_name="", prepared_for="", report_generated_text=""):
+def _ai_draw_cover_page(c, page_w, page_h, margin, title, area_level, client_name="", candidate_name="", prepared_for="", candidate_party="Republican", report_generated_text=""):
     """Draw a polished client-facing cover page for the Area Intelligence PDF."""
     c.setFillColor(colors.HexColor("#f8fafc"))
     c.rect(0, 0, page_w, page_h, fill=1, stroke=0)
@@ -4715,12 +4733,13 @@ def _ai_draw_cover_page(c, page_w, page_h, margin, title, area_level, client_nam
     box_w = page_w - margin * 2
     c.setFillColor(colors.white)
     c.setStrokeColor(colors.HexColor("#d8dee8"))
-    c.roundRect(margin, box_y - 124, box_w, 124, 12, fill=1, stroke=1)
+    c.roundRect(margin, box_y - 148, box_w, 148, 12, fill=1, stroke=1)
 
     rows = [
         ("Report Type", f"{normalize_export_text(area_level)} Area Intelligence"),
         ("Prepared For", normalize_export_text(prepared_for) or normalize_export_text(client_name) or "Client / Campaign"),
         ("Candidate / Client", normalize_export_text(candidate_name) or normalize_export_text(client_name) or "Not specified"),
+        ("Candidate Party Lens", normalize_export_text(candidate_party) or "Republican"),
         ("Generated", report_generated_text),
     ]
     yy = box_y - 30
@@ -4743,8 +4762,9 @@ def _ai_draw_cover_page(c, page_w, page_h, margin, title, area_level, client_nam
         pass
 
 
-def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df):
-    """Build simple field/turf recommendations from the Area Intelligence breakdown."""
+def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
+    """Build party-lens field/turf recommendations from the Area Intelligence breakdown."""
+    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
     if display_df is None or display_df.empty:
         return pd.DataFrame(columns=["Priority", "Area", "Voters", "Outstanding", "Recommendation"])
 
@@ -4765,11 +4785,13 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
         return " • ".join(parts[:3]) if parts else normalize_export_text(title)
 
     work["_Area"] = work.apply(area_label, axis=1)
+    party_pct = pd.to_numeric(work.get(party_pct_col, 0), errors="coerce").fillna(0) if party_pct_col in work.columns else 0
+    work["_PartyOpportunity"] = work["Total_Voters"] * (party_pct / 100.0)
     work["_Score"] = (
-        work["Total_Voters"] * 1.0
-        + work["Mail_Ballots_Outstanding"] * 2.0
-        + work["Outstanding_%"] * 40.0
-        + (work[["Rep_%", "Dem_%"]].max(axis=1)) * 15.0
+        work["_PartyOpportunity"] * 2.5
+        + work["Total_Voters"] * 0.35
+        + work["Mail_Ballots_Outstanding"] * 1.75
+        + work["Outstanding_%"] * 25.0
     )
     work = work.sort_values(["_Score", "Total_Voters"], ascending=False).head(8).reset_index(drop=True)
 
@@ -4777,20 +4799,19 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
     for idx, row in work.iterrows():
         voters = int(row.get("Total_Voters", 0) or 0)
         outstanding = int(row.get("Mail_Ballots_Outstanding", 0) or 0)
-        rep_pct = float(row.get("Rep_%", 0) or 0)
-        dem_pct = float(row.get("Dem_%", 0) or 0)
+        party_pct_val = float(row.get(party_pct_col, 0) or 0)
         return_pct = float(row.get("Mail_Return_%", 0) or 0)
 
         if outstanding >= 100 and return_pct < 35:
-            rec = "Mail chase + phones/texts"
+            rec = f"{party_label} turnout + mail chase"
+        elif party_pct_val >= 55 and voters >= 1000:
+            rec = f"Strong {party_label} base turnout"
         elif voters >= 5000:
             rec = "Build multiple turf packets"
-        elif rep_pct >= 55:
-            rec = "Base turnout turf"
-        elif dem_pct >= 55:
-            rec = "Monitor / selective persuasion"
+        elif party_pct_val >= 45:
+            rec = f"Competitive {party_label} opportunity"
         else:
-            rec = "Persuasion + turnout review"
+            rec = "Lower priority / monitor"
 
         rows.append({
             "Priority": idx + 1,
@@ -4826,6 +4847,7 @@ def build_area_intelligence_pdf_bytes(
     client_name="",
     candidate_name="",
     prepared_for="",
+    candidate_party="Republican",
     include_cover_page=True,
 ):
     """Build a client-ready Area Intelligence profile PDF from the selected Area Intelligence profile."""
@@ -4872,6 +4894,7 @@ def build_area_intelligence_pdf_bytes(
             client_name=client_name,
             candidate_name=candidate_name,
             prepared_for=prepared_for,
+            candidate_party=candidate_party,
             report_generated_text=generated_text,
         )
         c.showPage()
@@ -4931,7 +4954,7 @@ def build_area_intelligence_pdf_bytes(
     _ai_pdf_card(c, "Return Rate", _ai_pdf_pct(mail_returned, mail_apps_approved), "Returned / Approved", side_x, mail_table_top - 62, 152, 48)
 
     y -= 16
-    _ai_pdf_text(c, "Strategy Summary & Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, f"{normalize_export_text(candidate_party) or 'Republican'} Path to Victory Lens", margin, y, size=12, bold=True, color_hex="#142033")
     y -= 18
     badge_x = margin
     for text, tone in strategy_badges[:6]:
@@ -4954,7 +4977,7 @@ def build_area_intelligence_pdf_bytes(
     y -= 24
     y = _ai_pdf_draw_bullets(c, strategy_notes[:3], margin, y, page_w - margin * 2, size=8.0, max_items=3)
 
-    recommendations = _build_area_intelligence_recommendations(area_level, title, totals, display_df)
+    recommendations = _build_area_intelligence_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
     if recommendations:
         y -= 4
         _ai_pdf_text(c, "Recommended Next Actions", margin, y, size=9.2, bold=True, color_hex="#153d73")
@@ -5009,9 +5032,9 @@ def build_area_intelligence_pdf_bytes(
     y -= 118
 
     _ai_pdf_text(c, "Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, "Suggested priority areas for field planning based on voter size, mail chase opportunity, and partisan composition.", margin, y - 13, size=7.8, color_hex="#64748b")
+    _ai_pdf_text(c, f"Suggested priority areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate based on party concentration, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
     y -= 25
-    turf_df = _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df)
+    turf_df = _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
     if turf_df is not None and not turf_df.empty:
         _ai_pdf_table(c, turf_df, margin, y, [42, 214, 64, 72, 132], row_h=17, max_rows=8, font_size=6.8)
     else:
@@ -5451,13 +5474,15 @@ def render_area_intelligence_workspace():
 
     with pdf_tab:
         st.markdown('<div class="section-card"><div class="small-header">PDF Report Generator</div><div class="tiny-muted">Builds a branded client-ready PDF for the selected Area Intelligence profile.</div></div>', unsafe_allow_html=True)
-        cover_col1, cover_col2, cover_col3 = st.columns(3)
+        cover_col1, cover_col2, cover_col3, cover_col4 = st.columns(4)
         with cover_col1:
             pdf_client_name = st.text_input("Client / Campaign Name", value="", key="ai_pdf_client_name")
         with cover_col2:
             pdf_candidate_name = st.text_input("Candidate / Committee Name", value="", key="ai_pdf_candidate_name")
         with cover_col3:
             pdf_prepared_for = st.text_input("Prepared For", value="", key="ai_pdf_prepared_for")
+        with cover_col4:
+            pdf_candidate_party = st.selectbox("Candidate Party Lens", ["Republican", "Democratic", "Other / Nonpartisan"], index=0, key="ai_pdf_candidate_party")
         include_cover_page = st.checkbox("Include client-ready cover page", value=True, key="ai_pdf_include_cover_page")
         report_name = sanitize_filename_part(f"Area_Intelligence_{area_level}_{title}")
         pdf_totals = {
@@ -5501,6 +5526,7 @@ def render_area_intelligence_workspace():
                     client_name=pdf_client_name,
                     candidate_name=pdf_candidate_name,
                     prepared_for=pdf_prepared_for,
+                    candidate_party=pdf_candidate_party,
                     include_cover_page=include_cover_page,
                 )
                 st.session_state["area_intelligence_pdf_name"] = f"{report_name}.pdf"
