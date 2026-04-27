@@ -4467,7 +4467,7 @@ def _ai_pdf_card(c, label, value, note, x, y, w, h=48):
         _ai_pdf_text(c, note, x + 8, y - 44, size=6.8, color_hex="#64748b", max_width=w - 16)
 
 
-def _ai_pdf_footer(c, page_w, margin):
+def _ai_pdf_footer(c, page_w, margin, page_num=None):
     """Consistent branded footer for Area Intelligence PDF pages."""
     footer_y = 35
     c.setStrokeColor(colors.HexColor("#e2e8f0"))
@@ -4491,17 +4491,42 @@ def _ai_pdf_footer(c, page_w, margin):
         pass
     c.setFont("Helvetica", 6.8)
     c.setFillColor(colors.HexColor("#64748b"))
-    c.drawRightString(page_w - margin, footer_y - 7, "Candidate Connect • Area Intelligence")
+    right_text = "Candidate Connect • Area Intelligence" if page_num is None else f"Candidate Connect • Area Intelligence • Page {page_num}"
+    c.drawRightString(page_w - margin, footer_y - 7, right_text)
 
 
-def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals, mail_df, strategy_badges, strategy_notes, display_df):
+
+def _ai_pdf_filter_summary_box(c, filter_lines, x, y, w, title="Applied Universe Filters"):
+    """Draw compact filter summary box and return the new y position."""
+    lines = filter_lines or ["No additional filters selected"]
+    max_lines = 7
+    shown = lines[:max_lines]
+    if len(lines) > max_lines:
+        shown.append(f"+ {len(lines) - max_lines} more filter(s)")
+
+    line_h = 10
+    h = 28 + (len(shown) * line_h)
+    c.setFillColor(colors.HexColor("#f8fafc"))
+    c.setStrokeColor(colors.HexColor("#d8dee8"))
+    c.roundRect(x, y - h, w, h, 8, fill=1, stroke=1)
+    _ai_pdf_text(c, title, x + 10, y - 13, size=8.2, bold=True, color_hex="#142033", max_width=w - 20)
+    yy = y - 27
+    for line in shown:
+        wrapped = _ai_pdf_wrapped_lines(c, normalize_export_text(line), w - 28, size=6.9)
+        if wrapped:
+            _ai_pdf_text(c, "• " + wrapped[0], x + 12, yy, size=6.9, color_hex="#334155", max_width=w - 24)
+            yy -= line_h
+    return y - h - 12
+
+def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals, mail_df, strategy_badges, strategy_notes, display_df, filter_lines=None):
     """Build a client-ready Area Intelligence profile PDF from the selected Area Intelligence profile."""
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     page_w, page_h = letter
     margin = 38
+    page_num = 1
 
-    def header():
+    def header(page_label=None):
         y = page_h - 36
         try:
             if CC_LOGO.exists():
@@ -4509,16 +4534,21 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
         except Exception:
             pass
         _ai_pdf_text(c, "Area Intelligence Report", margin + 124, y - 2, size=16, bold=True, color_hex="#153d73")
-        _ai_pdf_text(c, normalize_export_text(title), margin + 124, y - 18, size=9.5, bold=True, color_hex="#334155", max_width=320)
+        subtitle = normalize_export_text(title)
+        if page_label:
+            subtitle = f"{subtitle} • {page_label}"
+        _ai_pdf_text(c, subtitle, margin + 124, y - 18, size=9.5, bold=True, color_hex="#334155", max_width=355)
         _ai_pdf_text(c, datetime.now().strftime("%m/%d/%Y %I:%M %p"), page_w - 150, y - 4, size=8, color_hex="#64748b")
         c.setStrokeColor(colors.HexColor("#d8dee8"))
         c.line(margin, y - 34, page_w - margin, y - 34)
         return y - 58
 
-    def new_page():
-        _ai_pdf_footer(c, page_w, margin)
+    def new_page(page_label=None):
+        nonlocal page_num
+        _ai_pdf_footer(c, page_w, margin, page_num)
         c.showPage()
-        return header()
+        page_num += 1
+        return header(page_label)
 
     y = header()
 
@@ -4562,6 +4592,8 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
         _ai_pdf_card(c, card[0], card[1], card[2], margin + col_i * (card_w + card_gap), y - row_i * 54, card_w, h=46)
     y -= 176
 
+    y = _ai_pdf_filter_summary_box(c, filter_lines, margin, y, page_w - margin * 2)
+
     _ai_pdf_text(c, "Mail Program", margin, y, size=12, bold=True, color_hex="#142033")
     y -= 14
     mail_cols = [130, 76, 80, 88]
@@ -4604,7 +4636,7 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
         y -= 1
 
     # Put the detailed breakdown on its own page so it never collides with footer/branding.
-    y = new_page()
+    y = new_page("Area Breakdown")
     _ai_pdf_text(c, "Area Breakdown", margin, y, size=12, bold=True, color_hex="#142033")
     _ai_pdf_text(c, "Top rows sorted by Total Voters.", margin, y - 13, size=7.8, color_hex="#64748b")
     y -= 24
@@ -4615,7 +4647,7 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
     col_widths = [usable_w / col_count] * col_count if col_count else [usable_w]
     _ai_pdf_table(c, breakdown.iloc[:, :col_count], margin, y, col_widths, row_h=16, max_rows=30, font_size=6.8)
 
-    _ai_pdf_footer(c, page_w, margin)
+    _ai_pdf_footer(c, page_w, margin, page_num)
     c.save()
     return buffer.getvalue()
 
@@ -5067,6 +5099,7 @@ def render_area_intelligence_workspace():
                     strategy_badges=badges,
                     strategy_notes=strategy_notes,
                     display_df=display_df,
+                    filter_lines=build_filter_summary_lines(active_filters),
                 )
                 st.session_state["area_intelligence_pdf_name"] = f"{report_name}.pdf"
         if st.session_state.get("area_intelligence_pdf_bytes"):
