@@ -4412,6 +4412,12 @@ def _build_area_intelligence_recommendations(area_level, title, totals, display_
     if new_reg_pct >= 1.5:
         recommendations.append(f"New registrations are {new_reg_pct:.1f}% of the universe; include new-voter education in the field plan.")
 
+    try:
+        turnout_profile = _build_area_turnout_profile(totals, display_df, candidate_party=candidate_party)
+        recommendations.extend(turnout_profile.get("notes", [])[:2])
+    except Exception:
+        pass
+
     deduped = []
     seen = set()
     for item in recommendations:
@@ -4762,14 +4768,178 @@ def _ai_draw_cover_page(c, page_w, page_h, margin, title, area_level, client_nam
         pass
 
 
+
+def _ai_first_present_column(columns, candidates):
+    """Return the first present column name, case-insensitive."""
+    existing = {str(c).strip().lower(): c for c in columns}
+    for cand in candidates:
+        hit = existing.get(str(cand).strip().lower())
+        if hit is not None:
+            return hit
+    return None
+
+
+def _ai_safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return float(default)
+        if pd.isna(value):
+            return float(default)
+        text = str(value).replace(",", "").strip()
+        if text.lower() in {"", "nan", "none", "null", "nat"}:
+            return float(default)
+        return float(text)
+    except Exception:
+        return float(default)
+
+
+def _ai_turnout_age_signal(avg_age):
+    """Convert average age into a simple turnout signal. Older voters tend to be more reliable voters."""
+    age = _ai_safe_float(avg_age, 0)
+    if age >= 65:
+        return 85, "Older electorate"
+    if age >= 55:
+        return 75, "Mature electorate"
+    if age >= 45:
+        return 62, "Middle-age electorate"
+    if age >= 35:
+        return 52, "Mixed age electorate"
+    if age > 0:
+        return 42, "Younger electorate"
+    return 50, "Age unavailable"
+
+
+def _ai_turnout_new_registration_signal(new_reg, total):
+    """New registrations can indicate a near-term participation bump."""
+    total = _ai_safe_float(total, 0)
+    pct = 0 if total <= 0 else (_ai_safe_float(new_reg, 0) / total) * 100
+    if pct >= 3:
+        return 78, f"High new registration activity ({pct:.1f}%)"
+    if pct >= 1.5:
+        return 66, f"Elevated new registration activity ({pct:.1f}%)"
+    if pct >= 0.5:
+        return 56, f"Some new registration activity ({pct:.1f}%)"
+    return 48, f"Low new registration activity ({pct:.1f}%)"
+
+
+def _ai_turnout_vote_history_signal(row_or_dict):
+    """Use vote-history columns when available; otherwise return a neutral/unavailable signal.
+
+    Supported possibilities include average V4 columns, 0/4 through 4/4 buckets, or a direct turnout/vote-history score.
+    This keeps v11 compatible with the current Area Intelligence summary while allowing stronger scoring later
+    if the pipeline adds aggregated vote-history fields.
+    """
+    data = row_or_dict if isinstance(row_or_dict, dict) else getattr(row_or_dict, "to_dict", lambda: {})()
+    columns = list(data.keys())
+
+    direct_col = _ai_first_present_column(columns, [
+        "Turnout_Score", "TurnoutScore", "Avg_Turnout_Score", "AvgTurnoutScore",
+        "Vote_History_Score", "VoteHistoryScore", "Avg_Vote_History", "Vote_History_Avg",
+        "Avg_V4A", "V4A_Avg", "Voted_Last_4_Avg", "Last4_Avg", "Vote_History_4_Avg"
+    ])
+    if direct_col:
+        raw = _ai_safe_float(data.get(direct_col), 0)
+        # Treat 0-4 averages as vote-history counts; 0-100 values as already scored.
+        if raw <= 4:
+            return max(0, min(100, raw / 4 * 100)), f"Vote history signal available ({raw:.1f}/4)"
+        return max(0, min(100, raw)), "Vote history score available"
+
+    bucket_sets = [
+        ("VH_4", "VH_3", "VH_2", "VH_1", "VH_0"),
+        ("V4A_4", "V4A_3", "V4A_2", "V4A_1", "V4A_0"),
+        ("VoteHistory_4", "VoteHistory_3", "VoteHistory_2", "VoteHistory_1", "VoteHistory_0"),
+        ("Voted_4_of_4", "Voted_3_of_4", "Voted_2_of_4", "Voted_1_of_4", "Voted_0_of_4"),
+    ]
+    lower_map = {str(c).strip().lower(): c for c in columns}
+    for labels in bucket_sets:
+        present = [lower_map.get(label.lower()) for label in labels]
+        if all(p is not None for p in present):
+            v4, v3, v2, v1, v0 = [_ai_safe_float(data.get(p), 0) for p in present]
+            denom = v4 + v3 + v2 + v1 + v0
+            if denom > 0:
+                avg = ((v4 * 4) + (v3 * 3) + (v2 * 2) + v1) / denom
+                return max(0, min(100, avg / 4 * 100)), f"Vote history signal available ({avg:.1f}/4)"
+
+    return 50, "Vote history not available in current summary"
+
+
+def _build_area_turnout_profile(totals, display_df=None, candidate_party="Republican"):
+    """Build a practical turnout profile for the selected Area Intelligence report."""
+    total = _ai_safe_float(totals.get("total", totals.get("Total_Voters", 0)), 0)
+    avg_age = _ai_safe_float(totals.get("avg_age", totals.get("Avg_Age", 0)), 0)
+    new_reg = _ai_safe_float(totals.get("new_reg", totals.get("New_Registrations", 0)), 0)
+
+    age_score, age_label = _ai_turnout_age_signal(avg_age)
+    new_score, new_label = _ai_turnout_new_registration_signal(new_reg, total)
+    vh_score, vh_label = _ai_turnout_vote_history_signal(totals)
+
+    # Vote history carries the most weight when available; otherwise the neutral 50 keeps it from over-driving the result.
+    overall = (vh_score * 0.45) + (age_score * 0.35) + (new_score * 0.20)
+    if overall >= 70:
+        tier = "High turnout environment"
+    elif overall >= 58:
+        tier = "Moderate-to-strong turnout environment"
+    elif overall >= 48:
+        tier = "Mixed turnout environment"
+    else:
+        tier = "Lower turnout environment"
+
+    notes = []
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
+    notes.append(f"Turnout lens: {tier.lower()} based on age, new-registration activity, and vote-history signal when available.")
+    if avg_age >= 55:
+        notes.append(f"Average age is {avg_age:.1f}; older voters are usually more reliable turnout voters across party groups.")
+    elif avg_age > 0:
+        notes.append(f"Average age is {avg_age:.1f}; field priorities should lean more heavily on party strength and vote-history when available.")
+    if new_reg > 0:
+        pct = 0 if total <= 0 else (new_reg / total) * 100
+        notes.append(f"New registrations total {new_reg:,.0f} voters ({pct:.1f}%); treat them as a separate turnout-opportunity watch group.")
+    if "not available" in vh_label.lower():
+        notes.append("Vote-history signal is not present in the current Area Intelligence summary; add aggregated V4A/V4G/V4P fields later for stronger prediction.")
+    else:
+        notes.append(vh_label + "; use it as the strongest turnout-readiness input.")
+
+    return {
+        "overall_score": round(float(overall), 1),
+        "tier": tier,
+        "age_score": round(float(age_score), 1),
+        "age_label": age_label,
+        "vote_history_score": round(float(vh_score), 1),
+        "vote_history_label": vh_label,
+        "new_registration_score": round(float(new_score), 1),
+        "new_registration_label": new_label,
+        "notes": notes[:4],
+    }
+
+
+def _ai_area_turnout_score_from_row(row, candidate_party="Republican"):
+    """Score one breakdown row for turnout-aware turf priority."""
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
+    total = _ai_safe_float(row.get("Total_Voters", 0), 0)
+    party_pct = _ai_safe_float(row.get(party_pct_col, 0), 0)
+    avg_age = _ai_safe_float(row.get("Avg_Age", 0), 0)
+    new_reg = _ai_safe_float(row.get("New_Registrations", 0), 0)
+    outstanding = _ai_safe_float(row.get("Mail_Ballots_Outstanding", 0), 0)
+    outstanding_pct = _ai_safe_float(row.get("Outstanding_%", 0), 0)
+
+    age_score, _ = _ai_turnout_age_signal(avg_age)
+    new_score, _ = _ai_turnout_new_registration_signal(new_reg, total)
+    vh_score, _ = _ai_turnout_vote_history_signal(row)
+    turnout_score = (vh_score * 0.45) + (age_score * 0.35) + (new_score * 0.20)
+
+    party_opportunity = total * (party_pct / 100.0)
+    mail_chase_score = min(outstanding, max(total, 1)) * (1 + min(outstanding_pct, 100) / 100.0)
+    weighted = (party_opportunity * 2.7) + (total * 0.25) + (mail_chase_score * 1.15) + (turnout_score * 35.0)
+    return round(float(turnout_score), 1), round(float(weighted), 1)
+
 def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
-    """Build party-lens field/turf recommendations from the Area Intelligence breakdown."""
+    """Build party-lens, turnout-aware field/turf recommendations from the Area Intelligence breakdown."""
     party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
     if display_df is None or display_df.empty:
-        return pd.DataFrame(columns=["Priority", "Area", "Voters", "Outstanding", "Recommendation"])
+        return pd.DataFrame(columns=["Priority", "Area", "Voters", "Turnout", "Outstanding", "Recommendation"])
 
     work = display_df.copy()
-    for col in ["Total_Voters", "Mail_Ballots_Outstanding", "Mail_Applications_Approved", "Rep_%", "Dem_%", "Mail_Return_%", "Outstanding_%"]:
+    for col in ["Total_Voters", "Mail_Ballots_Outstanding", "Mail_Applications_Approved", "Rep_%", "Dem_%", "Other_%", "Mail_Return_%", "Outstanding_%", "Avg_Age", "New_Registrations"]:
         if col in work.columns:
             work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
         else:
@@ -4787,29 +4957,30 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
     work["_Area"] = work.apply(area_label, axis=1)
     party_pct = pd.to_numeric(work.get(party_pct_col, 0), errors="coerce").fillna(0) if party_pct_col in work.columns else 0
     work["_PartyOpportunity"] = work["Total_Voters"] * (party_pct / 100.0)
-    work["_Score"] = (
-        work["_PartyOpportunity"] * 2.5
-        + work["Total_Voters"] * 0.35
-        + work["Mail_Ballots_Outstanding"] * 1.75
-        + work["Outstanding_%"] * 25.0
-    )
-    work = work.sort_values(["_Score", "Total_Voters"], ascending=False).head(8).reset_index(drop=True)
+
+    scores = work.apply(lambda r: _ai_area_turnout_score_from_row(r, candidate_party=candidate_party), axis=1)
+    work["_TurnoutScore"] = [x[0] for x in scores]
+    work["_Score"] = [x[1] for x in scores]
+    work = work.sort_values(["_Score", "_PartyOpportunity", "Total_Voters"], ascending=False).head(8).reset_index(drop=True)
 
     rows = []
     for idx, row in work.iterrows():
         voters = int(row.get("Total_Voters", 0) or 0)
         outstanding = int(row.get("Mail_Ballots_Outstanding", 0) or 0)
         party_pct_val = float(row.get(party_pct_col, 0) or 0)
+        turnout_score = float(row.get("_TurnoutScore", 0) or 0)
         return_pct = float(row.get("Mail_Return_%", 0) or 0)
 
-        if outstanding >= 100 and return_pct < 35:
+        if party_pct_val >= 55 and turnout_score >= 65:
+            rec = f"High-propensity {party_label} base"
+        elif outstanding >= 100 and return_pct < 35 and party_pct_val >= 40:
             rec = f"{party_label} turnout + mail chase"
-        elif party_pct_val >= 55 and voters >= 1000:
-            rec = f"Strong {party_label} base turnout"
+        elif party_pct_val >= 45 and turnout_score >= 55:
+            rec = f"Competitive {party_label} turnout opportunity"
         elif voters >= 5000:
-            rec = "Build multiple turf packets"
-        elif party_pct_val >= 45:
-            rec = f"Competitive {party_label} opportunity"
+            rec = "Large turf build / review sub-areas"
+        elif turnout_score >= 65:
+            rec = "Strong turnout environment"
         else:
             rec = "Lower priority / monitor"
 
@@ -4817,6 +4988,7 @@ def _build_area_intelligence_turf_recommendations(area_level, title, totals, dis
             "Priority": idx + 1,
             "Area": row["_Area"],
             "Voters": voters,
+            "Turnout": f"{turnout_score:.0f}",
             "Outstanding": outstanding,
             "Recommendation": rec,
         })
@@ -4984,8 +5156,8 @@ def build_area_intelligence_pdf_bytes(
         y -= 13
         y = _ai_pdf_draw_bullets(c, recommendations[:4], margin, y, page_w - margin * 2, size=7.7, max_items=4)
 
-    # Charts and turf recommendations page.
-    y = new_page("Charts & Turf Recommendations")
+    # Charts page.
+    y = new_page("Charts")
     _ai_pdf_text(c, "Profile Charts", margin, y, size=12, bold=True, color_hex="#142033")
     _ai_pdf_text(c, "Quick visual summary of the selected Area Intelligence profile.", margin, y - 13, size=7.8, color_hex="#64748b")
     y -= 26
@@ -5029,14 +5201,39 @@ def build_area_intelligence_pdf_bytes(
         h=92,
         color_hex="#2e7d32",
     )
-    y -= 118
 
-    _ai_pdf_text(c, "Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, f"Suggested priority areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate based on party concentration, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
+    # Turnout Intelligence and smarter turf recommendations page.
+    y = new_page("Turnout Intelligence & Turf")
+    turnout_profile = _build_area_turnout_profile(totals, display_df, candidate_party=candidate_party)
+    _ai_pdf_text(c, "Turnout Intelligence", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, "Practical turnout-readiness model using age, new registrations, and vote history when available.", margin, y - 13, size=7.8, color_hex="#64748b")
+    y -= 26
+
+    _ai_pdf_bar_chart(
+        c,
+        f"Turnout Factor Snapshot — {turnout_profile.get('tier', 'Turnout environment')}",
+        [
+            ("Overall", turnout_profile.get("overall_score", 0), f"{turnout_profile.get('overall_score', 0):.1f}/100"),
+            ("Age", turnout_profile.get("age_score", 0), turnout_profile.get("age_label", "")),
+            ("Vote Hist", turnout_profile.get("vote_history_score", 0), turnout_profile.get("vote_history_label", "")),
+            ("New Reg", turnout_profile.get("new_registration_score", 0), turnout_profile.get("new_registration_label", "")),
+        ],
+        margin,
+        y,
+        page_w - margin * 2,
+        h=96,
+        color_hex="#153d73",
+    )
+    y -= 112
+    y = _ai_pdf_draw_bullets(c, turnout_profile.get("notes", []), margin, y, page_w - margin * 2, size=7.8, max_items=4)
+    y -= 10
+
+    _ai_pdf_text(c, "Turnout-Aware Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, f"Suggested priority areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate based on party concentration, turnout signal, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
     y -= 25
     turf_df = _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
     if turf_df is not None and not turf_df.empty:
-        _ai_pdf_table(c, turf_df, margin, y, [42, 214, 64, 72, 132], row_h=17, max_rows=8, font_size=6.8)
+        _ai_pdf_table(c, turf_df, margin, y, [38, 190, 56, 54, 66, 120], row_h=17, max_rows=8, font_size=6.6)
     else:
         _ai_pdf_text(c, "No turf recommendation data available.", margin, y, size=8, color_hex="#64748b")
 
