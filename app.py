@@ -5209,21 +5209,29 @@ def _ai_geojson_likely_lonlat(geojson_data):
     return good >= max(1, int(len(samples) * 0.75))
 
 
-def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican"):
+def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican", title=""):
     """Render a true GeoJSON choropleth when local /geo boundary files are available."""
     available_layers = _ai_geo_available_layers()
     if not available_layers:
         st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
         return False
 
-    preferred_defaults = [
-        ("Municipality Boundaries", "Municipality"),
-        ("County Boundaries", "County"),
-        ("School District Boundaries", "School District"),
-        ("State House Boundaries", "STH"),
-        ("State Senate Boundaries", "STS"),
-        ("Congressional Boundaries", "USC"),
-    ]
+    title_upper = str(title or "").upper()
+    if "STS" in title_upper or ("STS" in heat_df.columns and heat_df.get("STS", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "State Senate Boundaries" in available_layers):
+        preferred_defaults = [("State Senate Boundaries", "STS"), ("County Boundaries", "County")]
+    elif "STH" in title_upper or ("STH" in heat_df.columns and heat_df.get("STH", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "State House Boundaries" in available_layers):
+        preferred_defaults = [("State House Boundaries", "STH"), ("County Boundaries", "County")]
+    elif "USC" in title_upper or ("USC" in heat_df.columns and heat_df.get("USC", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "Congressional Boundaries" in available_layers):
+        preferred_defaults = [("Congressional Boundaries", "USC"), ("County Boundaries", "County")]
+    else:
+        preferred_defaults = [
+            ("Municipality Boundaries", "Municipality"),
+            ("County Boundaries", "County"),
+            ("School District Boundaries", "School District"),
+            ("State House Boundaries", "STH"),
+            ("State Senate Boundaries", "STS"),
+            ("Congressional Boundaries", "USC"),
+        ]
     default_idx = 0
     for layer, data_col in preferred_defaults:
         if layer in available_layers and data_col in heat_df.columns and heat_df[data_col].astype(str).str.strip().ne("").any():
@@ -5292,25 +5300,40 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         st.warning("This GeoJSON appears to use projected coordinates instead of longitude/latitude. Convert/export it as WGS84 / EPSG:4326 for web maps.")
         return False
 
+    lookup_records = lookup_df.set_index("Geo_Key").to_dict(orient="index")
+    enriched_features = []
+    for feat in matched_features:
+        nf = dict(feat)
+        props = dict(feat.get("properties") or {})
+        rec = lookup_records.get(str(props.get("__cc_join_key", "")), {})
+        props["__metric_value"] = float(rec.get("__metric_value", 0) or 0)
+        props["__area_label"] = str(rec.get("Area_Label", props.get("__cc_label", "")))
+        props["__total_voters"] = float(rec.get("__total_voters", 0) or 0)
+        props["__target_voters"] = float(rec.get("__target_voters", 0) or 0)
+        props["__target_per_door"] = float(rec.get("__target_per_door", 0) or 0)
+        nf["properties"] = props
+        enriched_features.append(nf)
+
     matched_geo = {k: v for k, v in prepped_geo.items() if k != "features"}
-    matched_geo["features"] = matched_features
+    matched_geo["features"] = enriched_features
+
+    metric_values = [float((f.get("properties") or {}).get("__metric_value", 0) or 0) for f in enriched_features]
+    if metric_values and max(metric_values) == min(metric_values):
+        st.caption("Only one matched boundary/value is visible for this selection. Choose a more detailed boundary layer, such as State Senate or Municipality, when available.")
 
     scheme = _ai_boundary_color_scheme(metric_label)
     chart = alt.Chart(alt.Data(values=matched_geo["features"])).mark_geoshape(
-        stroke="#24303f", strokeWidth=0.55
+        stroke="#24303f", strokeWidth=0.7
     ).encode(
-        color=alt.Color("__metric_value:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
+        color=alt.Color("properties.__metric_value:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
         tooltip=[
             alt.Tooltip("properties.__cc_label:N", title="Boundary"),
-            alt.Tooltip("Area_Label:N", title="Matched Area"),
-            alt.Tooltip("__metric_value:Q", title=metric_label, format=",.1f"),
-            alt.Tooltip("__total_voters:Q", title="Total Voters", format=","),
-            alt.Tooltip("__target_voters:Q", title="Target Voters", format=",.0f"),
-            alt.Tooltip("__target_per_door:Q", title="Target/Door", format=".2f"),
+            alt.Tooltip("properties.__area_label:N", title="Matched Area"),
+            alt.Tooltip("properties.__metric_value:Q", title=metric_label, format=",.1f"),
+            alt.Tooltip("properties.__total_voters:Q", title="Total Voters", format=","),
+            alt.Tooltip("properties.__target_voters:Q", title="Target Voters", format=",.0f"),
+            alt.Tooltip("properties.__target_per_door:Q", title="Target/Door", format=".2f"),
         ],
-    ).transform_lookup(
-        lookup="properties.__cc_join_key",
-        from_=alt.LookupData(lookup_df, "Geo_Key", ["Area_Label", "__metric_value", "__total_voters", "__target_voters", "__target_per_door"]),
     ).project(type="mercator").properties(height=620)
 
     st.altair_chart(chart, use_container_width=True)
@@ -5349,7 +5372,7 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
         unsafe_allow_html=True,
     )
 
-    boundary_rendered = _ai_render_boundary_heat_map(heat_df, metric_col, metric_label, candidate_party=candidate_party)
+    boundary_rendered = _ai_render_boundary_heat_map(heat_df, metric_col, metric_label, candidate_party=candidate_party, title=title)
 
     lat_col, lon_col = _ai_find_lat_lon_columns(ranked)
     if lat_col and lon_col:
