@@ -4497,26 +4497,112 @@ def _ai_pdf_footer(c, page_w, margin, page_num=None):
 
 
 def _ai_pdf_filter_summary_box(c, filter_lines, x, y, w, title="Applied Universe Filters"):
-    """Draw compact filter summary box and return the new y position."""
-    lines = filter_lines or ["No additional filters selected"]
-    max_lines = 7
+    """Draw a cleaner client-facing filter summary box and return the new y position."""
+    raw_lines = filter_lines or ["No additional filters selected"]
+    lines = [normalize_export_text(v) for v in raw_lines if normalize_export_text(v)] or ["No additional filters selected"]
+    max_lines = 8
     shown = lines[:max_lines]
     if len(lines) > max_lines:
         shown.append(f"+ {len(lines) - max_lines} more filter(s)")
 
-    line_h = 10
-    h = 28 + (len(shown) * line_h)
+    col_gap = 14
+    col_w = (w - 24 - col_gap) / 2
+    left = shown[0::2]
+    right = shown[1::2]
+    row_count = max(len(left), len(right), 1)
+    line_h = 11
+    h = 31 + (row_count * line_h)
+
     c.setFillColor(colors.HexColor("#f8fafc"))
+    c.setStrokeColor(colors.HexColor("#cfd8e3"))
+    c.roundRect(x, y - h, w, h, 9, fill=1, stroke=1)
+    c.setFillColor(colors.HexColor("#153d73"))
+    c.roundRect(x, y - 20, w, 20, 9, fill=1, stroke=0)
+    _ai_pdf_text(c, title, x + 10, y - 14, size=8.1, bold=True, color_hex="#ffffff", max_width=w - 20)
+
+    def draw_filter_line(text, xx, yy, ww):
+        if ":" in text:
+            label, value = text.split(":", 1)
+        else:
+            label, value = "Filter", text
+        label = normalize_export_text(label)
+        value = normalize_export_text(value).strip()
+        c.setFillColor(colors.HexColor("#eaf1fb"))
+        c.roundRect(xx, yy - 8.5, 5, 5, 2.5, fill=1, stroke=0)
+        _ai_pdf_text(c, f"{label}:", xx + 9, yy - 7, size=6.9, bold=True, color_hex="#334155", max_width=ww * 0.42)
+        label_w = min(c.stringWidth(f"{label}:", "Helvetica-Bold", 6.9) + 14, ww * 0.46)
+        _ai_pdf_text(c, value or "All", xx + label_w, yy - 7, size=6.9, color_hex="#24303f", max_width=ww - label_w)
+
+    yy = y - 29
+    for i in range(row_count):
+        if i < len(left):
+            draw_filter_line(left[i], x + 10, yy, col_w)
+        if i < len(right):
+            draw_filter_line(right[i], x + 10 + col_w + col_gap, yy, col_w)
+        yy -= line_h
+    return y - h - 13
+
+
+def _ai_pdf_bar_chart(c, title, rows, x, y, w, h=92, color_hex="#153d73"):
+    """Draw a compact horizontal bar chart. rows = [(label, value, note), ...]."""
+    clean_rows = []
+    for item in rows:
+        if len(item) == 2:
+            label, value = item
+            note = ""
+        else:
+            label, value, note = item
+        try:
+            val = float(value or 0)
+        except Exception:
+            val = 0
+        clean_rows.append((normalize_export_text(label), val, normalize_export_text(note)))
+
+    c.setFillColor(colors.white)
     c.setStrokeColor(colors.HexColor("#d8dee8"))
     c.roundRect(x, y - h, w, h, 8, fill=1, stroke=1)
-    _ai_pdf_text(c, title, x + 10, y - 13, size=8.2, bold=True, color_hex="#142033", max_width=w - 20)
-    yy = y - 27
-    for line in shown:
-        wrapped = _ai_pdf_wrapped_lines(c, normalize_export_text(line), w - 28, size=6.9)
-        if wrapped:
-            _ai_pdf_text(c, "• " + wrapped[0], x + 12, yy, size=6.9, color_hex="#334155", max_width=w - 24)
-            yy -= line_h
-    return y - h - 12
+    _ai_pdf_text(c, title, x + 10, y - 14, size=8.5, bold=True, color_hex="#142033", max_width=w - 20)
+
+    if not clean_rows:
+        _ai_pdf_text(c, "No chart data available.", x + 10, y - 34, size=7.4, color_hex="#64748b")
+        return y - h
+
+    max_val = max([v for _, v, _ in clean_rows] + [1])
+    bar_x = x + 72
+    bar_w = w - 132
+    yy = y - 31
+    row_h = 17
+    for label, val, note in clean_rows[:4]:
+        _ai_pdf_text(c, label, x + 10, yy, size=7.2, bold=True, color_hex="#334155", max_width=57)
+        c.setFillColor(colors.HexColor("#edf2f7"))
+        c.roundRect(bar_x, yy - 3, bar_w, 6, 3, fill=1, stroke=0)
+        if max_val > 0 and val > 0:
+            c.setFillColor(colors.HexColor(color_hex))
+            c.roundRect(bar_x, yy - 3, max(2, bar_w * (val / max_val)), 6, 3, fill=1, stroke=0)
+        _ai_pdf_draw_aligned_text(c, _ai_pdf_num(val), bar_x + bar_w + 6, yy - 2, 46, size=7.1, bold=True, color_hex="#153d73", align="RIGHT")
+        if note:
+            _ai_pdf_text(c, note, bar_x + bar_w + 55, yy - 2, size=6.4, color_hex="#64748b", max_width=42)
+        yy -= row_h
+    return y - h
+
+
+def _ai_build_area_filter_lines(area_level, title, selected_county="", selected_muni="", selected_precinct="", selected_district="", breakdown_mode=""):
+    """Build Area Intelligence-specific filter lines without depending on the main voter filter state."""
+    lines = [f"Report Level: {area_level}", f"Selected Area: {title}"]
+    if selected_county:
+        lines.append(f"County: {selected_county}")
+    if selected_muni:
+        lines.append(f"Municipality: {selected_muni}")
+    if selected_precinct:
+        lines.append(f"Precinct: {selected_precinct}")
+    if selected_district:
+        lines.append(f"District: {area_level} {selected_district}")
+    if breakdown_mode:
+        lines.append(f"Breakdown View: {breakdown_mode}")
+    lines.append("Voter Status: Active voters")
+    lines.append("Source: Area Intelligence precinct summary")
+    return lines
+
 
 def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals, mail_df, strategy_badges, strategy_notes, display_df, filter_lines=None):
     """Build a client-ready Area Intelligence profile PDF from the selected Area Intelligence profile."""
@@ -4635,8 +4721,53 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
             y -= 11
         y -= 1
 
-    # Put the detailed breakdown on its own page so it never collides with footer/branding.
-    y = new_page("Area Breakdown")
+    # Put charts and the detailed breakdown on their own page so nothing collides with footer/branding.
+    y = new_page("Charts & Area Breakdown")
+    _ai_pdf_text(c, "Profile Charts", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, "Quick visual summary of the selected Area Intelligence profile.", margin, y - 13, size=7.8, color_hex="#64748b")
+    y -= 26
+
+    chart_gap = 12
+    chart_w = (page_w - margin * 2 - chart_gap) / 2
+    _ai_pdf_bar_chart(
+        c,
+        "Party Composition",
+        [("Dem", dem, _ai_pdf_pct(dem, total)), ("Rep", rep, _ai_pdf_pct(rep, total)), ("Other", other, _ai_pdf_pct(other, total))],
+        margin,
+        y,
+        chart_w,
+        h=82,
+        color_hex="#153d73",
+    )
+    _ai_pdf_bar_chart(
+        c,
+        "Gender Composition",
+        [("Male", male, _ai_pdf_pct(male, total)), ("Female", female, _ai_pdf_pct(female, total)), ("Unknown", unknown_gender, _ai_pdf_pct(unknown_gender, total))],
+        margin + chart_w + chart_gap,
+        y,
+        chart_w,
+        h=82,
+        color_hex="#7a1523",
+    )
+    y -= 100
+
+    _ai_pdf_bar_chart(
+        c,
+        "Mail Program Snapshot",
+        [
+            ("Approved", mail_apps_approved, _ai_pdf_pct(mail_apps_approved, mail_apps_total)),
+            ("Sent", mail_sent, _ai_pdf_pct(mail_sent, mail_apps_approved)),
+            ("Returned", mail_returned, _ai_pdf_pct(mail_returned, mail_apps_approved)),
+            ("Outstanding", mail_outstanding, _ai_pdf_pct(mail_outstanding, mail_apps_approved)),
+        ],
+        margin,
+        y,
+        page_w - margin * 2,
+        h=92,
+        color_hex="#2e7d32",
+    )
+    y -= 112
+
     _ai_pdf_text(c, "Area Breakdown", margin, y, size=12, bold=True, color_hex="#142033")
     _ai_pdf_text(c, "Top rows sorted by Total Voters.", margin, y - 13, size=7.8, color_hex="#64748b")
     y -= 24
@@ -5013,6 +5144,7 @@ def render_area_intelligence_workspace():
             breakdown_df[col] = 0
     breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Ballots_Returned"].where(breakdown_df["Mail_Ballots_Returned"] > 0, breakdown_df["Mail_Voters"])
 
+    breakdown_mode = ""
     if area_level == "County":
         with breakdown_tab:
             breakdown_mode = st.radio("Breakdown View", ["By Municipality", "By Precinct"], horizontal=True, key="ai_county_breakdown_mode")
@@ -5099,7 +5231,15 @@ def render_area_intelligence_workspace():
                     strategy_badges=badges,
                     strategy_notes=strategy_notes,
                     display_df=display_df,
-                    filter_lines=build_filter_summary_lines(active_filters),
+                    filter_lines=_ai_build_area_filter_lines(
+                        area_level=area_level,
+                        title=title,
+                        selected_county=selected_county,
+                        selected_muni=selected_muni,
+                        selected_precinct=selected_precinct,
+                        selected_district=selected_district,
+                        breakdown_mode=breakdown_mode,
+                    ),
                 )
                 st.session_state["area_intelligence_pdf_name"] = f"{report_name}.pdf"
         if st.session_state.get("area_intelligence_pdf_bytes"):
