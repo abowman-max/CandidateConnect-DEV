@@ -422,6 +422,28 @@ def prepare_db(local_paths):
 def sql_literal_list(values):
     return ", ".join(["?"] * len(values))
 
+def clean_district_display_value(value) -> str:
+    """Display USC/STS/STH without trailing .0 while preserving real text values."""
+    raw = normalize_export_text(value) if "normalize_export_text" in globals() else str(value).strip()
+    if raw.lower() in {"", "nan", "none", "null"}:
+        return ""
+    try:
+        f = float(raw)
+        if f.is_integer():
+            return str(int(f))
+    except Exception:
+        pass
+    return re.sub(r"\.0+$", "", raw)
+
+
+def district_sort_key(value):
+    s = clean_district_display_value(value)
+    try:
+        return (0, int(float(s)))
+    except Exception:
+        return (1, s)
+
+
 def current_filter_clause(active, columns):
     where = ["_Status = 'A'"]
     params = []
@@ -546,7 +568,9 @@ def get_basic_options(columns):
     geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in columns]
     for col in geo_cols:
         if col in ["USC", "STS", "STH"]:
-            options[col] = get_distinct_options(col, f"regexp_replace(trim(cast({quote_ident(col)} as varchar)), '\\.0+$', '')")
+            vals = get_distinct_options(col, f"regexp_replace(trim(cast({quote_ident(col)} as varchar)), '\\.0+$', '')")
+            vals = [clean_district_display_value(v) for v in vals if clean_district_display_value(v)]
+            options[col] = sorted(set(vals), key=district_sort_key)
         else:
             options[col] = get_distinct_options(col)
     options["party_vals"] = get_distinct_options("_PartyNorm", "_PartyNorm") if "Party" in columns else []
@@ -4168,7 +4192,8 @@ def _aggregate_area_profile(profile_df: pd.DataFrame) -> dict:
     numeric_cols = [
         "Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters",
         "Male_Voters", "Female_Voters", "Unknown_Gender",
-        "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters"
+        "New_Registrations", "Mail_Applications", "Mail_Applications_Total", "Mail_Applications_Approved", "Mail_Applications_Declined",
+        "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters"
     ]
     out = {}
     work = profile_df.copy()
@@ -4343,12 +4368,16 @@ def render_area_intelligence_workspace():
     unknown_gender = _area_num(row, "Unknown_Gender", 0)
     avg_age = _area_num(row, "Avg_Age", 0)
     new_reg = _area_num(row, "New_Registrations", 0)
-    mail_apps = _area_num(row, "Mail_Applications", 0)
+    mail_apps_total = _area_num(row, "Mail_Applications_Total", _area_num(row, "Mail_Applications", 0))
+    mail_apps_approved = _area_num(row, "Mail_Applications_Approved", _area_num(row, "Mail_Applications", 0))
+    mail_apps_declined = _area_num(row, "Mail_Applications_Declined", 0)
+    # Backward-compatible name used by existing strategy logic: approved applications.
+    mail_apps = mail_apps_approved
     mail_sent = _area_num(row, "Mail_Ballots_Sent", 0)
     mail_returned = _area_num(row, "Mail_Ballots_Returned", 0)
     if mail_returned == 0:
         mail_returned = _area_num(row, "Mail_Voters", 0)
-    mail_outstanding = _area_num(row, "Mail_Ballots_Outstanding", max(mail_apps - mail_returned, 0))
+    mail_outstanding = _area_num(row, "Mail_Ballots_Outstanding", max(mail_apps_approved - mail_returned, 0))
     geo_issues = _area_num(row, "Geo_Issue_Rows", 0)
     precinct_count = int(_area_num(row, "Precinct_Count", len(profile_df)))
 
@@ -4392,19 +4421,19 @@ def render_area_intelligence_workspace():
                 st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
 
     # Mail Program: compact table plus two decision cards.
-    st.markdown('<div class="section-card"><div class="small-header">Mail Program</div><div class="tiny-muted">Application, sent, returned, and chase universe.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-card"><div class="small-header">Mail Program</div><div class="tiny-muted">Approved/declined applications, sent ballots, returned ballots, and chase universe.</div></div>', unsafe_allow_html=True)
     mail_left, mail_right = st.columns([2, 1], gap="medium")
     with mail_left:
         mail_df = pd.DataFrame({
-            "Stage": ["Ballot Applications", "Ballots Sent", "Ballots Returned", "Outstanding Ballots"],
-            "Voters": [int(mail_apps), int(mail_sent), int(mail_returned), int(mail_outstanding)],
-            "% of Voters": [pct_txt(mail_apps), pct_txt(mail_sent), pct_txt(mail_returned), pct_txt(mail_outstanding)],
-            "% of Applications": ["—", "—", pct_txt(mail_returned, mail_apps) if mail_apps else "—", pct_txt(mail_outstanding, mail_apps) if mail_apps else "—"],
+            "Stage": ["Applications Total", "Applications Approved", "Applications Declined", "Ballots Sent", "Ballots Returned", "Outstanding Ballots"],
+            "Voters": [int(mail_apps_total), int(mail_apps_approved), int(mail_apps_declined), int(mail_sent), int(mail_returned), int(mail_outstanding)],
+            "% of Voters": [pct_txt(mail_apps_total), pct_txt(mail_apps_approved), pct_txt(mail_apps_declined), pct_txt(mail_sent), pct_txt(mail_returned), pct_txt(mail_outstanding)],
+            "% of Approved": ["—", "100%" if mail_apps_approved else "—", "—", pct_txt(mail_sent, mail_apps_approved) if mail_apps_approved else "—", pct_txt(mail_returned, mail_apps_approved) if mail_apps_approved else "—", pct_txt(mail_outstanding, mail_apps_approved) if mail_apps_approved else "—"],
         })
         st.dataframe(mail_df, use_container_width=True, hide_index=True)
     with mail_right:
-        st.markdown(_metric_html("Outstanding Ballots", f"{int(mail_outstanding):,}", f"{mail_outstanding_rate:.1f}% of applications" if mail_apps else "No chase universe visible"), unsafe_allow_html=True)
-        st.markdown(_metric_html("Return Rate", f"{mail_return_rate:.1f}%" if mail_apps else "—", "Returned / Applications"), unsafe_allow_html=True)
+        st.markdown(_metric_html("Outstanding Ballots", f"{int(mail_outstanding):,}", f"{mail_outstanding_rate:.1f}% of approved applications" if mail_apps else "No chase universe visible"), unsafe_allow_html=True)
+        st.markdown(_metric_html("Return Rate", f"{mail_return_rate:.1f}%" if mail_apps else "—", "Returned / Approved"), unsafe_allow_html=True)
 
     # Strategy Summary gets a visual block and stays above charts.
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -4457,7 +4486,7 @@ def render_area_intelligence_workspace():
 
     # Prepare breakdown once and display in breakdown tab.
     breakdown_df = profile_df.copy()
-    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters", "Geo_Issue_Rows", "Avg_Age"]:
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Applications", "Mail_Applications_Total", "Mail_Applications_Approved", "Mail_Applications_Declined", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters", "Geo_Issue_Rows", "Avg_Age"]:
         if col in breakdown_df.columns:
             breakdown_df[col] = pd.to_numeric(breakdown_df[col], errors="coerce").fillna(0)
         else:
@@ -4482,6 +4511,9 @@ def render_area_intelligence_workspace():
             Other_Voters=("Other_Voters", "sum"),
             New_Registrations=("New_Registrations", "sum"),
             Mail_Applications=("Mail_Applications", "sum"),
+            Mail_Applications_Total=("Mail_Applications_Total", "sum"),
+            Mail_Applications_Approved=("Mail_Applications_Approved", "sum"),
+            Mail_Applications_Declined=("Mail_Applications_Declined", "sum"),
             Mail_Ballots_Sent=("Mail_Ballots_Sent", "sum"),
             Mail_Ballots_Returned=("Mail_Ballots_Returned", "sum"),
             Mail_Ballots_Outstanding=("Mail_Ballots_Outstanding", "sum"),
@@ -4497,13 +4529,13 @@ def render_area_intelligence_workspace():
     )
     weighted_age["Avg_Age"] = weighted_age.apply(lambda r: 0 if r["_AgeTotal"] <= 0 else round(float(r["_AgeWeight"] / r["_AgeTotal"]), 1), axis=1)
     display_df = display_df.merge(weighted_age[group_cols + ["Avg_Age"]], on=group_cols, how="left")
-    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Geo_Issue_Rows"]:
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "New_Registrations", "Mail_Applications", "Mail_Applications_Total", "Mail_Applications_Approved", "Mail_Applications_Declined", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Geo_Issue_Rows"]:
         display_df[col] = pd.to_numeric(display_df[col], errors="coerce").fillna(0).astype(int)
     display_df["Dem_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Dem_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
     display_df["Rep_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Rep_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
     display_df["Other_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Other_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
-    display_df["Mail_Return_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications"]) * 100, 1), axis=1)
-    display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications"]) * 100, 1), axis=1)
+    display_df["Mail_Return_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
+    display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
 
     with breakdown_tab:
