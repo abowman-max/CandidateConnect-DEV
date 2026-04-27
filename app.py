@@ -127,6 +127,23 @@ def quote_ident(name: str) -> str:
 def sql_string_literal(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
+def sql_clean_district_expr(column: str) -> str:
+    """Return a display/filter expression for district fields that removes trailing .0."""
+    qcol = quote_ident(column)
+    raw = f"trim(coalesce(cast({qcol} as varchar), ''))"
+    return f"""case
+        when {raw} = '' then NULL
+        when try_cast({qcol} as double) is not null
+             and try_cast({qcol} as double) = floor(try_cast({qcol} as double))
+        then cast(cast(try_cast({qcol} as double) as bigint) as varchar)
+        else {raw}
+    end"""
+
+def filter_expr_for_column(column: str) -> str:
+    if column in {"USC", "STS", "STH"}:
+        return sql_clean_district_expr(column)
+    return quote_ident(column)
+
 @st.cache_resource(show_spinner=False)
 def get_conn():
     swap_dir = Path("/tmp/candidate_connect_duckdb_swap")
@@ -316,8 +333,9 @@ def build_view_sql(columns, local_paths):
     if party_col:
         exprs.append(
             f"""case
-                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) in ('', 'NONE', 'NAN', 'U') then 'O'
-                else upper(trim(cast({q(party_col)} as varchar)))
+                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) = 'D' then 'D'
+                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) = 'R' then 'R'
+                else 'O'
             end as _PartyNorm"""
         )
     else:
@@ -428,8 +446,8 @@ def current_filter_clause(active, columns):
     for col in geo_cols:
         picked = active.get(col, [])
         if picked:
-            where.append(f"{quote_ident(col)} IN ({sql_literal_list(picked)})")
-            params.extend(picked)
+            where.append(f"{filter_expr_for_column(col)} IN ({sql_literal_list(picked)})")
+            params.extend([str(v) for v in picked])
     if active.get("party_pick"):
         picked = active["party_pick"]
         where.append(f"_PartyNorm IN ({sql_literal_list(picked)})")
@@ -541,8 +559,15 @@ def get_basic_options(columns):
     options = {}
     geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in columns]
     for col in geo_cols:
-        options[col] = get_distinct_options(col)
-    options["party_vals"] = get_distinct_options("_PartyNorm", "_PartyNorm") if "Party" in columns else []
+        if col in {"USC", "STS", "STH"}:
+            options[col] = get_distinct_options(col, sql_clean_district_expr(col))
+        else:
+            options[col] = get_distinct_options(col)
+    if "Party" in columns:
+        found_parties = set(get_distinct_options("_PartyNorm", "_PartyNorm"))
+        options["party_vals"] = [p for p in ["D", "R", "O"] if p in found_parties]
+    else:
+        options["party_vals"] = []
     options["gender_vals"] = get_distinct_options("_Gender", "_Gender")
     options["age_range_vals"] = get_distinct_options("_AgeRange", "_AgeRange")
     options["hh_party_vals"] = get_distinct_options("HH-Party") if "HH-Party" in columns else []
@@ -1068,8 +1093,9 @@ def build_detail_export_sql(detail_paths, active_filters):
     if party_col:
         exprs.append(
             f"""case
-                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) in ('', 'NONE', 'NAN', 'U') then 'O'
-                else upper(trim(cast({q(party_col)} as varchar)))
+                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) = 'D' then 'D'
+                when upper(trim(coalesce(cast({q(party_col)} as varchar), ''))) = 'R' then 'R'
+                else 'O'
             end as _PartyNorm"""
         )
     else:
