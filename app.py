@@ -4984,6 +4984,153 @@ def _ai_canvassing_efficiency_metrics(row, candidate_party="Republican"):
     }
 
 
+
+def _ai_heat_map_label_from_row(row, fallback_title=""):
+    """Create a readable geography label for Area Intelligence heat-map rows."""
+    parts = []
+    for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"]:
+        if col in row:
+            val = normalize_export_text(row.get(col, ""))
+            if val and val not in parts:
+                parts.append(val)
+    return " • ".join(parts[:3]) if parts else normalize_export_text(fallback_title) or "Selected Area"
+
+
+def _ai_find_lat_lon_columns(df: pd.DataFrame):
+    """Find likely latitude/longitude columns when they exist in the summary file."""
+    if df is None or df.empty:
+        return None, None
+    lower = {str(c).strip().lower().replace(" ", "_"): c for c in df.columns}
+    lat_candidates = ["latitude", "lat", "precinct_lat", "centroid_lat", "y"]
+    lon_candidates = ["longitude", "lon", "lng", "precinct_lon", "precinct_lng", "centroid_lon", "centroid_lng", "x"]
+    lat_col = next((lower[c] for c in lat_candidates if c in lower), None)
+    lon_col = next((lower[c] for c in lon_candidates if c in lower), None)
+    return lat_col, lon_col
+
+
+def _ai_add_heatmap_metrics(display_df: pd.DataFrame, candidate_party="Republican", title="") -> pd.DataFrame:
+    """Add explainable heat-map metrics used for UI mapping/ranking."""
+    if display_df is None or display_df.empty:
+        return pd.DataFrame()
+    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
+    work = display_df.copy()
+    for col in [
+        "Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Dem_%", "Rep_%", "Other_%",
+        "Avg_Age", "New_Registrations", "Mail_Applications_Approved", "Mail_Ballots_Returned",
+        "Mail_Ballots_Outstanding", "Mail_Return_%", "Outstanding_%", "Households", "Total_Households", "Doors", "Door_Count", "Household_Doors"
+    ]:
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
+        else:
+            work[col] = 0
+    metrics = work.apply(lambda r: _ai_canvassing_efficiency_metrics(r, candidate_party=candidate_party), axis=1)
+    work["Target_Voters"] = [m["target_voters"] for m in metrics]
+    work["Estimated_Doors"] = [m["doors"] for m in metrics]
+    work["Target_Per_Door"] = [m["target_per_door"] for m in metrics]
+    work["Canvass_Efficiency"] = [m["efficiency_score"] for m in metrics]
+    work["Turnout_Score"] = [m["turnout_score"] for m in metrics]
+    work["Door_Source"] = [m["door_source"] for m in metrics]
+    work["Area_Label"] = work.apply(lambda r: _ai_heat_map_label_from_row(r, fallback_title=title), axis=1)
+    work["Field_Priority"] = (
+        (pd.to_numeric(work["Target_Voters"], errors="coerce").fillna(0) * 0.45)
+        + (pd.to_numeric(work["Canvass_Efficiency"], errors="coerce").fillna(0) * 28.0)
+        + (pd.to_numeric(work["Turnout_Score"], errors="coerce").fillna(0) * 7.5)
+        + (pd.to_numeric(work["Mail_Ballots_Outstanding"], errors="coerce").fillna(0) * 0.12)
+    ).round(1)
+    return work
+
+
+def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
+    """Render the first Area Intelligence heat-map panel."""
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
+    heat_df = _ai_add_heatmap_metrics(display_df, candidate_party=candidate_party, title=title)
+    if heat_df.empty:
+        st.info("No heat-map data is available for this selection.")
+        return
+
+    metric_options = {
+        f"{party_label} %": party_pct_col,
+        "Field Priority": "Field_Priority",
+        "Canvass Efficiency": "Canvass_Efficiency",
+        "Target Voters": "Target_Voters",
+        "Target Voters / Door": "Target_Per_Door",
+        "Turnout Score": "Turnout_Score",
+        "Mail Return %": "Mail_Return_%",
+        "Outstanding Ballot %": "Outstanding_%",
+        "Total Voters": "Total_Voters",
+    }
+    metric_label = st.selectbox("Heat metric", list(metric_options.keys()), index=1, key="ai_heat_metric")
+    metric_col = metric_options[metric_label]
+    top_n = st.slider("Areas shown", min_value=10, max_value=75, value=30, step=5, key="ai_heat_top_n")
+
+    heat_df[metric_col] = pd.to_numeric(heat_df[metric_col], errors="coerce").fillna(0)
+    ranked = heat_df.sort_values(metric_col, ascending=False).head(int(top_n)).copy()
+    ranked["Rank"] = range(1, len(ranked) + 1)
+    ranked["Area_Label_Wrapped"] = ranked["Area_Label"].astype(str).str.slice(0, 60)
+
+    st.markdown(
+        '<div class="section-card"><div class="small-header">Area Heat Map</div>'
+        '<div class="tiny-muted">First heat-map layer for presentation review. It ranks the visible breakdown areas by the selected metric and is ready for future boundary/GeoJSON layering.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    lat_col, lon_col = _ai_find_lat_lon_columns(ranked)
+    if lat_col and lon_col:
+        geo_df = ranked.copy()
+        geo_df[lat_col] = pd.to_numeric(geo_df[lat_col], errors="coerce")
+        geo_df[lon_col] = pd.to_numeric(geo_df[lon_col], errors="coerce")
+        geo_df = geo_df.dropna(subset=[lat_col, lon_col])
+        if not geo_df.empty:
+            geo_df["Bubble_Size"] = (pd.to_numeric(geo_df[metric_col], errors="coerce").fillna(0).rank(pct=True) * 650) + 80
+            chart = alt.Chart(geo_df).mark_circle(opacity=0.72).encode(
+                longitude=alt.Longitude(f"{lon_col}:Q"),
+                latitude=alt.Latitude(f"{lat_col}:Q"),
+                size=alt.Size("Bubble_Size:Q", legend=None),
+                color=alt.Color(f"{metric_col}:Q", title=metric_label, scale=alt.Scale(scheme="redyellowgreen")),
+                tooltip=[
+                    alt.Tooltip("Area_Label:N", title="Area"),
+                    alt.Tooltip(f"{metric_col}:Q", title=metric_label, format=",.1f"),
+                    alt.Tooltip("Total_Voters:Q", title="Total Voters", format=","),
+                    alt.Tooltip("Target_Voters:Q", title=f"{party_label} Target Voters", format=",.0f"),
+                    alt.Tooltip("Target_Per_Door:Q", title="Target/Door", format=".2f"),
+                ],
+            ).project(type="mercator").properties(height=520)
+            st.altair_chart(chart, use_container_width=True)
+            st.caption("Geographic bubble heat map shown because latitude/longitude fields were found in the Area Intelligence summary.")
+        else:
+            st.caption("Latitude/longitude columns were found, but no valid coordinates were available for this selection.")
+    else:
+        st.caption("Boundary/coordinate data is not in the current Area Intelligence summary yet, so this first version shows a ranked heat-map layer. Add municipal/precinct GeoJSON or centroid columns later for a true geographic choropleth map.")
+
+    chart = alt.Chart(ranked).mark_rect(cornerRadius=4).encode(
+        y=alt.Y("Area_Label_Wrapped:N", sort="-x", title=None, axis=alt.Axis(labelLimit=360)),
+        x=alt.X("Rank:O", title="Priority Rank"),
+        color=alt.Color(f"{metric_col}:Q", title=metric_label, scale=alt.Scale(scheme="redyellowgreen")),
+        tooltip=[
+            alt.Tooltip("Rank:O", title="Rank"),
+            alt.Tooltip("Area_Label:N", title="Area"),
+            alt.Tooltip(f"{metric_col}:Q", title=metric_label, format=",.1f"),
+            alt.Tooltip("Total_Voters:Q", title="Total Voters", format=","),
+            alt.Tooltip("Target_Voters:Q", title=f"{party_label} Target Voters", format=",.0f"),
+            alt.Tooltip("Estimated_Doors:Q", title="Estimated Doors", format=",.0f"),
+            alt.Tooltip("Target_Per_Door:Q", title="Target/Door", format=".2f"),
+            alt.Tooltip("Turnout_Score:Q", title="Turnout Score", format=".1f"),
+        ],
+    ).properties(height=max(340, min(860, int(top_n) * 22)))
+    st.altair_chart(chart, use_container_width=True)
+
+    table_cols = [c for c in ["Area_Label", "Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"] if c in ranked.columns]
+    table_df = ranked[table_cols].copy()
+    table_df = table_df.rename(columns={
+        "Area_Label": "Area",
+        "Target_Voters": f"{party_label} Target Voters",
+        "Estimated_Doors": "Est. Doors",
+        "Target_Per_Door": "Target/Door",
+        "Canvass_Efficiency": "Canvass Efficiency",
+        "Field_Priority": "Field Priority",
+    })
+    st.markdown('<div class="section-card"><div class="small-header">Top Heat-Map Priorities</div><div class="tiny-muted">Use this as the bridge between analysis and field planning.</div></div>', unsafe_allow_html=True)
+    _ai_render_table(table_df, height=360, sticky_cols=["Area"], key="heatmap_priority_table")
 def _build_area_intelligence_canvassing_insights(display_df, candidate_party="Republican"):
     """Build short PDF bullets explaining canvassing efficiency in plain English."""
     party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
@@ -5667,7 +5814,7 @@ def render_area_intelligence_workspace():
         st.markdown("<ul>" + "".join(f"<li>{note}</li>" for note in strategy_notes[:4]) + "</ul>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    chart_tab, breakdown_tab, pdf_tab, debug_tab = st.tabs(["Charts", "Area Breakdown", "PDF Report", "Debug"])
+    chart_tab, heatmap_tab, breakdown_tab, pdf_tab, debug_tab = st.tabs(["Charts", "Heat Map", "Area Breakdown", "PDF Report", "Debug"])
 
     with chart_tab:
         chart_col1, chart_col2 = st.columns(2, gap="medium")
@@ -5771,6 +5918,9 @@ def render_area_intelligence_workspace():
     display_df["Mail_Return_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
+
+    with heatmap_tab:
+        _render_area_intelligence_heat_map(display_df, candidate_party=st.session_state.get("ai_pdf_candidate_party", "Republican"), title=title)
 
     with pdf_tab:
         st.markdown('<div class="section-card"><div class="small-header">PDF Report Generator</div><div class="tiny-muted">Builds a branded client-ready PDF for the selected Area Intelligence profile.</div></div>', unsafe_allow_html=True)
