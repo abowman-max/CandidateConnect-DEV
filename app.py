@@ -5173,6 +5173,42 @@ def _ai_boundary_color_scheme(metric_label: str):
     return "redyellowgreen"
 
 
+def _ai_collect_first_coordinate(geometry):
+    """Return the first coordinate pair found in a GeoJSON geometry for quick CRS checks."""
+    if not isinstance(geometry, dict):
+        return None
+    coords = geometry.get("coordinates")
+    def walk(obj):
+        if isinstance(obj, (list, tuple)):
+            if len(obj) >= 2 and all(isinstance(x, (int, float)) for x in obj[:2]):
+                return obj[:2]
+            for item in obj:
+                hit = walk(item)
+                if hit is not None:
+                    return hit
+        return None
+    return walk(coords)
+
+
+def _ai_geojson_likely_lonlat(geojson_data):
+    """Vega/Altair expects GeoJSON coordinates in lon/lat. Warn when a layer appears projected."""
+    samples = []
+    for feat in (geojson_data or {}).get("features", [])[:25]:
+        xy = _ai_collect_first_coordinate(feat.get("geometry")) if isinstance(feat, dict) else None
+        if xy:
+            samples.append(xy)
+    if not samples:
+        return True
+    good = 0
+    for x, y in samples:
+        try:
+            if -180 <= float(x) <= 180 and -90 <= float(y) <= 90:
+                good += 1
+        except Exception:
+            pass
+    return good >= max(1, int(len(samples) * 0.75))
+
+
 def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican"):
     """Render a true GeoJSON choropleth when local /geo boundary files are available."""
     available_layers = _ai_geo_available_layers()
@@ -5180,11 +5216,19 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
         return False
 
+    preferred_defaults = [
+        ("Municipality Boundaries", "Municipality"),
+        ("County Boundaries", "County"),
+        ("School District Boundaries", "School District"),
+        ("State House Boundaries", "STH"),
+        ("State Senate Boundaries", "STS"),
+        ("Congressional Boundaries", "USC"),
+    ]
     default_idx = 0
-    if "Municipality Boundaries" in available_layers and "Municipality" in heat_df.columns:
-        default_idx = available_layers.index("Municipality Boundaries")
-    elif "County Boundaries" in available_layers and "County" in heat_df.columns:
-        default_idx = available_layers.index("County Boundaries")
+    for layer, data_col in preferred_defaults:
+        if layer in available_layers and data_col in heat_df.columns and heat_df[data_col].astype(str).str.strip().ne("").any():
+            default_idx = available_layers.index(layer)
+            break
 
     layer_label = st.selectbox("Boundary layer", available_layers, index=default_idx, key="ai_geo_boundary_layer")
     geo = _ai_load_geojson_layer(layer_label)
@@ -5216,36 +5260,61 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     keep_label = "Area_Label" if "Area_Label" in map_df.columns else data_col
     agg_cols[keep_label] = "first"
     lookup_df = map_df.groupby("Geo_Key", as_index=False).agg(agg_cols).rename(columns={keep_label: "Area_Label"})
-    lookup_df[metric_col] = pd.to_numeric(lookup_df[metric_col], errors="coerce").fillna(0)
+    lookup_df["__metric_value"] = pd.to_numeric(lookup_df[metric_col], errors="coerce").fillna(0)
+    lookup_df["__total_voters"] = pd.to_numeric(lookup_df.get("Total_Voters", 0), errors="coerce").fillna(0)
+    lookup_df["__target_voters"] = pd.to_numeric(lookup_df.get("Target_Voters", 0), errors="coerce").fillna(0)
+    lookup_df["__target_per_door"] = pd.to_numeric(lookup_df.get("Target_Per_Door", 0), errors="coerce").fillna(0)
 
     prepped_geo = _ai_prepare_geojson_for_join(geo, geo_prop)
+    lookup_keys = set(lookup_df["Geo_Key"].astype(str))
+    matched_features = []
+    all_geo_keys = set()
+    for feat in prepped_geo.get("features", []):
+        props = feat.get("properties") or {}
+        key = str(props.get("__cc_join_key", ""))
+        if key:
+            all_geo_keys.add(key)
+        if key in lookup_keys:
+            matched_features.append(feat)
+
+    matched_count = len({str((feat.get("properties") or {}).get("__cc_join_key", "")) for feat in matched_features if feat.get("properties")})
+    st.caption(f"Boundary heat map using {layer_label} joined on Area Intelligence `{data_col}` to GeoJSON `{geo_prop}`. Matched {matched_count:,} of {len(lookup_df):,} current area row(s).")
+
+    if matched_count == 0 or not matched_features:
+        st.warning("No boundaries matched. Try a different Boundary name field, or we may need to add a custom crosswalk for this GeoJSON layer.")
+        with st.expander("Map join debug", expanded=False):
+            st.write("Sample Area Intelligence keys:", sorted(lookup_keys)[:8])
+            st.write("Sample GeoJSON keys:", sorted(all_geo_keys)[:8])
+            st.write("Available GeoJSON fields:", prop_names)
+        return False
+
+    if not _ai_geojson_likely_lonlat({"features": matched_features}):
+        st.warning("This GeoJSON appears to use projected coordinates instead of longitude/latitude. Convert/export it as WGS84 / EPSG:4326 for web maps.")
+        return False
+
+    matched_geo = {k: v for k, v in prepped_geo.items() if k != "features"}
+    matched_geo["features"] = matched_features
+
     scheme = _ai_boundary_color_scheme(metric_label)
-    chart = alt.Chart(alt.Data(values=prepped_geo["features"])).mark_geoshape(
-        stroke="#ffffff", strokeWidth=0.45
+    chart = alt.Chart(alt.Data(values=matched_geo["features"])).mark_geoshape(
+        stroke="#24303f", strokeWidth=0.55
     ).encode(
-        color=alt.Color(f"{metric_col}:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
+        color=alt.Color("__metric_value:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
         tooltip=[
             alt.Tooltip("properties.__cc_label:N", title="Boundary"),
             alt.Tooltip("Area_Label:N", title="Matched Area"),
-            alt.Tooltip(f"{metric_col}:Q", title=metric_label, format=",.1f"),
-            alt.Tooltip("Total_Voters:Q", title="Total Voters", format=","),
-            alt.Tooltip("Target_Voters:Q", title="Target Voters", format=",.0f"),
-            alt.Tooltip("Target_Per_Door:Q", title="Target/Door", format=".2f"),
+            alt.Tooltip("__metric_value:Q", title=metric_label, format=",.1f"),
+            alt.Tooltip("__total_voters:Q", title="Total Voters", format=","),
+            alt.Tooltip("__target_voters:Q", title="Target Voters", format=",.0f"),
+            alt.Tooltip("__target_per_door:Q", title="Target/Door", format=".2f"),
         ],
     ).transform_lookup(
         lookup="properties.__cc_join_key",
-        from_=alt.LookupData(lookup_df, "Geo_Key", ["Area_Label", metric_col, "Total_Voters", "Target_Voters", "Target_Per_Door"]),
-    ).project(type="mercator").properties(height=600)
+        from_=alt.LookupData(lookup_df, "Geo_Key", ["Area_Label", "__metric_value", "__total_voters", "__target_voters", "__target_per_door"]),
+    ).project(type="mercator").properties(height=620)
 
     st.altair_chart(chart, use_container_width=True)
-    matched = set(lookup_df["Geo_Key"].astype(str))
-    geo_keys = {_ai_geo_normalize_key((feat.get("properties") or {}).get(geo_prop, "")) for feat in prepped_geo.get("features", [])}
-    matched_count = len(matched.intersection(geo_keys))
-    st.caption(f"Boundary heat map using {layer_label} joined on Area Intelligence `{data_col}` to GeoJSON `{geo_prop}`. Matched {matched_count:,} of {len(matched):,} current area row(s).")
-    if matched_count == 0:
-        st.warning("No boundaries matched. Try a different Boundary name field, or we may need to inspect the GeoJSON property names and add a custom crosswalk.")
     return True
-
 def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
     """Render the first Area Intelligence heat-map panel."""
     party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
