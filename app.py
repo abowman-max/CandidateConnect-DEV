@@ -4377,6 +4377,38 @@ def _ai_pdf_wrapped_lines(c, text, max_width, font="Helvetica", size=9):
     return lines or [""]
 
 
+def _ai_pdf_draw_aligned_text(c, text, x, y, w, size=7.2, bold=False, color_hex="#24303f", align="LEFT", pad=4):
+    """Draw clipped PDF table text with left, center, or right alignment."""
+    font = "Helvetica-Bold" if bold else "Helvetica"
+    c.setFont(font, size)
+    c.setFillColor(colors.HexColor(color_hex or "#24303f"))
+    text = normalize_export_text(text)
+    max_width = max(4, w - (pad * 2))
+    original = text
+    while text and c.stringWidth(text, font, size) > max_width:
+        text = text[:-1]
+    if text != original and len(text) > 1:
+        text = text[:-1] + "…"
+    text_w = c.stringWidth(text, font, size)
+    if align == "CENTER":
+        draw_x = x + (w - text_w) / 2
+    elif align == "RIGHT":
+        draw_x = x + w - pad - text_w
+    else:
+        draw_x = x + pad
+    c.drawString(draw_x, y, text)
+
+
+def _ai_pdf_column_alignment(col_name):
+    """Professional table alignment: text left, totals right, percentages centered."""
+    name = str(col_name).strip().lower()
+    if name.endswith("_%") or "percent" in name or name in {"dem_%", "rep_%", "other_%", "mail_return_%", "outstanding_%", "% of voters", "% of approved"}:
+        return "CENTER"
+    if name in {"total_voters", "voters", "households", "count", "total", "democratic", "republican", "other", "male", "female", "unknown gender"}:
+        return "RIGHT"
+    return "LEFT"
+
+
 def _ai_pdf_table(c, df, x, y, col_widths, row_h=18, max_rows=12, font_size=7.2):
     if df is None or df.empty:
         _ai_pdf_text(c, "No table data available.", x, y, size=9)
@@ -4385,28 +4417,45 @@ def _ai_pdf_table(c, df, x, y, col_widths, row_h=18, max_rows=12, font_size=7.2)
     cols = list(work.columns)[:len(col_widths)]
     work = work[cols]
     table_w = sum(col_widths)
-    c.setFillColor(colors.HexColor("#f1f5f9"))
+
+    # Header
+    c.setFillColor(colors.HexColor("#eef2f7"))
     c.rect(x, y - row_h, table_w, row_h, fill=1, stroke=0)
-    c.setStrokeColor(colors.HexColor("#d8dee8"))
-    c.setLineWidth(0.4)
+    c.setStrokeColor(colors.HexColor("#cfd8e3"))
+    c.setLineWidth(0.35)
     cur_x = x
     for i, col in enumerate(cols):
         c.rect(cur_x, y - row_h, col_widths[i], row_h, fill=0, stroke=1)
-        _ai_pdf_text(c, str(col), cur_x + 3, y - 12, size=font_size, bold=True, max_width=col_widths[i] - 6)
+        _ai_pdf_draw_aligned_text(c, str(col), cur_x, y - 12, col_widths[i], size=font_size, bold=True, color_hex="#334155", align="CENTER")
         cur_x += col_widths[i]
     y -= row_h
-    for _, row in work.iterrows():
+
+    # Body with light row striping. Text columns stay left; totals are right; percentages center.
+    for row_idx, (_, row) in enumerate(work.iterrows()):
         cur_x = x
+        fill_hex = "#ffffff" if row_idx % 2 == 0 else "#f8fafc"
+        c.setFillColor(colors.HexColor(fill_hex))
+        c.rect(x, y - row_h, table_w, row_h, fill=1, stroke=0)
         for i, col in enumerate(cols):
+            c.setStrokeColor(colors.HexColor("#d8dee8"))
+            c.setLineWidth(0.3)
             c.rect(cur_x, y - row_h, col_widths[i], row_h, fill=0, stroke=1)
-            _ai_pdf_text(c, str(row[col]), cur_x + 3, y - 12, size=font_size, max_width=col_widths[i] - 6)
+            _ai_pdf_draw_aligned_text(
+                c,
+                str(row[col]),
+                cur_x,
+                y - 12,
+                col_widths[i],
+                size=font_size,
+                color_hex="#24303f",
+                align=_ai_pdf_column_alignment(col),
+            )
             cur_x += col_widths[i]
         y -= row_h
     if len(df) > max_rows:
         _ai_pdf_text(c, f"Showing top {max_rows:,} rows of {len(df):,} total breakdown rows.", x, y - 10, size=7.5, color_hex="#64748b")
         y -= 14
     return y
-
 
 def _ai_pdf_card(c, label, value, note, x, y, w, h=48):
     c.setFillColor(colors.white)
