@@ -4371,13 +4371,24 @@ def render_area_intelligence_workspace():
     mail_apps_total = _area_num(row, "Mail_Applications_Total", _area_num(row, "Mail_Applications", 0))
     mail_apps_approved = _area_num(row, "Mail_Applications_Approved", _area_num(row, "Mail_Applications", 0))
     mail_apps_declined = _area_num(row, "Mail_Applications_Declined", 0)
-    # Backward-compatible name used by existing strategy logic: approved applications.
-    mail_apps = mail_apps_approved
     mail_sent = _area_num(row, "Mail_Ballots_Sent", 0)
     mail_returned = _area_num(row, "Mail_Ballots_Returned", 0)
     if mail_returned == 0:
         mail_returned = _area_num(row, "Mail_Voters", 0)
     mail_outstanding = _area_num(row, "Mail_Ballots_Outstanding", max(mail_apps_approved - mail_returned, 0))
+
+    # Safety repair for older precinct_summary.csv files or source rows where application status
+    # is missing but sent/outstanding/returned counts prove an approved application exists.
+    inferred_approved = max(mail_apps_approved, mail_outstanding + mail_returned, mail_sent, mail_returned)
+    if inferred_approved > mail_apps_approved:
+        mail_apps_approved = inferred_approved
+    inferred_total = mail_apps_approved + mail_apps_declined
+    if inferred_total > mail_apps_total:
+        mail_apps_total = inferred_total
+    mail_outstanding = max(mail_apps_approved - mail_returned, 0)
+
+    # Backward-compatible name used by existing strategy logic: approved applications.
+    mail_apps = mail_apps_approved
     geo_issues = _area_num(row, "Geo_Issue_Rows", 0)
     precinct_count = int(_area_num(row, "Precinct_Count", len(profile_df)))
 
