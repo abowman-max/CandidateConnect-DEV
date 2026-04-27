@@ -4544,7 +4544,7 @@ def _ai_pdf_filter_summary_box(c, filter_lines, x, y, w, title="Applied Universe
 
 
 def _ai_pdf_bar_chart(c, title, rows, x, y, w, h=92, color_hex="#153d73"):
-    """Draw a compact horizontal bar chart. rows = [(label, value, note), ...]."""
+    """Draw a compact horizontal bar chart with all labels/values clipped inside the card."""
     clean_rows = []
     for item in rows:
         if len(item) == 2:
@@ -4568,23 +4568,31 @@ def _ai_pdf_bar_chart(c, title, rows, x, y, w, h=92, color_hex="#153d73"):
         return y - h
 
     max_val = max([v for _, v, _ in clean_rows] + [1])
-    bar_x = x + 72
-    bar_w = w - 132
+
+    # Fixed internal columns keep values and percentages inside the rounded container.
+    label_x = x + 10
+    label_w = 62
+    pct_w = 35
+    value_w = 55
+    pct_x = x + w - 10 - pct_w
+    value_x = pct_x - 5 - value_w
+    bar_x = label_x + label_w + 8
+    bar_w = max(28, value_x - bar_x - 8)
+
     yy = y - 31
     row_h = 17
     for label, val, note in clean_rows[:4]:
-        _ai_pdf_text(c, label, x + 10, yy, size=7.2, bold=True, color_hex="#334155", max_width=57)
+        _ai_pdf_draw_aligned_text(c, label, label_x, yy - 2, label_w, size=7.0, bold=True, color_hex="#334155", align="LEFT", pad=0)
         c.setFillColor(colors.HexColor("#edf2f7"))
         c.roundRect(bar_x, yy - 3, bar_w, 6, 3, fill=1, stroke=0)
         if max_val > 0 and val > 0:
             c.setFillColor(colors.HexColor(color_hex))
-            c.roundRect(bar_x, yy - 3, max(2, bar_w * (val / max_val)), 6, 3, fill=1, stroke=0)
-        _ai_pdf_draw_aligned_text(c, _ai_pdf_num(val), bar_x + bar_w + 6, yy - 2, 46, size=7.1, bold=True, color_hex="#153d73", align="RIGHT")
+            c.roundRect(bar_x, yy - 3, max(1.5, bar_w * (val / max_val)), 6, 3, fill=1, stroke=0)
+        _ai_pdf_draw_aligned_text(c, _ai_pdf_num(val), value_x, yy - 2, value_w, size=7.0, bold=True, color_hex="#153d73", align="RIGHT", pad=0)
         if note:
-            _ai_pdf_text(c, note, bar_x + bar_w + 55, yy - 2, size=6.4, color_hex="#64748b", max_width=42)
+            _ai_pdf_draw_aligned_text(c, note, pct_x, yy - 2, pct_w, size=6.2, color_hex="#64748b", align="RIGHT", pad=0)
         yy -= row_h
     return y - h
-
 
 def _ai_build_area_filter_lines(area_level, title, selected_county="", selected_muni="", selected_precinct="", selected_district="", breakdown_mode=""):
     """Build Area Intelligence-specific filter lines without depending on the main voter filter state."""
@@ -4776,7 +4784,7 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
     col_count = min(len(breakdown.columns), 8)
     usable_w = page_w - margin * 2
     col_widths = [usable_w / col_count] * col_count if col_count else [usable_w]
-    _ai_pdf_table(c, breakdown.iloc[:, :col_count], margin, y, col_widths, row_h=16, max_rows=30, font_size=6.8)
+    _ai_pdf_table(c, breakdown.iloc[:, :col_count], margin, y, col_widths, row_h=16, max_rows=18, font_size=6.8)
 
     _ai_pdf_footer(c, page_w, margin, page_num)
     c.save()
