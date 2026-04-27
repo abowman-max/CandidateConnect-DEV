@@ -15,6 +15,7 @@ import boto3
 
 from io import BytesIO
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
@@ -4632,7 +4633,7 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
         if page_label:
             subtitle = f"{subtitle} • {page_label}"
         _ai_pdf_text(c, subtitle, margin + 124, y - 18, size=9.5, bold=True, color_hex="#334155", max_width=355)
-        _ai_pdf_text(c, datetime.now().strftime("%m/%d/%Y %I:%M %p"), page_w - 150, y - 4, size=8, color_hex="#64748b")
+        _ai_pdf_text(c, datetime.now(ZoneInfo("America/New_York")).strftime("%m/%d/%Y %I:%M %p"), page_w - 150, y - 4, size=8, color_hex="#64748b")
         c.setStrokeColor(colors.HexColor("#d8dee8"))
         c.line(margin, y - 34, page_w - margin, y - 34)
         return y - 58
