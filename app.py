@@ -4326,6 +4326,215 @@ def _build_strategy_summary(total, dem, rep, other, new_reg, mail_apps, mail_ret
 
     return badges, notes, return_rate, outstanding_rate, app_pct
 
+def _ai_pdf_num(value, decimals=0):
+    try:
+        v = float(value or 0)
+        if decimals:
+            return f"{v:,.{decimals}f}"
+        return f"{int(round(v)):,}"
+    except Exception:
+        return "0"
+
+
+def _ai_pdf_pct(n, d):
+    try:
+        d = float(d or 0)
+        n = float(n or 0)
+        if d <= 0:
+            return "—"
+        return f"{(n / d) * 100:.1f}%"
+    except Exception:
+        return "—"
+
+
+def _ai_pdf_text(c, text, x, y, size=9, bold=False, color_hex=None, max_width=None):
+    font = "Helvetica-Bold" if bold else "Helvetica"
+    c.setFont(font, size)
+    c.setFillColor(colors.HexColor(color_hex or "#24303f"))
+    text = normalize_export_text(text)
+    if max_width:
+        original = text
+        while text and c.stringWidth(text, font, size) > max_width:
+            text = text[:-1]
+        if text != original and len(text) > 1:
+            text = text[:-1] + "…"
+    c.drawString(x, y, text)
+
+
+def _ai_pdf_wrapped_lines(c, text, max_width, font="Helvetica", size=9):
+    words = normalize_export_text(text).split()
+    lines, current = [], ""
+    for word in words:
+        test = (current + " " + word).strip()
+        if c.stringWidth(test, font, size) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def _ai_pdf_table(c, df, x, y, col_widths, row_h=18, max_rows=12, font_size=7.2):
+    if df is None or df.empty:
+        _ai_pdf_text(c, "No table data available.", x, y, size=9)
+        return y - 18
+    work = _ai_clean_display_df(df).head(max_rows).copy()
+    cols = list(work.columns)[:len(col_widths)]
+    work = work[cols]
+    table_w = sum(col_widths)
+    c.setFillColor(colors.HexColor("#f1f5f9"))
+    c.rect(x, y - row_h, table_w, row_h, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#d8dee8"))
+    c.setLineWidth(0.4)
+    cur_x = x
+    for i, col in enumerate(cols):
+        c.rect(cur_x, y - row_h, col_widths[i], row_h, fill=0, stroke=1)
+        _ai_pdf_text(c, str(col), cur_x + 3, y - 12, size=font_size, bold=True, max_width=col_widths[i] - 6)
+        cur_x += col_widths[i]
+    y -= row_h
+    for _, row in work.iterrows():
+        cur_x = x
+        for i, col in enumerate(cols):
+            c.rect(cur_x, y - row_h, col_widths[i], row_h, fill=0, stroke=1)
+            _ai_pdf_text(c, str(row[col]), cur_x + 3, y - 12, size=font_size, max_width=col_widths[i] - 6)
+            cur_x += col_widths[i]
+        y -= row_h
+    if len(df) > max_rows:
+        _ai_pdf_text(c, f"Showing top {max_rows:,} rows of {len(df):,} total breakdown rows.", x, y - 10, size=7.5, color_hex="#64748b")
+        y -= 14
+    return y
+
+
+def _ai_pdf_card(c, label, value, note, x, y, w, h=48):
+    c.setFillColor(colors.white)
+    c.setStrokeColor(colors.HexColor("#d8dee8"))
+    c.roundRect(x, y - h, w, h, 8, fill=1, stroke=1)
+    _ai_pdf_text(c, label, x + 8, y - 16, size=7.8, bold=True, color_hex="#64748b", max_width=w - 16)
+    _ai_pdf_text(c, value, x + 8, y - 34, size=14, bold=True, color_hex="#153d73", max_width=w - 16)
+    if note:
+        _ai_pdf_text(c, note, x + 8, y - 44, size=6.8, color_hex="#64748b", max_width=w - 16)
+
+
+def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals, mail_df, strategy_badges, strategy_notes, display_df):
+    """Build a client-ready Area Intelligence profile PDF from the selected Area Intelligence profile."""
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    page_w, page_h = letter
+    margin = 38
+
+    def header():
+        y = page_h - 36
+        try:
+            if CC_LOGO.exists():
+                c.drawImage(ImageReader(str(CC_LOGO)), margin, y - 24, width=112, height=28, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+        _ai_pdf_text(c, "Area Intelligence Report", margin + 132, y - 2, size=16, bold=True, color_hex="#153d73")
+        _ai_pdf_text(c, normalize_export_text(title), margin + 132, y - 18, size=9.5, bold=True, color_hex="#334155", max_width=330)
+        _ai_pdf_text(c, datetime.now().strftime("%m/%d/%Y %I:%M %p"), page_w - 150, y - 4, size=8, color_hex="#64748b")
+        c.setStrokeColor(colors.HexColor("#d8dee8"))
+        c.line(margin, y - 34, page_w - margin, y - 34)
+        return y - 58
+
+    y = header()
+
+    total = totals.get("total", 0)
+    dem = totals.get("dem", 0)
+    rep = totals.get("rep", 0)
+    other = totals.get("other", 0)
+    male = totals.get("male", 0)
+    female = totals.get("female", 0)
+    unknown_gender = totals.get("unknown_gender", 0)
+    avg_age = totals.get("avg_age", 0)
+    new_reg = totals.get("new_reg", 0)
+    mail_apps_total = totals.get("mail_apps_total", 0)
+    mail_apps_approved = totals.get("mail_apps_approved", 0)
+    mail_apps_declined = totals.get("mail_apps_declined", 0)
+    mail_sent = totals.get("mail_sent", 0)
+    mail_returned = totals.get("mail_returned", 0)
+    mail_outstanding = totals.get("mail_outstanding", 0)
+
+    _ai_pdf_text(c, f"{area_level} Profile", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, f"{int(precinct_count):,} precinct row(s) included", margin, y - 14, size=8, color_hex="#64748b")
+    y -= 30
+
+    card_w = (page_w - margin * 2 - 24) / 4
+    cards = [
+        ("Total Voters", _ai_pdf_num(total), "profile universe"),
+        ("Democratic", _ai_pdf_num(dem), _ai_pdf_pct(dem, total)),
+        ("Republican", _ai_pdf_num(rep), _ai_pdf_pct(rep, total)),
+        ("Other / Unaffiliated", _ai_pdf_num(other), _ai_pdf_pct(other, total)),
+        ("Average Age", f"{float(avg_age or 0):.1f}" if avg_age else "—", "weighted"),
+        ("New Registrations", _ai_pdf_num(new_reg), _ai_pdf_pct(new_reg, total)),
+        ("Male", _ai_pdf_num(male), _ai_pdf_pct(male, total)),
+        ("Female / Unknown", f"{_ai_pdf_num(female)} / {_ai_pdf_num(unknown_gender)}", "gender split"),
+    ]
+    for idx, card in enumerate(cards):
+        row_i = idx // 4
+        col_i = idx % 4
+        _ai_pdf_card(c, card[0], card[1], card[2], margin + col_i * (card_w + 8), y - row_i * 56, card_w)
+    y -= 124
+
+    _ai_pdf_text(c, "Mail Program", margin, y, size=12, bold=True, color_hex="#142033")
+    y -= 12
+    mail_cols = [130, 78, 82, 92]
+    y = _ai_pdf_table(c, mail_df, margin, y, mail_cols, row_h=17, max_rows=10, font_size=7.6)
+
+    _ai_pdf_card(c, "Outstanding Ballots", _ai_pdf_num(mail_outstanding), _ai_pdf_pct(mail_outstanding, mail_apps_approved) + " of approved", page_w - margin - 156, y + 114, 156, 48)
+    _ai_pdf_card(c, "Return Rate", _ai_pdf_pct(mail_returned, mail_apps_approved), "Returned / Approved", page_w - margin - 156, y + 58, 156, 48)
+
+    y -= 10
+    _ai_pdf_text(c, "Strategy Summary", margin, y, size=12, bold=True, color_hex="#142033")
+    y -= 18
+    badge_x = margin
+    for text, tone in strategy_badges[:6]:
+        badge_w = min(190, max(72, c.stringWidth(text, "Helvetica-Bold", 7.5) + 18))
+        if badge_x + badge_w > page_w - margin:
+            badge_x = margin
+            y -= 20
+        tone_colors = {
+            "good": ("#e8f5e9", "#1b5e20"),
+            "watch": ("#fff8e1", "#8a5a00"),
+            "priority": ("#ffebee", "#b71c1c"),
+            "info": ("#e3f2fd", "#0d47a1"),
+            "neutral": ("#f5f5f5", "#374151"),
+        }
+        bg, fg = tone_colors.get(tone, tone_colors["neutral"])
+        c.setFillColor(colors.HexColor(bg))
+        c.roundRect(badge_x, y - 12, badge_w, 15, 7, fill=1, stroke=0)
+        _ai_pdf_text(c, text, badge_x + 8, y - 8.5, size=7.5, bold=True, color_hex=fg, max_width=badge_w - 14)
+        badge_x += badge_w + 6
+    y -= 22
+    for note in strategy_notes[:4]:
+        lines = _ai_pdf_wrapped_lines(c, note, page_w - margin * 2 - 12, size=8.2)
+        for line in lines[:2]:
+            _ai_pdf_text(c, "• " + line, margin + 6, y, size=8.2, color_hex="#334155")
+            y -= 12
+
+    y -= 6
+    if y < 210:
+        c.showPage()
+        y = header()
+    _ai_pdf_text(c, "Area Breakdown", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, "Top rows sorted by Total Voters.", margin, y - 13, size=7.8, color_hex="#64748b")
+    y -= 22
+    preferred_cols = [col for col in ["USC", "STS", "STH", "School District", "County", "Municipality", "Precinct", "Total_Voters", "Dem_%", "Rep_%", "Mail_Return_%", "Outstanding_%"] if col in display_df.columns]
+    breakdown = display_df[preferred_cols].copy() if preferred_cols else display_df.copy()
+    col_count = min(len(breakdown.columns), 8)
+    usable_w = page_w - margin * 2
+    col_widths = [usable_w / col_count] * col_count if col_count else [usable_w]
+    _ai_pdf_table(c, breakdown.iloc[:, :col_count], margin, y, col_widths, row_h=16, max_rows=18, font_size=6.8)
+
+    c.setFont("Helvetica", 7)
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.drawRightString(page_w - margin, 24, "Candidate Connect • Area Intelligence")
+    c.save()
+    return buffer.getvalue()
+
+
 
 
 # Area Intelligence table renderer: centered values, comma formatting, sticky headers/label columns.
@@ -4637,7 +4846,7 @@ def render_area_intelligence_workspace():
         st.markdown("<ul>" + "".join(f"<li>{note}</li>" for note in strategy_notes[:4]) + "</ul>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    chart_tab, breakdown_tab, debug_tab = st.tabs(["Charts", "Area Breakdown", "Debug"])
+    chart_tab, breakdown_tab, pdf_tab, debug_tab = st.tabs(["Charts", "Area Breakdown", "PDF Report", "Debug"])
 
     with chart_tab:
         chart_col1, chart_col2 = st.columns(2, gap="medium")
@@ -4740,6 +4949,49 @@ def render_area_intelligence_workspace():
     display_df["Mail_Return_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
+
+    with pdf_tab:
+        st.markdown('<div class="section-card"><div class="small-header">PDF Report Generator</div><div class="tiny-muted">Builds a branded client-ready PDF for the selected Area Intelligence profile.</div></div>', unsafe_allow_html=True)
+        report_name = sanitize_filename_part(f"Area_Intelligence_{area_level}_{title}")
+        pdf_totals = {
+            "total": total,
+            "dem": dem,
+            "rep": rep,
+            "other": other,
+            "male": male,
+            "female": female,
+            "unknown_gender": unknown_gender,
+            "avg_age": avg_age,
+            "new_reg": new_reg,
+            "mail_apps_total": mail_apps_total,
+            "mail_apps_approved": mail_apps_approved,
+            "mail_apps_declined": mail_apps_declined,
+            "mail_sent": mail_sent,
+            "mail_returned": mail_returned,
+            "mail_outstanding": mail_outstanding,
+            "geo_issues": geo_issues,
+        }
+        if st.button("Prepare Area Intelligence PDF", use_container_width=True, key="prepare_area_intelligence_pdf"):
+            with st.spinner("Building Area Intelligence PDF..."):
+                st.session_state["area_intelligence_pdf_bytes"] = build_area_intelligence_pdf_bytes(
+                    area_level=area_level,
+                    title=title,
+                    precinct_count=precinct_count,
+                    totals=pdf_totals,
+                    mail_df=mail_df,
+                    strategy_badges=badges,
+                    strategy_notes=strategy_notes,
+                    display_df=display_df,
+                )
+                st.session_state["area_intelligence_pdf_name"] = f"{report_name}.pdf"
+        if st.session_state.get("area_intelligence_pdf_bytes"):
+            st.download_button(
+                "Download Area Intelligence PDF",
+                data=st.session_state["area_intelligence_pdf_bytes"],
+                file_name=st.session_state.get("area_intelligence_pdf_name", f"{report_name}.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
     with breakdown_tab:
         st.markdown('<div class="section-card"><div class="small-header">Area Breakdown</div><div class="tiny-muted">Summarized areas included in this profile.</div></div>', unsafe_allow_html=True)
