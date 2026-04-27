@@ -4160,7 +4160,7 @@ def _aggregate_area_profile(profile_df: pd.DataFrame) -> dict:
     numeric_cols = [
         "Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters",
         "Male_Voters", "Female_Voters", "Unknown_Gender",
-        "New_Registrations", "Mail_Voters"
+        "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters"
     ]
     out = {}
     work = profile_df.copy()
@@ -4181,6 +4181,74 @@ def _aggregate_area_profile(profile_df: pd.DataFrame) -> dict:
 
     out["Precinct_Count"] = int(len(work))
     return out
+
+
+def _strategy_badge(text: str, tone: str = "neutral") -> str:
+    colors = {
+        "good": ("#e8f5e9", "#1b5e20"),
+        "watch": ("#fff8e1", "#8a5a00"),
+        "priority": ("#ffebee", "#b71c1c"),
+        "info": ("#e3f2fd", "#0d47a1"),
+        "neutral": ("#f5f5f5", "#374151"),
+    }
+    bg, fg = colors.get(tone, colors["neutral"])
+    return (
+        f'<span style="display:inline-block; padding:6px 10px; margin:3px 5px 3px 0; '
+        f'border-radius:999px; background:{bg}; color:{fg}; font-size:12px; font-weight:800;">{text}</span>'
+    )
+
+
+def _build_strategy_summary(total, dem, rep, other, new_reg, mail_apps, mail_returned, mail_outstanding, geo_issues):
+    total = float(total or 0)
+    dem_pct = 0 if total <= 0 else dem / total * 100
+    rep_pct = 0 if total <= 0 else rep / total * 100
+    new_reg_pct = 0 if total <= 0 else new_reg / total * 100
+    app_pct = 0 if total <= 0 else mail_apps / total * 100
+    return_rate = 0 if mail_apps <= 0 else mail_returned / mail_apps * 100
+    outstanding_rate = 0 if mail_apps <= 0 else mail_outstanding / mail_apps * 100
+
+    badges = []
+    notes = []
+
+    if rep_pct >= 55:
+        badges.append(("Republican Advantage Area", "good"))
+        notes.append("GOP-friendly geography. Strong area for base turnout and mail ballot chase.")
+    elif dem_pct >= 55:
+        badges.append(("Democratic Advantage Area", "priority"))
+        notes.append("Democratic-leaning geography. Use for opposition awareness and selective persuasion.")
+    elif abs(rep_pct - dem_pct) <= 8:
+        badges.append(("Persuasion Opportunity", "watch"))
+        notes.append("Party balance is close enough to justify persuasion and turnout monitoring.")
+    else:
+        badges.append(("Mixed Performance Area", "info"))
+        notes.append("Not heavily one-sided. Review party mix and turnout behavior before assigning resources.")
+
+    if mail_apps > 0:
+        if return_rate < 35:
+            badges.append(("Low Mail Return - Chase Priority", "priority"))
+            notes.append("Mail ballot requests exist, but return rate is low. Prioritize chase calls, texts, and door contact.")
+        elif return_rate < 65:
+            badges.append(("Medium Mail Return - Watch", "watch"))
+            notes.append("Mail return is moving but not complete. Keep this area on the chase list.")
+        else:
+            badges.append(("High Mail Return", "good"))
+            notes.append("Many requested ballots have already returned. Reduce chase pressure on returned voters.")
+    else:
+        badges.append(("Low Mail Application Universe", "info"))
+        notes.append("Few or no mail applications are currently visible. Consider application-growth messaging if strategically useful.")
+
+    if mail_outstanding > 0:
+        badges.append((f"{int(mail_outstanding):,} Outstanding Ballots", "priority" if outstanding_rate >= 40 else "watch"))
+
+    if new_reg_pct >= 2:
+        badges.append(("New Registration Watch", "watch"))
+        notes.append("New registrations are elevated. Check whether they need education, ID, or first-time voter messaging.")
+
+    if geo_issues > 0:
+        badges.append(("Geography Update Watch", "info"))
+        notes.append("Some rows required geography repair or reflect newer election geography than the base voter file.")
+
+    return badges, notes, return_rate, outstanding_rate, app_pct
 
 
 def render_area_intelligence_workspace():
@@ -4271,7 +4339,14 @@ def render_area_intelligence_workspace():
     unknown_gender = _area_num(row, "Unknown_Gender", 0)
     avg_age = _area_num(row, "Avg_Age", 0)
     new_reg = _area_num(row, "New_Registrations", 0)
-    mail_voters = _area_num(row, "Mail_Voters", 0)
+    mail_apps = _area_num(row, "Mail_Applications", 0)
+    mail_sent = _area_num(row, "Mail_Ballots_Sent", 0)
+    mail_returned = _area_num(row, "Mail_Ballots_Returned", 0)
+    # Backward compatibility: older precinct_summary files only have Mail_Voters.
+    if mail_returned == 0:
+        mail_returned = _area_num(row, "Mail_Voters", 0)
+    mail_outstanding = _area_num(row, "Mail_Ballots_Outstanding", max(mail_apps - mail_returned, 0))
+    geo_issues = _area_num(row, "Geo_Issue_Rows", 0)
     precinct_count = int(_area_num(row, "Precinct_Count", len(profile_df)))
 
     def pct(n):
@@ -4307,12 +4382,39 @@ def render_area_intelligence_workspace():
     r3 = st.columns(3, gap="small")
     cards3 = [
         ("New Registrations", f"{int(new_reg):,}", pct_note(new_reg)),
-        ("Mail Ballots Returned", f"{int(mail_voters):,}", f"{pct(mail_voters)} returned"),
+        ("Mail Ballots Returned", f"{int(mail_returned):,}", f"{pct(mail_returned)} of voters"),
         ("Precincts Included", f"{precinct_count:,}", f"Area Type: {area_level}"),
     ]
     for col, (label, value, note) in zip(r3, cards3):
         with col:
             st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
+
+    mail_return_rate = 0 if mail_apps <= 0 else (mail_returned / mail_apps) * 100
+    mail_outstanding_rate = 0 if mail_apps <= 0 else (mail_outstanding / mail_apps) * 100
+
+    st.markdown('<div class="section-card"><div class="small-header">Mail Program</div><div class="tiny-muted">Tracks the mail ballot pipeline: application, sent, returned, and chase universe.</div></div>', unsafe_allow_html=True)
+    mail_cols = st.columns(5, gap="small")
+    mail_cards = [
+        ("Ballot Applications", f"{int(mail_apps):,}", f"{pct(mail_apps)} of voters"),
+        ("Ballots Sent", f"{int(mail_sent):,}", f"{pct(mail_sent)} of voters"),
+        ("Ballots Returned", f"{int(mail_returned):,}", f"{mail_return_rate:.1f}% of applications" if mail_apps > 0 else "No applications visible"),
+        ("Outstanding Ballots", f"{int(mail_outstanding):,}", f"{mail_outstanding_rate:.1f}% of applications" if mail_apps > 0 else "No chase universe visible"),
+        ("Return Rate", f"{mail_return_rate:.1f}%" if mail_apps > 0 else "—", "Returned / Applications"),
+    ]
+    for col, (label, value, note) in zip(mail_cols, mail_cards):
+        with col:
+            st.markdown(_metric_html(label, value, note), unsafe_allow_html=True)
+
+    badges, strategy_notes, return_rate, outstanding_rate, app_pct = _build_strategy_summary(
+        total, dem, rep, other, new_reg, mail_apps, mail_returned, mail_outstanding, geo_issues
+    )
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-header">Strategy Summary</div>', unsafe_allow_html=True)
+    st.markdown("".join(_strategy_badge(text, tone) for text, tone in badges), unsafe_allow_html=True)
+    if strategy_notes:
+        st.markdown("<ul>" + "".join(f"<li>{note}</li>" for note in strategy_notes[:4]) + "</ul>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     divider()
 
@@ -4386,11 +4488,16 @@ def render_area_intelligence_workspace():
     st.markdown('<div class="section-card"><div class="small-header">Area Breakdown</div><div class="tiny-muted">These are the summarized areas included in the selected profile.</div></div>', unsafe_allow_html=True)
 
     breakdown_df = profile_df.copy()
-    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Voters", "Avg_Age"]:
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters", "Geo_Issue_Rows", "Avg_Age"]:
         if col in breakdown_df.columns:
             breakdown_df[col] = pd.to_numeric(breakdown_df[col], errors="coerce").fillna(0)
         else:
             breakdown_df[col] = 0
+
+    if "Mail_Ballots_Returned" in breakdown_df.columns:
+        breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Ballots_Returned"].where(breakdown_df["Mail_Ballots_Returned"] > 0, breakdown_df["Mail_Voters"])
+    else:
+        breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Voters"]
 
     if area_level == "County":
         breakdown_mode = st.radio(
@@ -4418,7 +4525,12 @@ def render_area_intelligence_workspace():
             Female_Voters=("Female_Voters", "sum"),
             Unknown_Gender=("Unknown_Gender", "sum"),
             New_Registrations=("New_Registrations", "sum"),
+            Mail_Applications=("Mail_Applications", "sum"),
+            Mail_Ballots_Sent=("Mail_Ballots_Sent", "sum"),
+            Mail_Ballots_Returned=("Mail_Ballots_Returned", "sum"),
+            Mail_Ballots_Outstanding=("Mail_Ballots_Outstanding", "sum"),
             Mail_Voters=("Mail_Voters", "sum"),
+            Geo_Issue_Rows=("Geo_Issue_Rows", "sum"),
         )
         .reset_index()
     )
@@ -4433,12 +4545,14 @@ def render_area_intelligence_workspace():
     weighted_age["Avg_Age"] = weighted_age.apply(lambda r: 0 if r["_AgeTotal"] <= 0 else round(float(r["_AgeWeight"] / r["_AgeTotal"]), 1), axis=1)
     display_df = display_df.merge(weighted_age[group_cols + ["Avg_Age"]], on=group_cols, how="left")
 
-    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Voters"]:
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "Male_Voters", "Female_Voters", "Unknown_Gender", "New_Registrations", "Mail_Applications", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Mail_Voters", "Geo_Issue_Rows"]:
         display_df[col] = pd.to_numeric(display_df[col], errors="coerce").fillna(0).astype(int)
 
     display_df["Dem_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Dem_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
     display_df["Rep_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Rep_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
     display_df["Other_%"] = display_df.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Other_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    display_df["Mail_Return_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications"]) * 100, 1), axis=1)
+    display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications"]) * 100, 1), axis=1)
 
     display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
     st.dataframe(display_df, use_container_width=True, hide_index=True)
