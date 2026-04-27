@@ -4327,6 +4327,82 @@ def _build_strategy_summary(total, dem, rep, other, new_reg, mail_apps, mail_ret
 
     return badges, notes, return_rate, outstanding_rate, app_pct
 
+
+def _build_area_intelligence_recommendations(area_level, title, totals, display_df):
+    """Auto-generate client-facing recommendations for the Area Intelligence PDF."""
+    total = float(totals.get("total", 0) or 0)
+    dem = float(totals.get("dem", 0) or 0)
+    rep = float(totals.get("rep", 0) or 0)
+    other = float(totals.get("other", 0) or 0)
+    unknown_gender = float(totals.get("unknown_gender", 0) or 0)
+    mail_apps_approved = float(totals.get("mail_apps_approved", 0) or 0)
+    mail_returned = float(totals.get("mail_returned", 0) or 0)
+    mail_outstanding = float(totals.get("mail_outstanding", 0) or 0)
+    new_reg = float(totals.get("new_reg", 0) or 0)
+
+    dem_pct = 0 if total <= 0 else (dem / total) * 100
+    rep_pct = 0 if total <= 0 else (rep / total) * 100
+    other_pct = 0 if total <= 0 else (other / total) * 100
+    unknown_gender_pct = 0 if total <= 0 else (unknown_gender / total) * 100
+    new_reg_pct = 0 if total <= 0 else (new_reg / total) * 100
+    mail_return_rate = 0 if mail_apps_approved <= 0 else (mail_returned / mail_apps_approved) * 100
+    outstanding_rate = 0 if mail_apps_approved <= 0 else (mail_outstanding / mail_apps_approved) * 100
+
+    recommendations = []
+
+    if rep_pct >= 55:
+        recommendations.append("Prioritize Republican base turnout and mail-ballot chase in this area before expanding persuasion resources.")
+    elif dem_pct >= 55:
+        recommendations.append("Treat this as a Democratic-advantage area; use selective persuasion, opposition awareness, and defensive monitoring.")
+    elif abs(rep_pct - dem_pct) <= 8:
+        recommendations.append("Party balance is close enough for persuasion; compare precincts or municipalities before assigning field resources.")
+    else:
+        recommendations.append("Use sub-area targeting rather than a one-size-fits-all plan because the overall party mix is mixed.")
+
+    if mail_apps_approved > 0:
+        if mail_return_rate < 35:
+            recommendations.append(f"Launch immediate mail-ballot chase: {int(mail_outstanding):,} approved mail voters are still outstanding.")
+        elif outstanding_rate >= 25:
+            recommendations.append(f"Keep this area on the chase list; {outstanding_rate:.1f}% of approved mail voters remain outstanding.")
+        else:
+            recommendations.append("Mail returns are comparatively healthy; shift chase resources toward lower-return areas first.")
+    else:
+        recommendations.append("Mail application volume is low; focus on direct voter contact, doors, phones, and turnout messaging.")
+
+    try:
+        if display_df is not None and not display_df.empty and "Total_Voters" in display_df.columns:
+            work = display_df.copy()
+            work["Total_Voters"] = pd.to_numeric(work["Total_Voters"], errors="coerce").fillna(0)
+            area_total = float(work["Total_Voters"].sum() or 0)
+            top5 = float(work.head(5)["Total_Voters"].sum() or 0)
+            top_share = 0 if area_total <= 0 else (top5 / area_total) * 100
+            if top_share >= 35:
+                recommendations.append(f"Top five breakdown rows contain {top_share:.1f}% of voters; start turfing and meeting prep there.")
+            elif len(work) >= 20:
+                recommendations.append("Voters are spread across many areas; build multiple smaller turfs instead of one central push.")
+    except Exception:
+        pass
+
+    if unknown_gender_pct >= 12:
+        recommendations.append(f"Unknown gender is {unknown_gender_pct:.1f}% of voters; consider data enrichment before gender-based targeting.")
+
+    if new_reg_pct >= 1.5:
+        recommendations.append(f"New registrations are {new_reg_pct:.1f}% of the universe; add first-time/new-voter education messaging.")
+
+    if other_pct >= 20:
+        recommendations.append(f"Other/unaffiliated voters are {other_pct:.1f}% of the universe; consider persuasion messaging for this segment.")
+
+    # Keep the printed PDF section tight and client-readable.
+    deduped = []
+    seen = set()
+    for item in recommendations:
+        key = item.lower().strip()
+        if key and key not in seen:
+            deduped.append(item)
+            seen.add(key)
+    return deduped[:6]
+
+
 def _ai_pdf_num(value, decimals=0):
     try:
         v = float(value or 0)
@@ -4701,7 +4777,7 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
     _ai_pdf_card(c, "Return Rate", _ai_pdf_pct(mail_returned, mail_apps_approved), "Returned / Approved", side_x, mail_table_top - 62, 152, 48)
 
     y -= 16
-    _ai_pdf_text(c, "Strategy Summary", margin, y, size=12, bold=True, color_hex="#142033")
+    _ai_pdf_text(c, "Strategy Summary & Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
     y -= 18
     badge_x = margin
     for text, tone in strategy_badges[:6]:
@@ -4722,13 +4798,26 @@ def build_area_intelligence_pdf_bytes(area_level, title, precinct_count, totals,
         _ai_pdf_text(c, text, badge_x + 8, y - 8.5, size=7.2, bold=True, color_hex=fg, max_width=badge_w - 14)
         badge_x += badge_w + 6
     y -= 24
-    for note in strategy_notes[:4]:
+    for note in strategy_notes[:3]:
         lines = _ai_pdf_wrapped_lines(c, note, page_w - margin * 2 - 14, size=8.0)
-        for i, line in enumerate(lines[:3]):
+        for i, line in enumerate(lines[:2]):
             prefix = "• " if i == 0 else "  "
             _ai_pdf_text(c, prefix + line, margin + 6, y, size=8.0, color_hex="#334155", max_width=page_w - margin * 2 - 12)
             y -= 11
         y -= 1
+
+    recommendations = _build_area_intelligence_recommendations(area_level, title, totals, display_df)
+    if recommendations:
+        y -= 4
+        _ai_pdf_text(c, "Recommended Next Actions", margin, y, size=9.2, bold=True, color_hex="#153d73")
+        y -= 13
+        for rec in recommendations[:4]:
+            lines = _ai_pdf_wrapped_lines(c, rec, page_w - margin * 2 - 18, size=7.7)
+            for i, line in enumerate(lines[:2]):
+                prefix = "• " if i == 0 else "  "
+                _ai_pdf_text(c, prefix + line, margin + 6, y, size=7.7, color_hex="#334155", max_width=page_w - margin * 2 - 12)
+                y -= 10
+            y -= 1
 
     # Put charts and the detailed breakdown on their own page so nothing collides with footer/branding.
     y = new_page("Charts & Area Breakdown")
