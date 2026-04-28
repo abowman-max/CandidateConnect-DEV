@@ -5063,6 +5063,13 @@ def _ai_geo_normalize_key(value):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _ai_geo_muni_base_key(value):
+    """Normalize municipality names for joins, ignoring common government-type suffixes."""
+    s = _ai_geo_normalize_key(value)
+    s = re.sub(r"\b(TWP|BORO|CITY|TOWN|TOWNSHIP|BOROUGH)\b$", "", s).strip()
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _ai_geo_available_layers():
     """Return local GeoJSON layers that are present next to the Streamlit app."""
     found = []
@@ -5242,18 +5249,20 @@ def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str 
             keys.append(key)
 
     if layer == "Municipality Boundaries":
-        county = props.get("COUNTY_NAME") or props.get("COUNTY") or props.get("COUNTY_NAM")
+        county = props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY")
         muni = props.get("MUNICIPAL_NAME") or props.get("MUNICIPAL_NAM") or props.get("MUNICIPAL") or props.get("NAME")
         suffix = _ai_geo_municipality_type_suffix(props)
         muni_key = _ai_geo_normalize_key(muni)
+        muni_base = _ai_geo_muni_base_key(muni)
         county_key = _ai_geo_normalize_key(county)
-        if county_key and muni_key:
-            add(f"{county_key}|{muni_key}")
-            if suffix:
-                add(f"{county_key}|{muni_key} {suffix}")
-        add(muni_key)
-        if suffix:
-            add(f"{muni_key} {suffix}")
+        # Composite keys are preferred so duplicate municipality names across
+        # counties do not collide. Include both pipe and space versions.
+        for mk in [muni_key, muni_base, f"{muni_base} {suffix}" if suffix else "", f"{muni_key} {suffix}" if suffix else ""]:
+            mk = _ai_geo_normalize_key(mk)
+            if county_key and mk:
+                add(f"{county_key}|{mk}")
+                add(f"{county_key} {mk}")
+            add(mk)
     elif layer == "County Boundaries":
         add(props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("NAME") or props.get("COUNTY"))
     elif layer in {"State House Boundaries", "State Senate Boundaries", "Congressional Boundaries"}:
@@ -5347,7 +5356,7 @@ def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
     if layer_label == "Municipality Boundaries" and "Municipality" in data_cols:
         muni = row.get("Municipality", "")
         county = row.get("County", "")
-        muni_key = _ai_geo_normalize_key(muni)
+        muni_key = _ai_geo_muni_base_key(muni)
         county_key = _ai_geo_normalize_key(county)
         return f"{county_key}|{muni_key}" if county_key else muni_key
     if data_cols:
@@ -5433,7 +5442,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
 
     if not matched_features:
         st.warning("No boundaries matched. We may need a custom crosswalk for this GeoJSON layer.")
-        with st.expander("Map join debug", expanded=True):
+        with st.expander("Map join debug", expanded=False):
             st.write("Sample Area Intelligence keys:", sorted(lookup_keys)[:12])
             st.write("Sample GeoJSON keys:", unmatched_sample)
             st.write("Available GeoJSON fields:", _ai_geo_property_names(geo))
@@ -5520,20 +5529,19 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
 
     if not boundary_rendered:
         st.caption("Boundary map is not available for this selection yet. Showing top-priority planning table instead.")
-
-    table_cols = [c for c in ["Area_Label", "Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"] if c in ranked.columns]
-    table_df = ranked[table_cols].copy()
-    if "Target_Voters" in table_df.columns:
-        table_df["Target_Voters"] = table_df["Target_Voters"].round(0).astype(int)
-    for c in ["Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"]:
-        if c in table_df.columns:
-            table_df[c] = pd.to_numeric(table_df[c], errors="coerce").round(1)
-    st.markdown(
-        '<div class="table-card"><div class="small-header">Top Heat-Map Priorities</div>'
-        '<div class="tiny-muted">Use this as the ranked planning table behind the boundary map.</div></div>',
-        unsafe_allow_html=True,
-    )
-    st.dataframe(table_df, width="stretch", hide_index=True)
+        table_cols = [c for c in ["Area_Label", "Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"] if c in ranked.columns]
+        table_df = ranked[table_cols].copy()
+        if "Target_Voters" in table_df.columns:
+            table_df["Target_Voters"] = table_df["Target_Voters"].round(0).astype(int)
+        for c in ["Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"]:
+            if c in table_df.columns:
+                table_df[c] = pd.to_numeric(table_df[c], errors="coerce").round(1)
+        st.markdown(
+            '<div class="table-card"><div class="small-header">Top Heat-Map Priorities</div>'
+            '<div class="tiny-muted">Use this as the ranked planning table when the boundary map is unavailable.</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(table_df, width="stretch", hide_index=True)
 
 
 
