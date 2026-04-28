@@ -6684,7 +6684,16 @@ def render_area_intelligence_workspace():
     breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Ballots_Returned"].where(breakdown_df["Mail_Ballots_Returned"] > 0, breakdown_df["Mail_Voters"])
 
     breakdown_mode = ""
-    if area_level == "County":
+    if area_level == "Statewide":
+        with breakdown_tab:
+            breakdown_mode = st.radio("Breakdown View", ["By Municipality", "By County", "By Precinct"], horizontal=True, key="ai_statewide_breakdown_mode")
+        if breakdown_mode == "By County":
+            group_cols = ["County"]
+        elif breakdown_mode == "By Precinct":
+            group_cols = ["County", "Municipality", "Precinct"]
+        else:
+            group_cols = ["County", "Municipality"]
+    elif area_level == "County":
         with breakdown_tab:
             breakdown_mode = st.radio("Breakdown View", ["By Municipality", "By Precinct"], horizontal=True, key="ai_county_breakdown_mode")
         group_cols = ["County", "Municipality"] if breakdown_mode == "By Municipality" else ["County", "Municipality", "Precinct"]
