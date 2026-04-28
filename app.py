@@ -5276,6 +5276,97 @@ def _ai_geo_municipality_type_suffix(props: dict) -> str:
     return ""
 
 
+
+
+def _ai_geo_municipality_suffix_from_text(value) -> str:
+    """Return a standard suffix from a municipality/class description."""
+    cls = _ai_geo_normalize_key(value)
+    words = set(cls.split())
+    if "TWP" in words or "TOWNSHIP" in words:
+        return "TWP"
+    if "BORO" in words or "BOROUGH" in words:
+        return "BORO"
+    if "CITY" in words:
+        return "CITY"
+    if "TOWN" in words:
+        return "TOWN"
+    return ""
+
+
+@st.cache_data(show_spinner=False)
+def _ai_load_municipality_crosswalk_alias_map():
+    """Load geo/municipalities.csv and build safe alias -> official-key mappings.
+
+    The CSV should have COUNTY, MUNICIPALITY, and optionally CLASS columns.
+    We only keep aliases that resolve to exactly one official municipality key so
+    ambiguous places like YORK CITY vs YORK TWP do not merge accidentally.
+    """
+    path = GEO_PATH / "municipalities.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return {}
+
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    county_col = cols.get("county") or cols.get("county_name")
+    muni_col = cols.get("municipality") or cols.get("municipal_name") or cols.get("name")
+    class_col = cols.get("class") or cols.get("class_of_munic") or cols.get("municipality_class")
+    if not county_col or not muni_col:
+        return {}
+
+    raw_alias_map = {}
+
+    def add_alias(alias, official):
+        alias = _ai_geo_normalize_join_key(alias)
+        official = _ai_geo_normalize_join_key(official)
+        if not alias or not official:
+            return
+        raw_alias_map.setdefault(alias, set()).add(official)
+        compact_alias = _ai_geo_compact_join_key(alias)
+        if compact_alias:
+            raw_alias_map.setdefault(compact_alias, set()).add(official)
+        fuzzy_alias = _ai_geo_fuzzy_join_key(alias)
+        if fuzzy_alias:
+            raw_alias_map.setdefault(fuzzy_alias, set()).add(official)
+
+    for _, row in df.iterrows():
+        county = _ai_geo_normalize_key(row.get(county_col, ""))
+        muni_full = _ai_geo_normalize_key(row.get(muni_col, ""))
+        if not county or not muni_full:
+            continue
+        suffix = _ai_geo_municipality_suffix_from_text(row.get(class_col, "")) if class_col else ""
+        if not suffix:
+            suffix = _ai_geo_municipality_suffix_from_text(muni_full)
+        muni_base = _ai_geo_muni_base_key(muni_full)
+        official_muni = muni_full
+        if suffix and suffix not in official_muni.split():
+            official_muni = _ai_geo_normalize_key(f"{muni_base} {suffix}")
+        official = f"{county}|{official_muni}"
+
+        # Exact/full aliases.
+        add_alias(f"{county}|{muni_full}", official)
+        add_alias(f"{county} {muni_full}", official)
+        add_alias(f"{county}|{official_muni}", official)
+        add_alias(f"{county} {official_muni}", official)
+
+        # Bare base aliases are useful when voter data omits BORO/TWP. Ambiguous
+        # base aliases are discarded below so City/Township/Borough do not merge.
+        if muni_base:
+            add_alias(f"{county}|{muni_base}", official)
+            add_alias(f"{county} {muni_base}", official)
+
+    # Keep only unambiguous aliases.
+    safe = {}
+    for alias, officials in raw_alias_map.items():
+        officials = {o for o in officials if o}
+        if len(officials) == 1:
+            official = next(iter(officials))
+            safe.setdefault(alias, set()).add(official)
+    return {alias: sorted(vals) for alias, vals in safe.items()}
+
+
 def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str | None = None, duplicate_muni_bases=None):
     """Create robust match keys for a GeoJSON feature.
 
@@ -5491,19 +5582,43 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     agg_cols[keep_label] = "first"
     lookup_df = map_df.groupby("Geo_Key", as_index=False).agg(agg_cols).rename(columns={keep_label: "Area_Label"})
 
-    # Add compact no-space aliases so official boundary names like MILLCREEK
-    # can match voter-data names like MILL CREEK TWP without merging distinct
-    # municipality types such as YORK CITY and YORK TWP.
+    # Add compact/fuzzy aliases and, when available, a municipality crosswalk
+    # from geo/municipalities.csv. The crosswalk is the final safety net for
+    # true naming differences while still avoiding ambiguous City/TWP/Boro merges.
     alias_rows = []
+    crosswalk_alias_map = _ai_load_municipality_crosswalk_alias_map() if layer_label == "Municipality Boundaries" else {}
+
+    def _append_alias_row(source_row, alias_key):
+        alias_key = _ai_geo_normalize_join_key(alias_key)
+        if alias_key:
+            row_copy = source_row.copy()
+            row_copy["Geo_Key"] = alias_key
+            alias_rows.append(row_copy)
+
     for _, alias_row in lookup_df.iterrows():
         base_key = _ai_geo_normalize_join_key(alias_row.get("Geo_Key", ""))
-        compact_key = _ai_geo_compact_join_key(base_key)
-        fuzzy_key = _ai_geo_fuzzy_join_key(base_key)
-        for alias_key in [base_key, compact_key, fuzzy_key]:
-            if alias_key:
-                row_copy = alias_row.copy()
-                row_copy["Geo_Key"] = alias_key
-                alias_rows.append(row_copy)
+        candidate_aliases = [
+            base_key,
+            _ai_geo_compact_join_key(base_key),
+            _ai_geo_fuzzy_join_key(base_key),
+        ]
+        seen_aliases = set()
+        for alias_key in candidate_aliases:
+            if not alias_key or alias_key in seen_aliases:
+                continue
+            seen_aliases.add(alias_key)
+            _append_alias_row(alias_row, alias_key)
+
+            # If this voter-data key has a safe official-municipality match in
+            # the crosswalk, also add the official key and its compact/fuzzy forms.
+            for official_key in crosswalk_alias_map.get(alias_key, []):
+                for official_alias in [
+                    official_key,
+                    _ai_geo_compact_join_key(official_key),
+                    _ai_geo_fuzzy_join_key(official_key),
+                ]:
+                    _append_alias_row(alias_row, official_alias)
+
     if alias_rows:
         lookup_df = pd.DataFrame(alias_rows).drop_duplicates(subset=["Geo_Key"], keep="first").reset_index(drop=True)
 
@@ -7250,3 +7365,5 @@ else:
         
         
             st.markdown('</div>', unsafe_allow_html=True)
+
+# Candidate Connect Area Intelligence map crosswalk build v34
