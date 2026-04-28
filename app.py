@@ -5362,7 +5362,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
         return False
 
-    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key="ai_geo_boundary_layer")
+    # Use a context-specific key so an old Streamlit selection does not keep the map stuck\n    # on County Boundaries after the user changes report levels.\n    layer_context = sanitize_filename_part(str(title or "area"))\n    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key=f"ai_geo_boundary_layer_{layer_context}")
     geo = _ai_load_geojson_layer(layer_label)
     if not geo:
         st.warning("That boundary file could not be loaded. Check the GeoJSON file format.")
@@ -5444,46 +5444,41 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     matched_geo["features"] = matched_features
 
     try:
-        import plotly.express as px
-        plot_df = pd.DataFrame([
-            {
-                "Geo_Key": (f.get("properties") or {}).get("__cc_join_key", ""),
-                "Area": (f.get("properties") or {}).get("__area_label", ""),
-                metric_col: (f.get("properties") or {}).get("__metric_value", 0),
-                "Total Voters": (f.get("properties") or {}).get("__total_voters", 0),
-                "Target Voters": (f.get("properties") or {}).get("__target_voters", 0),
-                "Target/Door": (f.get("properties") or {}).get("__target_per_door", 0),
-            }
-            for f in matched_features
-        ])
-        plot_df[metric_col] = pd.to_numeric(plot_df[metric_col], errors="coerce").fillna(0)
-        fig = px.choropleth(
-            plot_df,
-            geojson=matched_geo,
-            locations="Geo_Key",
-            featureidkey="properties.__cc_join_key",
-            color=metric_col,
-            color_continuous_scale="RdYlGn",
-            hover_name="Area",
-            hover_data={
-                metric_col: ":,.1f",
-                "Total Voters": ":,.0f",
-                "Target Voters": ":,.0f",
-                "Target/Door": ":.2f",
-                "Geo_Key": False,
-            },
-        )
-        fig.update_geos(fitbounds="locations", visible=False)
-        fig.update_layout(
+        # Render with Altair geoshape so the app does not depend on Plotly being
+        # installed in Streamlit Cloud. The metric values were already written
+        # into each matched GeoJSON feature above.
+        feature_collection = {
+            "type": "FeatureCollection",
+            "features": matched_features,
+        }
+        chart = alt.Chart(alt.Data(values=feature_collection["features"])).mark_geoshape(
+            stroke="#ffffff",
+            strokeWidth=0.35,
+        ).encode(
+            color=alt.Color(
+                "properties.__metric_value:Q",
+                title=metric_label,
+                scale=alt.Scale(scheme="redyellowgreen"),
+            ),
+            tooltip=[
+                alt.Tooltip("properties.__area_label:N", title="Area"),
+                alt.Tooltip("properties.__metric_value:Q", title=metric_label, format=",.1f"),
+                alt.Tooltip("properties.__total_voters:Q", title="Total Voters", format=",.0f"),
+                alt.Tooltip("properties.__target_voters:Q", title="Target Voters", format=",.0f"),
+                alt.Tooltip("properties.__target_per_door:Q", title="Target/Door", format=".2f"),
+            ],
+        ).project(
+            type="identity",
+            reflectY=True,
+        ).properties(
             height=650,
-            margin=dict(l=0, r=0, t=8, b=0),
-            coloraxis_colorbar=dict(title=metric_label),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.altair_chart(chart, use_container_width=True)
         return True
     except Exception as e:
-        st.warning(f"Boundary map could not render with Plotly ({e}). Falling back to the simple planning table below.")
+        st.warning(f"Boundary map could not render ({e}). Showing the top-priority planning table below.")
         return False
+
 
 
 def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
