@@ -5070,6 +5070,23 @@ def _ai_geo_muni_base_key(value):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _ai_geo_normalize_join_key(value):
+    """Normalize a map join key while preserving composite separators."""
+    raw = normalize_export_text(value)
+    if "|" in raw:
+        parts = [_ai_geo_normalize_key(part) for part in raw.split("|")]
+        return "|".join([part for part in parts if part])
+    return _ai_geo_normalize_key(raw)
+
+
+def _ai_geo_compact_join_key(value):
+    """Return a no-space alias for matching names like MILLCREEK vs MILL CREEK."""
+    key = _ai_geo_normalize_join_key(value)
+    if "|" in key:
+        return "|".join(part.replace(" ", "") for part in key.split("|"))
+    return key.replace(" ", "")
+
+
 def _ai_geo_available_layers():
     """Return local GeoJSON layers that are present next to the Streamlit app."""
     found = []
@@ -5244,9 +5261,12 @@ def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str 
     keys = []
 
     def add(value):
-        key = _ai_geo_normalize_key(value)
+        key = _ai_geo_normalize_join_key(value)
         if key and key not in keys:
             keys.append(key)
+        compact_key = _ai_geo_compact_join_key(value)
+        if compact_key and compact_key not in keys:
+            keys.append(compact_key)
 
     if layer == "Municipality Boundaries":
         county = props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY")
@@ -5379,7 +5399,7 @@ def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
         # same-base municipalities separate on the map.
         muni_key = _ai_geo_normalize_key(muni)
         county_key = _ai_geo_normalize_key(county)
-        return f"{county_key}|{muni_key}".strip("|") if county_key else muni_key
+        return _ai_geo_normalize_join_key(f"{county_key}|{muni_key}".strip("|")) if county_key else muni_key
     if data_cols:
         return _ai_geo_normalize_key(row.get(data_cols[-1], ""))
     return ""
@@ -5439,6 +5459,22 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     keep_label = "Area_Label" if "Area_Label" in map_df.columns else data_cols[-1]
     agg_cols[keep_label] = "first"
     lookup_df = map_df.groupby("Geo_Key", as_index=False).agg(agg_cols).rename(columns={keep_label: "Area_Label"})
+
+    # Add compact no-space aliases so official boundary names like MILLCREEK
+    # can match voter-data names like MILL CREEK TWP without merging distinct
+    # municipality types such as YORK CITY and YORK TWP.
+    alias_rows = []
+    for _, alias_row in lookup_df.iterrows():
+        base_key = _ai_geo_normalize_join_key(alias_row.get("Geo_Key", ""))
+        compact_key = _ai_geo_compact_join_key(base_key)
+        for alias_key in [base_key, compact_key]:
+            if alias_key:
+                row_copy = alias_row.copy()
+                row_copy["Geo_Key"] = alias_key
+                alias_rows.append(row_copy)
+    if alias_rows:
+        lookup_df = pd.DataFrame(alias_rows).drop_duplicates(subset=["Geo_Key"], keep="first").reset_index(drop=True)
+
     lookup_df["__metric_value"] = pd.to_numeric(lookup_df[metric_col], errors="coerce").fillna(0)
     lookup_df["__total_voters"] = pd.to_numeric(lookup_df.get("Total_Voters", 0), errors="coerce").fillna(0)
     lookup_df["__target_voters"] = pd.to_numeric(lookup_df.get("Target_Voters", 0), errors="coerce").fillna(0)
