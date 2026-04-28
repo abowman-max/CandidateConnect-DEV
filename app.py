@@ -5449,6 +5449,14 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         props["__target_voters"] = float(rec.get("__target_voters", 0) or 0)
         props["__target_per_door"] = float(rec.get("__target_per_door", 0) or 0)
         nf["properties"] = props
+        # Copy metric fields to top-level so Altair can reliably encode colors and tooltips.
+        nf["__cc_join_key"] = props.get("__cc_join_key", "")
+        nf["__cc_label"] = props.get("__cc_label", "")
+        nf["__area_label"] = props.get("__area_label", "")
+        nf["__metric_value"] = props.get("__metric_value", 0)
+        nf["__total_voters"] = props.get("__total_voters", 0)
+        nf["__target_voters"] = props.get("__target_voters", 0)
+        nf["__target_per_door"] = props.get("__target_per_door", 0)
         matched_features.append(nf)
 
     matched_count = len({str((feat.get("properties") or {}).get("__cc_join_key", "")) for feat in matched_features})
@@ -5483,23 +5491,22 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         }
         chart = alt.Chart(alt.Data(values=feature_collection["features"])).mark_geoshape(
             stroke="#ffffff",
-            strokeWidth=0.35,
+            strokeWidth=0.45,
         ).encode(
             color=alt.Color(
-                "properties.__metric_value:Q",
+                "__metric_value:Q",
                 title=metric_label,
                 scale=alt.Scale(scheme="redyellowgreen"),
             ),
             tooltip=[
-                alt.Tooltip("properties.__area_label:N", title="Area"),
-                alt.Tooltip("properties.__metric_value:Q", title=metric_label, format=",.1f"),
-                alt.Tooltip("properties.__total_voters:Q", title="Total Voters", format=",.0f"),
-                alt.Tooltip("properties.__target_voters:Q", title="Target Voters", format=",.0f"),
-                alt.Tooltip("properties.__target_per_door:Q", title="Target/Door", format=".2f"),
+                alt.Tooltip("__area_label:N", title="Area"),
+                alt.Tooltip("__metric_value:Q", title=metric_label, format=",.1f"),
+                alt.Tooltip("__total_voters:Q", title="Total Voters", format=",.0f"),
+                alt.Tooltip("__target_voters:Q", title="Target Voters", format=",.0f"),
+                alt.Tooltip("__target_per_door:Q", title="Target/Door", format=".2f"),
             ],
         ).project(
-            type="identity",
-            reflectY=True,
+            type="mercator",
         ).properties(
             height=650,
         )
