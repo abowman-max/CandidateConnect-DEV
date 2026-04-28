@@ -5658,13 +5658,41 @@ def _ai_existing_alias_dataframe():
     return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "NOTES"])
 
 
+def _ai_existing_alias_key_set() -> set:
+    """Return reviewed alias keys so auto-suggestions never overwrite them."""
+    existing = _ai_existing_alias_dataframe()
+    if existing is None or existing.empty:
+        return set()
+    cols = {str(c).strip().lower(): c for c in existing.columns}
+    county_col = cols.get("county") or cols.get("sure_county") or cols.get("county_name")
+    sure_col = cols.get("sure_municipality") or cols.get("data_municipality") or cols.get("municipality") or cols.get("sure_name")
+    if not county_col or not sure_col:
+        return set()
+    keys = set()
+    for _, row in existing.iterrows():
+        county = _ai_geo_normalize_key(row.get(county_col, ""))
+        sure = _ai_geo_normalize_key(row.get(sure_col, ""))
+        if county and sure:
+            keys.add(f"{county}|{sure}")
+    return keys
+
+
 def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: float = 82.0) -> pd.DataFrame:
-    """Suggest municipality_aliases.csv rows for unmatched SURE municipality names."""
+    """Suggest municipality_aliases.csv rows for unmatched SURE names.
+
+    Reviewed aliases already present in geo/municipality_aliases.csv are protected:
+    they are not re-suggested and will not be replaced by a fuzzy guess. This
+    prevents cases like Bethlehem Twsp being corrected to Bethlehem Township
+    and then overwritten back to Bethlehem City by the suggestion engine.
+    """
+    empty_cols = ["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "MATCH_SCORE", "NOTES"]
     if unmatched_source_df is None or unmatched_source_df.empty:
-        return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "MATCH_SCORE", "NOTES"])
+        return pd.DataFrame(columns=empty_cols)
     candidates = _ai_load_municipality_crosswalk_candidates()
     if not candidates:
-        return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "MATCH_SCORE", "NOTES"])
+        return pd.DataFrame(columns=empty_cols)
+
+    existing_keys = _ai_existing_alias_key_set()
 
     by_county = {}
     for cand in candidates:
@@ -5676,6 +5704,9 @@ def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: fl
         county, sure_muni = _ai_split_county_muni_from_join_key(src.get("Geo_Key", ""))
         if not county or not sure_muni:
             continue
+        protected_key = f"{_ai_geo_normalize_key(county)}|{_ai_geo_normalize_key(sure_muni)}"
+        if protected_key in existing_keys:
+            continue
         key = (county, sure_muni)
         if key in seen:
             continue
@@ -5683,7 +5714,11 @@ def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: fl
 
         best = None
         best_score = 0.0
+        source_suffix = _ai_geo_municipality_suffix_from_text(sure_muni)
         for cand in by_county.get(county, []):
+            cand_suffix = _ai_geo_municipality_suffix_from_text(cand.get("OFFICIAL_MUNICIPALITY", ""))
+            if source_suffix and cand_suffix and source_suffix != cand_suffix:
+                continue
             score = max(
                 _ai_similarity_score(sure_muni, cand.get("OFFICIAL_MUNICIPALITY", "")),
                 _ai_similarity_score(_ai_geo_muni_base_key(sure_muni), cand.get("OFFICIAL_BASE", "")),
@@ -5701,9 +5736,7 @@ def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: fl
                 "MATCH_SCORE": round(best_score, 1),
                 "NOTES": "auto-suggested from unmatched Area Intelligence map row; review before production",
             })
-    return pd.DataFrame(rows)
-
-
+    return pd.DataFrame(rows, columns=empty_cols)
 def _ai_render_alias_suggestion_download(unmatched_source_df: pd.DataFrame):
     """Show a production-friendly alias CSV download for remaining unmatched municipalities."""
     suggestions = _ai_build_alias_suggestions(unmatched_source_df)
@@ -5720,10 +5753,10 @@ def _ai_render_alias_suggestion_download(unmatched_source_df: pd.DataFrame):
             add_df[col] = ""
     combined = pd.concat([existing[existing_cols], add_df[existing_cols]], ignore_index=True)
     combined["_dedupe"] = combined.apply(lambda r: f"{_ai_geo_normalize_key(r.get('COUNTY',''))}|{_ai_geo_normalize_key(r.get('SURE_MUNICIPALITY',''))}", axis=1)
-    combined = combined.drop_duplicates(subset=["_dedupe"], keep="last").drop(columns=["_dedupe"])
+    combined = combined.drop_duplicates(subset=["_dedupe"], keep="first").drop(columns=["_dedupe"])
 
     with st.expander("Unmatched municipality alias suggestions", expanded=False):
-        st.caption("These are high-confidence matches between SURE municipality names and the official map crosswalk. Review them, then replace geo/municipality_aliases.csv with the updated download.")
+        st.caption("These are high-confidence matches between SURE municipality names and the official map crosswalk. Existing reviewed aliases are protected and will not be overwritten by suggestions. Review the new rows, then replace geo/municipality_aliases.csv with the updated download.")
         st.dataframe(suggestions, width="stretch", hide_index=True)
         st.download_button(
             "Download updated municipality_aliases.csv",
@@ -6394,7 +6427,7 @@ def render_area_intelligence_workspace():
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="small-header">Select Area</div>', unsafe_allow_html=True)
 
-    available_levels = ["Statewide", "County", "Municipality", "Precinct"]
+    available_levels = ["County", "Municipality", "Precinct"]
     for _lvl in ["USC", "STS", "STH", "School District"]:
         if _lvl in area_df.columns and any(str(x).strip() for x in area_df[_lvl].unique().tolist()):
             available_levels.append(_lvl)
@@ -6429,17 +6462,7 @@ def render_area_intelligence_workspace():
     profile_df = pd.DataFrame()
     title = ""
 
-    if area_level == "Statewide":
-        with c1:
-            st.caption("Statewide report")
-        with c2:
-            st.caption("All counties included")
-        with c3:
-            st.caption("Municipalities/precincts are included in the breakdown below")
-        profile_df = area_df.copy()
-        title = "Statewide"
-
-    elif area_level in ["County", "Municipality", "Precinct"]:
+    if area_level in ["County", "Municipality", "Precinct"]:
         counties = _clean_options(area_df["County"])
         with c1:
             selected_county = st.selectbox("County", counties, key="ai_county") if counties else ""
@@ -6651,16 +6674,7 @@ def render_area_intelligence_workspace():
     breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Ballots_Returned"].where(breakdown_df["Mail_Ballots_Returned"] > 0, breakdown_df["Mail_Voters"])
 
     breakdown_mode = ""
-    if area_level == "Statewide":
-        with breakdown_tab:
-            breakdown_mode = st.radio("Breakdown View", ["By County", "By Municipality", "By Precinct"], index=1, horizontal=True, key="ai_statewide_breakdown_mode")
-        if breakdown_mode == "By County":
-            group_cols = ["County"]
-        elif breakdown_mode == "By Municipality":
-            group_cols = ["County", "Municipality"]
-        else:
-            group_cols = ["County", "Municipality", "Precinct"]
-    elif area_level == "County":
+    if area_level == "County":
         with breakdown_tab:
             breakdown_mode = st.radio("Breakdown View", ["By Municipality", "By Precinct"], horizontal=True, key="ai_county_breakdown_mode")
         group_cols = ["County", "Municipality"] if breakdown_mode == "By Municipality" else ["County", "Municipality", "Precinct"]
