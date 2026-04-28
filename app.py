@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import boto3
 
-AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v31-opacity-and-muni-aliases"
+AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v36-sure-alias-layer"
 
 from io import BytesIO
 from datetime import datetime
@@ -39,7 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
-# Candidate Connect Area Intelligence mapping build: v35 FIPS municipality crosswalk matching
+# Candidate Connect Area Intelligence mapping build: v36 SURE alias crosswalk matching
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5405,6 +5405,44 @@ def _ai_load_municipality_crosswalk_alias_map():
             for muni_alias in possible_munis:
                 add_alias(f"{official_county}|{muni_alias}", targets)
                 add_alias(f"{official_county} {muni_alias}", targets)
+
+    # Optional SURE-name alias layer for remaining edge cases where the SURE
+    # system spelling differs from the official PennDOT / GIS spelling.
+    # Put this file at geo/municipality_aliases.csv with columns like:
+    # COUNTY,SURE_MUNICIPALITY,OFFICIAL_MUNICIPALITY,FIPS_MUN_CODE,GEOID,NOTES
+    # FIPS_MUN_CODE is preferred. OFFICIAL_MUNICIPALITY is accepted when FIPS is blank.
+    alias_path = GEO_PATH / "municipality_aliases.csv"
+    if alias_path.exists():
+        try:
+            alias_df = pd.read_csv(alias_path, dtype=str).fillna("")
+            alias_cols = {str(c).strip().lower(): c for c in alias_df.columns}
+            a_county_col = alias_cols.get("county") or alias_cols.get("sure_county") or alias_cols.get("county_name")
+            a_sure_col = alias_cols.get("sure_municipality") or alias_cols.get("data_municipality") or alias_cols.get("municipality") or alias_cols.get("sure_name")
+            a_official_col = alias_cols.get("official_municipality") or alias_cols.get("official_municipal_name") or alias_cols.get("map_municipality") or alias_cols.get("gis_municipality")
+            a_fips_col = alias_cols.get("fips_mun_code")
+            a_geoid_col = alias_cols.get("geoid")
+            if a_county_col and a_sure_col:
+                for _, arow in alias_df.iterrows():
+                    acounty = _ai_geo_normalize_key(arow.get(a_county_col, ""))
+                    asure = _ai_geo_normalize_key(arow.get(a_sure_col, ""))
+                    if not acounty or not asure:
+                        continue
+                    targets = set()
+                    afips = normalize_export_text(arow.get(a_fips_col, "")) if a_fips_col else ""
+                    ageoid = normalize_export_text(arow.get(a_geoid_col, "")) if a_geoid_col else ""
+                    aofficial = _ai_geo_normalize_key(arow.get(a_official_col, "")) if a_official_col else ""
+                    if afips:
+                        targets.add(_ai_geo_normalize_join_key(f"FIPS|{afips}"))
+                    if ageoid:
+                        targets.add(_ai_geo_normalize_join_key(f"GEOID|{ageoid}"))
+                    if aofficial:
+                        targets.add(_ai_geo_normalize_join_key(f"{acounty}|{aofficial}"))
+                        targets.add(_ai_geo_normalize_join_key(f"{acounty} {aofficial}"))
+                    if targets:
+                        add_alias(f"{acounty}|{asure}", targets)
+                        add_alias(f"{acounty} {asure}", targets)
+        except Exception:
+            pass
 
     # Keep only unambiguous aliases. If one alias points to multiple FIPS/name
     # targets, it is safer to skip it than to color the wrong municipality.
