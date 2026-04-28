@@ -76,6 +76,7 @@ SAVED_UNIVERSES_R2_KEY = "app_state/saved_universes.json"
 # Local boundary files for Area Intelligence heat maps.
 # Put GeoJSON files in a /geo folder next to app.py.
 GEO_PATH = Path("geo")
+# Area Intelligence map production polish: v32 matching cleanup + lower-opacity map fills.
 AI_GEOJSON_LAYERS = {
     "County Boundaries": "counties.geojson",
     "Municipality Boundaries": "municipalities.geojson",
@@ -5063,6 +5064,10 @@ def _ai_geo_normalize_key(value):
     s = re.sub(r"\bMOUNT\b", "MT", s)
     s = re.sub(r"\bSAINT\b", "ST", s)
     s = re.sub(r"\bFORT\b", "FT", s)
+    s = re.sub(r"\bNORTH\b", "N", s)
+    s = re.sub(r"\bSOUTH\b", "S", s)
+    s = re.sub(r"\bEAST\b", "E", s)
+    s = re.sub(r"\bWEST\b", "W", s)
     s = re.sub(r"\bBOROUGH\b", "BORO", s)
     s = re.sub(r"\bTOWNSHIP\b", "TWP", s)
     s = re.sub(r"[^A-Z0-9]+", " ", s)
@@ -5545,10 +5550,6 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
 
     if not matched_features:
         st.warning("No boundaries matched. We may need a custom crosswalk for this GeoJSON layer.")
-        with st.expander("Map join debug", expanded=False):
-            st.write("Sample Area Intelligence keys:", sorted(lookup_keys)[:12])
-            st.write("Sample GeoJSON keys:", unmatched_sample)
-            st.write("Available GeoJSON fields:", _ai_geo_property_names(geo))
         return False
 
     if not _ai_geojson_likely_lonlat({"features": matched_features}):
@@ -5649,7 +5650,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
             get_fill_color="properties.__fill_color",
             get_line_color=[255, 255, 255, 230],
             line_width_min_pixels=1,
-            opacity=0.72,
+            opacity=0.45,
         )
         view_state = pdk.ViewState(
             latitude=(min_lat + max_lat) / 2,
