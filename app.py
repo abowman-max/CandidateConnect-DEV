@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import boto3
 
-AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v37-alias-suggestion-builder"
+AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v38-live-mapping-status"
 
 from io import BytesIO
 from datetime import datetime
@@ -39,7 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
-# Candidate Connect Area Intelligence mapping build: v37 alias suggestion builder
+# Candidate Connect Area Intelligence mapping build: v38 live mapping status and alias reload
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5124,7 +5124,6 @@ def _ai_geo_available_layers():
     return found
 
 
-@st.cache_data(show_spinner=False)
 def _ai_load_geojson_layer(layer_label: str):
     """Load one local GeoJSON boundary layer from /geo."""
     filename = AI_GEOJSON_LAYERS.get(layer_label)
@@ -5293,7 +5292,6 @@ def _ai_geo_municipality_suffix_from_text(value) -> str:
     return ""
 
 
-@st.cache_data(show_spinner=False)
 def _ai_load_municipality_crosswalk_alias_map():
     """Load an optional municipality crosswalk and build safe alias -> official map keys.
 
@@ -5565,7 +5563,6 @@ def _ai_split_county_muni_from_join_key(join_key: str):
     return "", key
 
 
-@st.cache_data(show_spinner=False)
 def _ai_load_municipality_crosswalk_candidates():
     """Load official municipality candidates used to suggest missing SURE aliases."""
     path = GEO_PATH / "municipality_crosswalk.csv"
@@ -5703,7 +5700,7 @@ def _ai_render_alias_suggestion_download(unmatched_source_df: pd.DataFrame):
 
     with st.expander("Unmatched municipality alias suggestions", expanded=False):
         st.caption("These are high-confidence matches between SURE municipality names and the official map crosswalk. Review them, then replace geo/municipality_aliases.csv with the updated download.")
-        st.dataframe(suggestions, use_container_width=True, hide_index=True)
+        st.dataframe(suggestions, width="stretch", hide_index=True)
         st.download_button(
             "Download updated municipality_aliases.csv",
             data=combined.to_csv(index=False).encode("utf-8"),
@@ -5784,6 +5781,36 @@ def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
     return ""
 
 
+
+def _ai_mapping_file_status():
+    """Return production-safe counts so we can verify deployed mapping files are being read."""
+    status = {
+        "geo_path": str(GEO_PATH),
+        "municipalities_geojson": "missing",
+        "crosswalk_rows": 0,
+        "alias_rows": 0,
+    }
+    geo_path = GEO_PATH / "municipalities.geojson"
+    if geo_path.exists():
+        try:
+            status["municipalities_geojson"] = f"loaded ({geo_path.stat().st_size/1024/1024:.1f} MB)"
+        except Exception:
+            status["municipalities_geojson"] = "loaded"
+    cw_path = GEO_PATH / "municipality_crosswalk.csv"
+    if not cw_path.exists():
+        cw_path = GEO_PATH / "municipalities.csv"
+    if cw_path.exists():
+        try:
+            status["crosswalk_rows"] = int(len(pd.read_csv(cw_path, dtype=str)))
+        except Exception:
+            status["crosswalk_rows"] = -1
+    alias_path = GEO_PATH / "municipality_aliases.csv"
+    if alias_path.exists():
+        try:
+            status["alias_rows"] = int(len(pd.read_csv(alias_path, dtype=str)))
+        except Exception:
+            status["alias_rows"] = -1
+    return status
 def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican", title=""):
     """Render a true GeoJSON choropleth when local /geo boundary files are available."""
     available_layers = _ai_preferred_boundary_layers(heat_df, title=title)
@@ -5941,16 +5968,31 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         matched_features.append(nf)
 
     matched_count = len({str((feat.get("properties") or {}).get("__cc_join_key", "")) for feat in matched_features})
-    st.caption(
-        f"Boundary heat map using {layer_label}. "
-        f"Joined on Area Intelligence `{', '.join(data_cols)}`. "
-        f"Matched {matched_count:,} of {len(lookup_df):,} current area row(s)."
-    )
-
+    unmatched_source_df = pd.DataFrame()
     if layer_label == "Municipality Boundaries" and "source_lookup_df" in locals():
         unmatched_source_df = source_lookup_df[~source_lookup_df["__source_geo_key"].astype(str).isin(matched_source_keys)].copy()
-        if not unmatched_source_df.empty:
-            _ai_render_alias_suggestion_download(unmatched_source_df)
+
+    if layer_label == "Municipality Boundaries":
+        status = _ai_mapping_file_status()
+        st.caption(
+            f"Map status — GeoJSON: {status.get('municipalities_geojson')} · "
+            f"Crosswalk rows: {status.get('crosswalk_rows'):,} · "
+            f"Alias rows: {status.get('alias_rows'):,} · "
+            f"Matched: {matched_count:,} / {len(source_lookup_df) if 'source_lookup_df' in locals() else len(lookup_df):,} · "
+            f"Unmatched: {len(unmatched_source_df):,}"
+        )
+    else:
+        st.caption(
+            f"Boundary heat map using {layer_label}. "
+            f"Joined on Area Intelligence `{', '.join(data_cols)}`. "
+            f"Matched {matched_count:,} of {len(lookup_df):,} current area row(s)."
+        )
+
+    if layer_label == "Municipality Boundaries" and not unmatched_source_df.empty:
+        with st.expander("Remaining unmatched municipalities", expanded=False):
+            show_cols = [c for c in ["__source_geo_key", "Area_Label", "Total_Voters", metric_col] if c in unmatched_source_df.columns]
+            st.dataframe(unmatched_source_df[show_cols].head(200), width="stretch", hide_index=True)
+        _ai_render_alias_suggestion_download(unmatched_source_df)
 
     if not matched_features:
         st.warning("No boundaries matched. We may need a custom crosswalk for this GeoJSON layer.")
@@ -7635,3 +7677,4 @@ else:
             st.markdown('</div>', unsafe_allow_html=True)
 
 # Candidate Connect Area Intelligence map crosswalk build v34
+# v38: live mapping status + fresh geo/crosswalk/alias reload
