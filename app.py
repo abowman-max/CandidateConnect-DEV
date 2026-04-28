@@ -832,7 +832,7 @@ def pie_chart_with_table(df_chart: pd.DataFrame, label_col: str, value_col: str,
         color=alt.Color(field=label_col, type="nominal", scale=alt.Scale(domain=domain, range=colors), legend=None),
         tooltip=[alt.Tooltip(f"{label_col}:N"), alt.Tooltip(f"{value_col}:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
     ).properties(height=220)
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
     st.markdown(make_summary_table(chart_df, label_col, value_col, colors), unsafe_allow_html=True)
 
 
@@ -3581,7 +3581,7 @@ def render_lookup_field_block(title: str, rows: list[tuple[str, str]]):
     if not clean_rows:
         st.caption("No data available")
     else:
-        st.dataframe(pd.DataFrame(clean_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(clean_rows), width="stretch", hide_index=True)
 
 
 def format_vote_method_label(value: str) -> str:
@@ -5362,7 +5362,10 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
         return False
 
-    # Use a context-specific key so an old Streamlit selection does not keep the map stuck\n    # on County Boundaries after the user changes report levels.\n    layer_context = sanitize_filename_part(str(title or "area"))\n    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key=f"ai_geo_boundary_layer_{layer_context}")
+    # Use a context-specific key so an old Streamlit selection does not keep the map stuck
+    # on County Boundaries after the user changes report levels.
+    layer_context = sanitize_filename_part(str(title or "area"))
+    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key=f"ai_geo_boundary_layer_{layer_context}")
     geo = _ai_load_geojson_layer(layer_label)
     if not geo:
         st.warning("That boundary file could not be loaded. Check the GeoJSON file format.")
@@ -5473,7 +5476,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         ).properties(
             height=650,
         )
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
         return True
     except Exception as e:
         st.warning(f"Boundary map could not render ({e}). Showing the top-priority planning table below.")
@@ -5530,7 +5533,7 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
         '<div class="tiny-muted">Use this as the ranked planning table behind the boundary map.</div></div>',
         unsafe_allow_html=True,
     )
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    st.dataframe(table_df, width="stretch", hide_index=True)
 
 
 
@@ -5868,7 +5871,7 @@ def render_area_intelligence_workspace():
                     color=alt.Color(field="Party", type="nominal", scale=alt.Scale(domain=party_chart["Party"].tolist(), range=party_colors), legend=alt.Legend(title="Party")),
                     tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f", title="Percent")],
                 ).properties(height=265)
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
                 st.markdown(make_summary_table(party_chart, "Party", "Voters", party_colors), unsafe_allow_html=True)
             else:
                 st.caption("No party data available.")
@@ -5886,7 +5889,7 @@ def render_area_intelligence_workspace():
                     color=alt.Color(field="Gender", type="nominal", scale=alt.Scale(domain=gender_chart["Gender"].tolist(), range=gender_colors), legend=alt.Legend(title="Gender")),
                     tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f", title="Percent")],
                 ).properties(height=265)
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
                 st.markdown(make_summary_table(gender_chart, "Gender", "Voters", gender_colors), unsafe_allow_html=True)
             else:
                 st.caption("No gender data available.")
