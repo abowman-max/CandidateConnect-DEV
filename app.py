@@ -5539,6 +5539,97 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
 
 
 
+def _ai_format_cell_value(value, col_name=""):
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if text.lower() in {"nan", "none", "nat"}:
+        return ""
+    if text == "":
+        return ""
+    if "%" in text or text == "—":
+        return text
+    try:
+        cleaned = text.replace(",", "")
+        num = float(cleaned)
+        if col_name in {"Avg_Age", "Dem_%", "Rep_%", "Other_%", "Mail_Return_%", "Outstanding_%"}:
+            return f"{num:,.1f}".rstrip("0").rstrip(".")
+        if abs(num - round(num)) < 0.000001:
+            return f"{int(round(num)):,}"
+        return f"{num:,.1f}"
+    except Exception:
+        return text
+
+
+def _ai_clean_display_df(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out = df.copy()
+    drop_cols = []
+    for c in out.columns:
+        name = str(c).strip()
+        if name == "" or name.lower().startswith("unnamed") or name.lower() in {"index", "level_0"}:
+            drop_cols.append(c)
+    if drop_cols:
+        out = out.drop(columns=drop_cols, errors="ignore")
+    for c in out.columns:
+        out[c] = out[c].map(lambda v, col=c: _ai_format_cell_value(v, str(col)))
+    return out
+
+
+def _ai_render_table(df, height=360, sticky_cols=None, key=""):
+    display = _ai_clean_display_df(df)
+    if display.empty:
+        st.caption("No table data available.")
+        return
+    sticky_cols = sticky_cols or []
+    cols = [str(c) for c in display.columns]
+    sticky_set = {c for c in sticky_cols if c in cols}
+    import html as _html
+    def esc(x):
+        return _html.escape(str(x))
+    sticky_positions = {cols[i]: i * 155 for i in range(min(3, len(cols))) if cols[i] in sticky_set}
+    table_id = f"ai-table-{key}" if key else "ai-table"
+    css = f"""
+    <style>
+    .{table_id}-wrap {{ width:100%; max-height:{int(height)}px; overflow:auto; border:1px solid #e5e7eb; border-radius:12px; background:white; }}
+    table.{table_id} {{ border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; font-size:12px; }}
+    table.{table_id} th, table.{table_id} td {{ border-right:1px solid #edf0f2; border-bottom:1px solid #edf0f2; padding:8px 10px; text-align:center !important; vertical-align:middle; white-space:nowrap; min-width:110px; }}
+    table.{table_id} th {{ position:sticky; top:0; z-index:5; background:#f8fafc; color:#24303f; font-weight:800; }}
+    table.{table_id} td {{ background:white; color:#24303f; }}
+    table.{table_id} tr:hover td {{ background:#f7fbff; }}
+    table.{table_id} .sticky-col {{ position:sticky; z-index:4; background:#ffffff; box-shadow:1px 0 0 #e5e7eb; font-weight:700; }}
+    table.{table_id} th.sticky-col {{ z-index:7; background:#f8fafc; }}
+    </style>
+    """
+    header_cells = []
+    for c in cols:
+        cls = "sticky-col" if c in sticky_set else ""
+        style = f"left:{sticky_positions.get(c, 0)}px; min-width:155px;" if c in sticky_set else ""
+        header_cells.append(f'<th class="{cls}" style="{style}">{esc(c)}</th>')
+    rows_html = []
+    for _, r in display.iterrows():
+        tds = []
+        for c in cols:
+            cls = "sticky-col" if c in sticky_set else ""
+            style = f"left:{sticky_positions.get(c, 0)}px; min-width:155px;" if c in sticky_set else ""
+            tds.append(f'<td class="{cls}" style="{style}">{esc(r[c])}</td>')
+        rows_html.append("<tr>" + "".join(tds) + "</tr>")
+    html_table = css + '<div class="{}-wrap"><table class="{}"><thead><tr>{}</tr></thead><tbody>{}</tbody></table></div>'.format(table_id, table_id, "".join(header_cells), "".join(rows_html))
+    st.markdown(html_table, unsafe_allow_html=True)
+
+def render_area_intelligence_workspace():
+    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 area profiles, mail program, and strategy foundation.</div></div>', unsafe_allow_html=True)
+
+    try:
+        area_df = load_area_precinct_summary()
+    except Exception as e:
+        st.error("Area Intelligence file could not be loaded.")
+
+
 def render_area_intelligence_workspace():
     st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 area profiles, mail program, and strategy foundation.</div></div>', unsafe_allow_html=True)
 
