@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import boto3
 
-AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v36-sure-alias-layer"
+AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v37-alias-suggestion-builder"
 
 from io import BytesIO
 from datetime import datetime
@@ -39,7 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
-# Candidate Connect Area Intelligence mapping build: v36 SURE alias crosswalk matching
+# Candidate Connect Area Intelligence mapping build: v37 alias suggestion builder
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5550,6 +5550,169 @@ def _ai_geo_feature_label(layer_label: str, props: dict) -> str:
     return normalize_export_text(props.get("NAME") or props.get("NAMELSAD") or props.get("DISTRICT") or props.get("GEOID") or "")
 
 
+
+def _ai_split_county_muni_from_join_key(join_key: str):
+    """Return (county, municipality) from a normalized Area Intelligence municipality key."""
+    key = _ai_geo_normalize_join_key(join_key)
+    if not key:
+        return "", ""
+    if "|" in key:
+        parts = key.split("|", 1)
+        return parts[0].strip(), parts[1].strip()
+    parts = key.split()
+    if len(parts) >= 2:
+        return parts[0].strip(), " ".join(parts[1:]).strip()
+    return "", key
+
+
+@st.cache_data(show_spinner=False)
+def _ai_load_municipality_crosswalk_candidates():
+    """Load official municipality candidates used to suggest missing SURE aliases."""
+    path = GEO_PATH / "municipality_crosswalk.csv"
+    if not path.exists():
+        path = GEO_PATH / "municipalities.csv"
+    if not path.exists():
+        return []
+    try:
+        df = pd.read_csv(path, dtype=str).fillna("")
+    except Exception:
+        return []
+
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    county_col = cols.get("county") or cols.get("official_county_name") or cols.get("county_name")
+    muni_col = cols.get("municipality") or cols.get("official_municipal_name") or cols.get("municipal_name")
+    official_muni_col = cols.get("official_municipal_name") or muni_col
+    fips_col = cols.get("fips_mun_code")
+    geoid_col = cols.get("geoid")
+    class_col = cols.get("official_class_of_munic") or cols.get("class") or cols.get("class_of_munic")
+    if not county_col or not muni_col:
+        return []
+
+    candidates = []
+    for _, row in df.iterrows():
+        county = _ai_geo_normalize_key(row.get(county_col, ""))
+        muni_raw = row.get(official_muni_col, row.get(muni_col, ""))
+        muni = _ai_geo_normalize_key(muni_raw)
+        if not county or not muni:
+            continue
+        suffix = _ai_geo_municipality_suffix_from_text(row.get(class_col, "")) if class_col else ""
+        muni_base = _ai_geo_muni_base_key(muni)
+        muni_full = _ai_geo_normalize_key(f"{muni_base} {suffix}".strip()) if suffix else muni
+        candidates.append({
+            "COUNTY": county,
+            "OFFICIAL_MUNICIPALITY": muni_full,
+            "OFFICIAL_BASE": muni_base,
+            "FIPS_MUN_CODE": normalize_export_text(row.get(fips_col, "")) if fips_col else "",
+            "GEOID": normalize_export_text(row.get(geoid_col, "")) if geoid_col else "",
+        })
+    return candidates
+
+
+def _ai_similarity_score(left: str, right: str) -> float:
+    """Difflib score plus compact/fuzzy boosts for near-spelling aliases."""
+    import difflib
+    a = _ai_geo_normalize_key(left)
+    b = _ai_geo_normalize_key(right)
+    if not a or not b:
+        return 0.0
+    scores = [difflib.SequenceMatcher(None, a, b).ratio()]
+    ac = a.replace(" ", "")
+    bc = b.replace(" ", "")
+    scores.append(difflib.SequenceMatcher(None, ac, bc).ratio())
+    af = _ai_geo_fuzzy_join_key(a)
+    bf = _ai_geo_fuzzy_join_key(b)
+    scores.append(difflib.SequenceMatcher(None, af, bf).ratio())
+    if ac and bc and (ac in bc or bc in ac):
+        scores.append(0.92)
+    return max(scores) * 100.0
+
+
+def _ai_existing_alias_dataframe():
+    path = GEO_PATH / "municipality_aliases.csv"
+    if path.exists():
+        try:
+            return pd.read_csv(path, dtype=str).fillna("")
+        except Exception:
+            pass
+    return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "NOTES"])
+
+
+def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: float = 82.0) -> pd.DataFrame:
+    """Suggest municipality_aliases.csv rows for unmatched SURE municipality names."""
+    if unmatched_source_df is None or unmatched_source_df.empty:
+        return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "MATCH_SCORE", "NOTES"])
+    candidates = _ai_load_municipality_crosswalk_candidates()
+    if not candidates:
+        return pd.DataFrame(columns=["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "MATCH_SCORE", "NOTES"])
+
+    by_county = {}
+    for cand in candidates:
+        by_county.setdefault(cand["COUNTY"], []).append(cand)
+
+    rows = []
+    seen = set()
+    for _, src in unmatched_source_df.iterrows():
+        county, sure_muni = _ai_split_county_muni_from_join_key(src.get("Geo_Key", ""))
+        if not county or not sure_muni:
+            continue
+        key = (county, sure_muni)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        best = None
+        best_score = 0.0
+        for cand in by_county.get(county, []):
+            score = max(
+                _ai_similarity_score(sure_muni, cand.get("OFFICIAL_MUNICIPALITY", "")),
+                _ai_similarity_score(_ai_geo_muni_base_key(sure_muni), cand.get("OFFICIAL_BASE", "")),
+            )
+            if score > best_score:
+                best_score = score
+                best = cand
+        if best and best_score >= float(min_score):
+            rows.append({
+                "COUNTY": county.title(),
+                "SURE_MUNICIPALITY": sure_muni.title(),
+                "OFFICIAL_MUNICIPALITY": str(best.get("OFFICIAL_MUNICIPALITY", "")).title(),
+                "FIPS_MUN_CODE": best.get("FIPS_MUN_CODE", ""),
+                "GEOID": best.get("GEOID", ""),
+                "MATCH_SCORE": round(best_score, 1),
+                "NOTES": "auto-suggested from unmatched Area Intelligence map row; review before production",
+            })
+    return pd.DataFrame(rows)
+
+
+def _ai_render_alias_suggestion_download(unmatched_source_df: pd.DataFrame):
+    """Show a production-friendly alias CSV download for remaining unmatched municipalities."""
+    suggestions = _ai_build_alias_suggestions(unmatched_source_df)
+    if suggestions.empty:
+        return
+    existing = _ai_existing_alias_dataframe()
+    existing_cols = ["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "NOTES"]
+    for col in existing_cols:
+        if col not in existing.columns:
+            existing[col] = ""
+    add_df = suggestions.copy()
+    for col in existing_cols:
+        if col not in add_df.columns:
+            add_df[col] = ""
+    combined = pd.concat([existing[existing_cols], add_df[existing_cols]], ignore_index=True)
+    combined["_dedupe"] = combined.apply(lambda r: f"{_ai_geo_normalize_key(r.get('COUNTY',''))}|{_ai_geo_normalize_key(r.get('SURE_MUNICIPALITY',''))}", axis=1)
+    combined = combined.drop_duplicates(subset=["_dedupe"], keep="last").drop(columns=["_dedupe"])
+
+    with st.expander("Unmatched municipality alias suggestions", expanded=False):
+        st.caption("These are high-confidence matches between SURE municipality names and the official map crosswalk. Review them, then replace geo/municipality_aliases.csv with the updated download.")
+        st.dataframe(suggestions, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download updated municipality_aliases.csv",
+            data=combined.to_csv(index=False).encode("utf-8"),
+            file_name="municipality_aliases.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+
 def _ai_preferred_boundary_layers(heat_df: pd.DataFrame, title: str = ""):
     """Default to the next-lowest useful layer for the selected report.
 
@@ -5675,6 +5838,8 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     keep_label = "Area_Label" if "Area_Label" in map_df.columns else data_cols[-1]
     agg_cols[keep_label] = "first"
     lookup_df = map_df.groupby("Geo_Key", as_index=False).agg(agg_cols).rename(columns={keep_label: "Area_Label"})
+    lookup_df["__source_geo_key"] = lookup_df["Geo_Key"].astype(str)
+    source_lookup_df = lookup_df.copy()
 
     # Add compact/fuzzy aliases and, when available, a municipality crosswalk
     # from geo/municipalities.csv. The crosswalk is the final safety net for
@@ -5739,6 +5904,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
 
     matched_features = []
     unmatched_sample = []
+    matched_source_keys = set()
 
     for feat in (geo or {}).get("features", []):
         if not isinstance(feat, dict):
@@ -5752,6 +5918,9 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
             continue
 
         rec = lookup_records.get(matched_key, {})
+        src_key = normalize_export_text(rec.get("__source_geo_key", ""))
+        if src_key:
+            matched_source_keys.add(src_key)
         nf = dict(feat)
         props["__cc_join_key"] = matched_key
         props["__cc_label"] = _ai_geo_feature_label(layer_label, props)
@@ -5777,6 +5946,11 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         f"Joined on Area Intelligence `{', '.join(data_cols)}`. "
         f"Matched {matched_count:,} of {len(lookup_df):,} current area row(s)."
     )
+
+    if layer_label == "Municipality Boundaries" and "source_lookup_df" in locals():
+        unmatched_source_df = source_lookup_df[~source_lookup_df["__source_geo_key"].astype(str).isin(matched_source_keys)].copy()
+        if not unmatched_source_df.empty:
+            _ai_render_alias_suggestion_download(unmatched_source_df)
 
     if not matched_features:
         st.warning("No boundaries matched. We may need a custom crosswalk for this GeoJSON layer.")
