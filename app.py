@@ -5209,63 +5209,183 @@ def _ai_geojson_likely_lonlat(geojson_data):
     return good >= max(1, int(len(samples) * 0.75))
 
 
+
+def _ai_geo_municipality_type_suffix(props: dict) -> str:
+    """Return a short municipal suffix that commonly appears in voter files."""
+    cls = normalize_export_text((props or {}).get("CLASS_OF_MUNIC", "")).upper()
+    if "TWP" in cls or "TOWNSHIP" in cls:
+        return "TWP"
+    if "BORO" in cls or "BOROUGH" in cls:
+        return "BORO"
+    if "CITY" in cls:
+        return "CITY"
+    if "TOWN" in cls:
+        return "TOWN"
+    return ""
+
+
+def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str | None = None):
+    """Create robust match keys for a GeoJSON feature.
+
+    The PA municipality GeoJSON stores names as MUNICIPAL_NAME without TWP/BORO,
+    while the voter data often stores CUMBERLAND TWP, GETTYSBURG, etc.  This
+    function creates both plain and suffix versions and includes county + muni
+    composite keys so duplicate municipality names across counties do not collide.
+    """
+    props = props or {}
+    layer = str(layer_label or "")
+    keys = []
+
+    def add(value):
+        key = _ai_geo_normalize_key(value)
+        if key and key not in keys:
+            keys.append(key)
+
+    if layer == "Municipality Boundaries":
+        county = props.get("COUNTY_NAME") or props.get("COUNTY") or props.get("COUNTY_NAM")
+        muni = props.get("MUNICIPAL_NAME") or props.get("MUNICIPAL_NAM") or props.get("MUNICIPAL") or props.get("NAME")
+        suffix = _ai_geo_municipality_type_suffix(props)
+        muni_key = _ai_geo_normalize_key(muni)
+        county_key = _ai_geo_normalize_key(county)
+        if county_key and muni_key:
+            add(f"{county_key}|{muni_key}")
+            if suffix:
+                add(f"{county_key}|{muni_key} {suffix}")
+        add(muni_key)
+        if suffix:
+            add(f"{muni_key} {suffix}")
+    elif layer == "County Boundaries":
+        add(props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("NAME") or props.get("COUNTY"))
+    elif layer in {"State House Boundaries", "State Senate Boundaries", "Congressional Boundaries"}:
+        for p in ["DISTRICT", "DISTRICT_N", "DISTRICT_NO", "DISTRICT_NUM", "DISTRICTID", "LEG_DISTRICT", "GEOID", "NAME", "NAMELSAD"]:
+            if p in props:
+                val = normalize_export_text(props.get(p))
+                add(val)
+                try:
+                    add(str(int(float(val))))
+                except Exception:
+                    pass
+    else:
+        for p in ["NAME", "NAMELSAD", "SCHOOL_DIST", "SD_NAME", "DISTRICT", "GEOID"]:
+            if p in props:
+                add(props.get(p))
+
+    return keys
+
+
+def _ai_geo_feature_label(layer_label: str, props: dict) -> str:
+    props = props or {}
+    if layer_label == "Municipality Boundaries":
+        county = normalize_export_text(props.get("COUNTY_NAME", ""))
+        muni = normalize_export_text(props.get("MUNICIPAL_NAME", ""))
+        suffix = _ai_geo_municipality_type_suffix(props)
+        name = f"{muni} {suffix}".strip() if suffix and suffix not in muni.upper().split() else muni
+        return f"{county} • {name}" if county and name else (name or county)
+    if layer_label == "County Boundaries":
+        return normalize_export_text(props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("NAME") or "")
+    return normalize_export_text(props.get("NAME") or props.get("NAMELSAD") or props.get("DISTRICT") or props.get("GEOID") or "")
+
+
+def _ai_preferred_boundary_layers(heat_df: pd.DataFrame, title: str = ""):
+    """Default to the next-lowest useful layer for the selected report.
+
+    County, STS, STH, USC, and school-district reports should first show
+    municipality boundaries when that data is available.  Precinct can be added
+    later above municipality once precinct GeoJSON is ready.
+    """
+    available = _ai_geo_available_layers()
+    if not available:
+        return []
+
+    ordered = []
+    def add(label):
+        if label in available and label not in ordered:
+            ordered.append(label)
+
+    # Start with the most useful current client-facing layer.
+    if "Municipality" in heat_df.columns:
+        add("Municipality Boundaries")
+    # Then fall back to layers that match the report level.
+    if "School District" in heat_df.columns:
+        add("School District Boundaries")
+    if "STH" in heat_df.columns:
+        add("State House Boundaries")
+    if "STS" in heat_df.columns:
+        add("State Senate Boundaries")
+    if "USC" in heat_df.columns:
+        add("Congressional Boundaries")
+    if "County" in heat_df.columns:
+        add("County Boundaries")
+
+    for label in available:
+        add(label)
+    return ordered
+
+
+def _ai_heat_data_key_columns(layer_label: str, heat_df: pd.DataFrame):
+    """Return one or more current Area Intelligence columns used to join to a layer."""
+    if heat_df is None or heat_df.empty:
+        return []
+    if layer_label == "Municipality Boundaries":
+        cols = []
+        if "County" in heat_df.columns:
+            cols.append("County")
+        if "Municipality" in heat_df.columns:
+            cols.append("Municipality")
+        return cols
+    preferred = {
+        "County Boundaries": ["County"],
+        "School District Boundaries": ["School District"],
+        "State House Boundaries": ["STH"],
+        "State Senate Boundaries": ["STS"],
+        "Congressional Boundaries": ["USC"],
+    }
+    return [c for c in preferred.get(layer_label, []) if c in heat_df.columns]
+
+
+def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
+    if layer_label == "Municipality Boundaries" and "Municipality" in data_cols:
+        muni = row.get("Municipality", "")
+        county = row.get("County", "")
+        muni_key = _ai_geo_normalize_key(muni)
+        county_key = _ai_geo_normalize_key(county)
+        return f"{county_key}|{muni_key}" if county_key else muni_key
+    if data_cols:
+        return _ai_geo_normalize_key(row.get(data_cols[-1], ""))
+    return ""
+
+
 def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican", title=""):
     """Render a true GeoJSON choropleth when local /geo boundary files are available."""
-    available_layers = _ai_geo_available_layers()
+    available_layers = _ai_preferred_boundary_layers(heat_df, title=title)
     if not available_layers:
         st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
         return False
 
-    title_upper = str(title or "").upper()
-    if "STS" in title_upper or ("STS" in heat_df.columns and heat_df.get("STS", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "State Senate Boundaries" in available_layers):
-        preferred_defaults = [("State Senate Boundaries", "STS"), ("County Boundaries", "County")]
-    elif "STH" in title_upper or ("STH" in heat_df.columns and heat_df.get("STH", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "State House Boundaries" in available_layers):
-        preferred_defaults = [("State House Boundaries", "STH"), ("County Boundaries", "County")]
-    elif "USC" in title_upper or ("USC" in heat_df.columns and heat_df.get("USC", pd.Series(dtype=object)).astype(str).str.strip().nunique() == 1 and "Congressional Boundaries" in available_layers):
-        preferred_defaults = [("Congressional Boundaries", "USC"), ("County Boundaries", "County")]
-    else:
-        preferred_defaults = [
-            ("Municipality Boundaries", "Municipality"),
-            ("County Boundaries", "County"),
-            ("School District Boundaries", "School District"),
-            ("State House Boundaries", "STH"),
-            ("State Senate Boundaries", "STS"),
-            ("Congressional Boundaries", "USC"),
-        ]
-    default_idx = 0
-    for layer, data_col in preferred_defaults:
-        if layer in available_layers and data_col in heat_df.columns and heat_df[data_col].astype(str).str.strip().ne("").any():
-            default_idx = available_layers.index(layer)
-            break
-
-    layer_label = st.selectbox("Boundary layer", available_layers, index=default_idx, key="ai_geo_boundary_layer")
+    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key="ai_geo_boundary_layer")
     geo = _ai_load_geojson_layer(layer_label)
     if not geo:
         st.warning("That boundary file could not be loaded. Check the GeoJSON file format.")
         return False
 
-    prop_names = _ai_geo_property_names(geo)
-    guessed_prop = _ai_guess_geo_property(layer_label, prop_names)
-    prop_idx = prop_names.index(guessed_prop) if guessed_prop in prop_names else 0
-    geo_prop = st.selectbox("Boundary name field", prop_names, index=prop_idx, key=f"ai_geo_prop_{layer_label}")
-
-    data_col = _ai_heat_data_key_column(layer_label, heat_df)
-    if data_col is None:
+    data_cols = _ai_heat_data_key_columns(layer_label, heat_df)
+    if not data_cols:
         st.warning("The current Area Intelligence data does not have a matching geography column for this boundary layer.")
         return False
 
     map_df = heat_df.copy()
-    map_df["Geo_Key"] = map_df[data_col].apply(_ai_geo_normalize_key)
+    map_df["Geo_Key"] = map_df.apply(lambda r: _ai_data_join_key_from_row(r, layer_label, data_cols), axis=1)
     map_df = map_df[map_df["Geo_Key"].astype(str).str.strip() != ""].copy()
     if map_df.empty:
         st.warning("No matching Area Intelligence geography values were available for this boundary layer.")
         return False
 
+    # Aggregate multiple rows that land on one boundary.
     agg_cols = {metric_col: "max"}
-    for col in ["Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Field_Priority", "Mail_Ballots_Outstanding"]:
+    for col in ["Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Field_Priority", "Mail_Ballots_Outstanding", "Mail_Return_%", "Outstanding_%"]:
         if col in map_df.columns and col != metric_col:
             agg_cols[col] = "sum" if col in ["Total_Voters", "Target_Voters", "Estimated_Doors", "Mail_Ballots_Outstanding"] else "max"
-    keep_label = "Area_Label" if "Area_Label" in map_df.columns else data_col
+    keep_label = "Area_Label" if "Area_Label" in map_df.columns else data_cols[-1]
     agg_cols[keep_label] = "first"
     lookup_df = map_df.groupby("Geo_Key", as_index=False).agg(agg_cols).rename(columns={keep_label: "Area_Label"})
     lookup_df["__metric_value"] = pd.to_numeric(lookup_df[metric_col], errors="coerce").fillna(0)
@@ -5273,80 +5393,101 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     lookup_df["__target_voters"] = pd.to_numeric(lookup_df.get("Target_Voters", 0), errors="coerce").fillna(0)
     lookup_df["__target_per_door"] = pd.to_numeric(lookup_df.get("Target_Per_Door", 0), errors="coerce").fillna(0)
 
-    prepped_geo = _ai_prepare_geojson_for_join(geo, geo_prop)
-    lookup_keys = set(lookup_df["Geo_Key"].astype(str))
-    matched_features = []
-    all_geo_keys = set()
-    for feat in prepped_geo.get("features", []):
-        props = feat.get("properties") or {}
-        key = str(props.get("__cc_join_key", ""))
-        if key:
-            all_geo_keys.add(key)
-        if key in lookup_keys:
-            matched_features.append(feat)
-
-    matched_count = len({str((feat.get("properties") or {}).get("__cc_join_key", "")) for feat in matched_features if feat.get("properties")})
-    st.caption(f"Boundary heat map using {layer_label} joined on Area Intelligence `{data_col}` to GeoJSON `{geo_prop}`. Matched {matched_count:,} of {len(lookup_df):,} current area row(s).")
-
-    if matched_count == 0 or not matched_features:
-        st.warning("No boundaries matched. Try a different Boundary name field, or we may need to add a custom crosswalk for this GeoJSON layer.")
-        with st.expander("Map join debug", expanded=False):
-            st.write("Sample Area Intelligence keys:", sorted(lookup_keys)[:8])
-            st.write("Sample GeoJSON keys:", sorted(all_geo_keys)[:8])
-            st.write("Available GeoJSON fields:", prop_names)
-        return False
-
-    if not _ai_geojson_likely_lonlat({"features": matched_features}):
-        st.warning("This GeoJSON appears to use projected coordinates instead of longitude/latitude. Convert/export it as WGS84 / EPSG:4326 for web maps.")
-        return False
-
     lookup_records = lookup_df.set_index("Geo_Key").to_dict(orient="index")
-    enriched_features = []
-    for feat in matched_features:
-        nf = dict(feat)
+    lookup_keys = set(lookup_records.keys())
+    matched_features = []
+    unmatched_sample = []
+
+    for feat in (geo or {}).get("features", []):
+        if not isinstance(feat, dict):
+            continue
         props = dict(feat.get("properties") or {})
-        rec = lookup_records.get(str(props.get("__cc_join_key", "")), {})
+        candidate_keys = _ai_geo_feature_candidate_keys(layer_label, props, data_cols[-1] if data_cols else None)
+        matched_key = next((k for k in candidate_keys if k in lookup_keys), None)
+        if not matched_key:
+            if len(unmatched_sample) < 8 and candidate_keys:
+                unmatched_sample.append(candidate_keys[0])
+            continue
+
+        rec = lookup_records.get(matched_key, {})
+        nf = dict(feat)
+        props["__cc_join_key"] = matched_key
+        props["__cc_label"] = _ai_geo_feature_label(layer_label, props)
         props["__metric_value"] = float(rec.get("__metric_value", 0) or 0)
         props["__area_label"] = str(rec.get("Area_Label", props.get("__cc_label", "")))
         props["__total_voters"] = float(rec.get("__total_voters", 0) or 0)
         props["__target_voters"] = float(rec.get("__target_voters", 0) or 0)
         props["__target_per_door"] = float(rec.get("__target_per_door", 0) or 0)
         nf["properties"] = props
-        enriched_features.append(nf)
+        matched_features.append(nf)
 
-    matched_geo = {k: v for k, v in prepped_geo.items() if k != "features"}
-    matched_geo["features"] = enriched_features
-
-    metric_values = [float((f.get("properties") or {}).get("__metric_value", 0) or 0) for f in enriched_features]
-    if metric_values and max(metric_values) == min(metric_values):
-        st.caption("Only one matched boundary/value is visible for this selection. Choose a more detailed boundary layer, such as State Senate or Municipality, when available.")
-
-    scheme = _ai_boundary_color_scheme(metric_label)
-    # IMPORTANT: pass the full GeoJSON FeatureCollection to Vega-Lite and tell it
-    # to read the features array. Passing only a Python list of features can
-    # render a blank chart/NaN legend in Streamlit.
-    geo_source = alt.Data(
-        values=matched_geo,
-        format=alt.DataFormat(type="json", property="features")
+    matched_count = len({str((feat.get("properties") or {}).get("__cc_join_key", "")) for feat in matched_features})
+    st.caption(
+        f"Boundary heat map using {layer_label}. "
+        f"Joined on Area Intelligence `{', '.join(data_cols)}`. "
+        f"Matched {matched_count:,} of {len(lookup_df):,} current area row(s)."
     )
-    chart = alt.Chart(geo_source).mark_geoshape(
-        stroke="#24303f", strokeWidth=0.7
-    ).encode(
-        color=alt.Color("properties.__metric_value:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
-        tooltip=[
-            alt.Tooltip("properties.__cc_label:N", title="Boundary"),
-            alt.Tooltip("properties.__area_label:N", title="Matched Area"),
-            alt.Tooltip("properties.__metric_value:Q", title=metric_label, format=",.1f"),
-            alt.Tooltip("properties.__total_voters:Q", title="Total Voters", format=","),
-            alt.Tooltip("properties.__target_voters:Q", title="Target Voters", format=",.0f"),
-            alt.Tooltip("properties.__target_per_door:Q", title="Target/Door", format=".2f"),
-        ],
-    ).project(type="mercator").properties(height=620)
 
-    st.altair_chart(chart, use_container_width=True)
-    return True
+    if not matched_features:
+        st.warning("No boundaries matched. We may need a custom crosswalk for this GeoJSON layer.")
+        with st.expander("Map join debug", expanded=True):
+            st.write("Sample Area Intelligence keys:", sorted(lookup_keys)[:12])
+            st.write("Sample GeoJSON keys:", unmatched_sample)
+            st.write("Available GeoJSON fields:", _ai_geo_property_names(geo))
+        return False
+
+    if not _ai_geojson_likely_lonlat({"features": matched_features}):
+        st.warning("This GeoJSON appears to use projected coordinates instead of longitude/latitude. Convert/export it as WGS84 / EPSG:4326 for web maps.")
+        return False
+
+    matched_geo = {k: v for k, v in geo.items() if k != "features"}
+    matched_geo["features"] = matched_features
+
+    try:
+        import plotly.express as px
+        plot_df = pd.DataFrame([
+            {
+                "Geo_Key": (f.get("properties") or {}).get("__cc_join_key", ""),
+                "Area": (f.get("properties") or {}).get("__area_label", ""),
+                metric_col: (f.get("properties") or {}).get("__metric_value", 0),
+                "Total Voters": (f.get("properties") or {}).get("__total_voters", 0),
+                "Target Voters": (f.get("properties") or {}).get("__target_voters", 0),
+                "Target/Door": (f.get("properties") or {}).get("__target_per_door", 0),
+            }
+            for f in matched_features
+        ])
+        plot_df[metric_col] = pd.to_numeric(plot_df[metric_col], errors="coerce").fillna(0)
+        fig = px.choropleth(
+            plot_df,
+            geojson=matched_geo,
+            locations="Geo_Key",
+            featureidkey="properties.__cc_join_key",
+            color=metric_col,
+            color_continuous_scale="RdYlGn",
+            hover_name="Area",
+            hover_data={
+                metric_col: ":,.1f",
+                "Total Voters": ":,.0f",
+                "Target Voters": ":,.0f",
+                "Target/Door": ":.2f",
+                "Geo_Key": False,
+            },
+        )
+        fig.update_geos(fitbounds="locations", visible=False)
+        fig.update_layout(
+            height=650,
+            margin=dict(l=0, r=0, t=8, b=0),
+            coloraxis_colorbar=dict(title=metric_label),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        return True
+    except Exception as e:
+        st.warning(f"Boundary map could not render with Plotly ({e}). Falling back to the simple planning table below.")
+        return False
+
+
 def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
-    """Render the first Area Intelligence heat-map panel."""
+    """Render the Area Intelligence heat-map panel."""
     party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
     heat_df = _ai_add_heatmap_metrics(display_df, candidate_party=candidate_party, title=title)
     if heat_df.empty:
@@ -5366,535 +5507,37 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
     }
     metric_label = st.selectbox("Heat metric", list(metric_options.keys()), index=1, key="ai_heat_metric")
     metric_col = metric_options[metric_label]
-    top_n = st.slider("Areas shown", min_value=10, max_value=75, value=30, step=5, key="ai_heat_top_n")
 
     heat_df[metric_col] = pd.to_numeric(heat_df[metric_col], errors="coerce").fillna(0)
-    ranked = heat_df.sort_values(metric_col, ascending=False).head(int(top_n)).copy()
+    ranked = heat_df.sort_values(metric_col, ascending=False).head(30).copy()
     ranked["Rank"] = range(1, len(ranked) + 1)
-    ranked["Area_Label_Wrapped"] = ranked["Area_Label"].astype(str).str.slice(0, 60)
 
     st.markdown(
         '<div class="section-card"><div class="small-header">Area Heat Map</div>'
-        '<div class="tiny-muted">Boundary heat maps use GeoJSON files from the local /geo folder. The ranked heat map remains below as a fallback and planning view.</div></div>',
+        '<div class="tiny-muted">Boundary heat maps use GeoJSON files from the local /geo folder. The default view uses the next-lowest available geography for the selected report.</div></div>',
         unsafe_allow_html=True,
     )
 
     boundary_rendered = _ai_render_boundary_heat_map(heat_df, metric_col, metric_label, candidate_party=candidate_party, title=title)
 
-    lat_col, lon_col = _ai_find_lat_lon_columns(ranked)
-    if lat_col and lon_col:
-        geo_df = ranked.copy()
-        geo_df[lat_col] = pd.to_numeric(geo_df[lat_col], errors="coerce")
-        geo_df[lon_col] = pd.to_numeric(geo_df[lon_col], errors="coerce")
-        geo_df = geo_df.dropna(subset=[lat_col, lon_col])
-        if not geo_df.empty:
-            geo_df["Bubble_Size"] = (pd.to_numeric(geo_df[metric_col], errors="coerce").fillna(0).rank(pct=True) * 650) + 80
-            chart = alt.Chart(geo_df).mark_circle(opacity=0.72).encode(
-                longitude=alt.Longitude(f"{lon_col}:Q"),
-                latitude=alt.Latitude(f"{lat_col}:Q"),
-                size=alt.Size("Bubble_Size:Q", legend=None),
-                color=alt.Color(f"{metric_col}:Q", title=metric_label, scale=alt.Scale(scheme="redyellowgreen")),
-                tooltip=[
-                    alt.Tooltip("Area_Label:N", title="Area"),
-                    alt.Tooltip(f"{metric_col}:Q", title=metric_label, format=",.1f"),
-                    alt.Tooltip("Total_Voters:Q", title="Total Voters", format=","),
-                    alt.Tooltip("Target_Voters:Q", title=f"{party_label} Target Voters", format=",.0f"),
-                    alt.Tooltip("Target_Per_Door:Q", title="Target/Door", format=".2f"),
-                ],
-            ).project(type="mercator").properties(height=520)
-            st.altair_chart(chart, use_container_width=True)
-            st.caption("Geographic bubble heat map shown because latitude/longitude fields were found in the Area Intelligence summary.")
-        else:
-            st.caption("Latitude/longitude columns were found, but no valid coordinates were available for this selection.")
-    else:
-        if not boundary_rendered:
-            st.caption("Boundary/coordinate data is not available for this selection yet, so the ranked heat-map layer below is shown for field planning.")
-
-    chart = alt.Chart(ranked).mark_rect(cornerRadius=4).encode(
-        y=alt.Y("Area_Label_Wrapped:N", sort="-x", title=None, axis=alt.Axis(labelLimit=360)),
-        x=alt.X("Rank:O", title="Priority Rank"),
-        color=alt.Color(f"{metric_col}:Q", title=metric_label, scale=alt.Scale(scheme="redyellowgreen")),
-        tooltip=[
-            alt.Tooltip("Rank:O", title="Rank"),
-            alt.Tooltip("Area_Label:N", title="Area"),
-            alt.Tooltip(f"{metric_col}:Q", title=metric_label, format=",.1f"),
-            alt.Tooltip("Total_Voters:Q", title="Total Voters", format=","),
-            alt.Tooltip("Target_Voters:Q", title=f"{party_label} Target Voters", format=",.0f"),
-            alt.Tooltip("Estimated_Doors:Q", title="Estimated Doors", format=",.0f"),
-            alt.Tooltip("Target_Per_Door:Q", title="Target/Door", format=".2f"),
-            alt.Tooltip("Turnout_Score:Q", title="Turnout Score", format=".1f"),
-        ],
-    ).properties(height=max(340, min(860, int(top_n) * 22)))
-    st.altair_chart(chart, use_container_width=True)
+    if not boundary_rendered:
+        st.caption("Boundary map is not available for this selection yet. Showing top-priority planning table instead.")
 
     table_cols = [c for c in ["Area_Label", "Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"] if c in ranked.columns]
     table_df = ranked[table_cols].copy()
-    table_df = table_df.rename(columns={
-        "Area_Label": "Area",
-        "Target_Voters": f"{party_label} Target Voters",
-        "Estimated_Doors": "Est. Doors",
-        "Target_Per_Door": "Target/Door",
-        "Canvass_Efficiency": "Canvass Efficiency",
-        "Field_Priority": "Field Priority",
-    })
-    st.markdown('<div class="section-card"><div class="small-header">Top Heat-Map Priorities</div><div class="tiny-muted">Use this as the bridge between analysis and field planning.</div></div>', unsafe_allow_html=True)
-    _ai_render_table(table_df, height=360, sticky_cols=["Area"], key="heatmap_priority_table")
-def _build_area_intelligence_canvassing_insights(display_df, candidate_party="Republican"):
-    """Build short PDF bullets explaining canvassing efficiency in plain English."""
-    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
-    if display_df is None or display_df.empty or "Total_Voters" not in display_df.columns:
-        return ["Canvassing efficiency could not be calculated from the current Area Intelligence breakdown."]
-
-    work = display_df.copy()
-    for col in ["Total_Voters", party_pct_col, "Avg_Age", "New_Registrations", "Mail_Ballots_Outstanding", "Outstanding_%"]:
-        if col in work.columns:
-            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
-        else:
-            work[col] = 0
-
-    metrics = work.apply(lambda r: _ai_canvassing_efficiency_metrics(r, candidate_party=candidate_party), axis=1)
-    work["_TargetVoters"] = [m["target_voters"] for m in metrics]
-    work["_Doors"] = [m["doors"] for m in metrics]
-    work["_TargetPerDoor"] = [m["target_per_door"] for m in metrics]
-    work["_EfficiencyScore"] = [m["efficiency_score"] for m in metrics]
-    work["_DoorSource"] = [m["door_source"] for m in metrics]
-    work = work.sort_values(["_EfficiencyScore", "_TargetVoters", "_TargetPerDoor"], ascending=False).reset_index(drop=True)
-
-    total_targets = float(work["_TargetVoters"].sum() or 0)
-    top3_targets = float(work.head(3)["_TargetVoters"].sum() or 0)
-    top_share = 0 if total_targets <= 0 else (top3_targets / total_targets) * 100
-    best_tpd = float(work["_TargetPerDoor"].max() or 0)
-    source_label = "known household counts" if (work["_DoorSource"] == "known").any() else "estimated doors from voter counts"
-
-    notes = [
-        f"Canvassing lens: prioritize areas with the most {party_plural.lower()} per door, not just the largest raw voter totals.",
-        f"Top three efficiency areas contain about {top3_targets:,.0f} target-party voters ({top_share:.1f}% of visible target opportunity).",
-        f"Best visible density is about {best_tpd:.2f} target-party voters per door using {source_label}.",
-        "Use this ranking for door-to-door planning where volunteer time, travel time, and walkability matter."
-    ]
-    return notes
-
-def _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party="Republican"):
-    """Build party-lens, turnout-aware, canvassing-efficient field/turf recommendations."""
-    party_key, party_label, party_plural, party_pct_col, party_count_col, opp_pct_col = _ai_candidate_party_key(candidate_party)
-    if display_df is None or display_df.empty:
-        return pd.DataFrame(columns=["Priority", "Area", "Target Voters", "Doors", "Target/Door", "Recommendation"])
-
-    work = display_df.copy()
-    for col in ["Total_Voters", "Mail_Ballots_Outstanding", "Mail_Applications_Approved", "Rep_%", "Dem_%", "Other_%", "Mail_Return_%", "Outstanding_%", "Avg_Age", "New_Registrations", "Households", "Total_Households", "Doors", "Door_Count", "Household_Doors"]:
-        if col in work.columns:
-            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
-        else:
-            work[col] = 0
-
-    label_cols = [c for c in ["Municipality", "Precinct", "County", "USC", "STS", "STH", "School District"] if c in work.columns]
-    def area_label(row):
-        parts = []
-        for col in label_cols:
-            val = normalize_export_text(row.get(col, ""))
-            if val and val not in parts:
-                parts.append(val)
-        return " • ".join(parts[:3]) if parts else normalize_export_text(title)
-
-    work["_Area"] = work.apply(area_label, axis=1)
-    party_pct = pd.to_numeric(work.get(party_pct_col, 0), errors="coerce").fillna(0) if party_pct_col in work.columns else 0
-    work["_PartyOpportunity"] = work["Total_Voters"] * (party_pct / 100.0)
-
-    turnout_scores = work.apply(lambda r: _ai_area_turnout_score_from_row(r, candidate_party=candidate_party), axis=1)
-    work["_TurnoutScore"] = [x[0] for x in turnout_scores]
-    work["_TurnoutWeightedScore"] = [x[1] for x in turnout_scores]
-
-    efficiency = work.apply(lambda r: _ai_canvassing_efficiency_metrics(r, candidate_party=candidate_party), axis=1)
-    work["_TargetVoters"] = [x["target_voters"] for x in efficiency]
-    work["_Doors"] = [x["doors"] for x in efficiency]
-    work["_TargetPerDoor"] = [x["target_per_door"] for x in efficiency]
-    work["_EfficiencyScore"] = [x["efficiency_score"] for x in efficiency]
-    work["_DoorSource"] = [x["door_source"] for x in efficiency]
-
-    # Sort first by real-world canvassing efficiency, then by target-party volume and turnout strength.
-    work = work.sort_values(["_EfficiencyScore", "_TargetVoters", "_TargetPerDoor", "_TurnoutScore"], ascending=False).head(8).reset_index(drop=True)
-
-    rows = []
-    for idx, row in work.iterrows():
-        voters = int(row.get("Total_Voters", 0) or 0)
-        outstanding = int(row.get("Mail_Ballots_Outstanding", 0) or 0)
-        party_pct_val = float(row.get(party_pct_col, 0) or 0)
-        turnout_score = float(row.get("_TurnoutScore", 0) or 0)
-        return_pct = float(row.get("Mail_Return_%", 0) or 0)
-        target_voters = float(row.get("_TargetVoters", 0) or 0)
-        doors = float(row.get("_Doors", 0) or 0)
-        target_per_door = float(row.get("_TargetPerDoor", 0) or 0)
-
-        if target_per_door >= 1.15 and target_voters >= 500:
-            rec = "Best door-density target"
-        elif party_pct_val >= 55 and turnout_score >= 65:
-            rec = f"High-propensity {party_label} base"
-        elif outstanding >= 100 and return_pct < 35 and party_pct_val >= 40:
-            rec = f"{party_label} turnout + mail chase"
-        elif target_voters >= 1500 and target_per_door >= 0.75:
-            rec = "High-volume efficient walk"
-        elif voters >= 5000:
-            rec = "Large turf build / review sub-areas"
-        elif turnout_score >= 65:
-            rec = "Strong turnout environment"
-        else:
-            rec = "Lower priority / monitor"
-
-        rows.append({
-            "Priority": idx + 1,
-            "Area": row["_Area"],
-            "Target Voters": int(round(target_voters)),
-            "Doors": int(round(doors)),
-            "Target/Door": f"{target_per_door:.2f}",
-            "Recommendation": rec,
-        })
-    return pd.DataFrame(rows)
-
-def _ai_pdf_draw_bullets(c, items, x, y, w, size=7.8, max_items=6, max_lines_each=2):
-    """Draw wrapped bullets and return the new y position."""
-    for item in (items or [])[:max_items]:
-        lines = _ai_pdf_wrapped_lines(c, item, w - 18, size=size)
-        for i, line in enumerate(lines[:max_lines_each]):
-            prefix = "• " if i == 0 else "  "
-            _ai_pdf_text(c, prefix + line, x + 6, y, size=size, color_hex="#334155", max_width=w - 12)
-            y -= size + 2.5
-        y -= 1.5
-    return y
-
-def build_area_intelligence_pdf_bytes(
-    area_level,
-    title,
-    precinct_count,
-    totals,
-    mail_df,
-    strategy_badges,
-    strategy_notes,
-    display_df,
-    filter_lines=None,
-    client_name="",
-    candidate_name="",
-    prepared_for="",
-    candidate_party="Republican",
-    include_cover_page=True,
-):
-    """Build a client-ready Area Intelligence profile PDF from the selected Area Intelligence profile."""
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    page_w, page_h = letter
-    margin = 38
-    page_num = 1
-    generated_text = datetime.now(ZoneInfo("America/New_York")).strftime("%m/%d/%Y %I:%M %p")
-
-    def header(page_label=None):
-        y = page_h - 36
-        try:
-            if CC_LOGO.exists():
-                c.drawImage(ImageReader(str(CC_LOGO)), margin, y - 25, width=104, height=30, preserveAspectRatio=True, mask='auto')
-        except Exception:
-            pass
-        _ai_pdf_text(c, "Area Intelligence Report", margin + 124, y - 2, size=16, bold=True, color_hex="#153d73")
-        subtitle = normalize_export_text(title)
-        if page_label:
-            subtitle = f"{subtitle} • {page_label}"
-        _ai_pdf_text(c, subtitle, margin + 124, y - 18, size=9.5, bold=True, color_hex="#334155", max_width=355)
-        _ai_pdf_text(c, generated_text, page_w - 150, y - 4, size=8, color_hex="#64748b")
-        c.setStrokeColor(colors.HexColor("#d8dee8"))
-        c.line(margin, y - 34, page_w - margin, y - 34)
-        return y - 58
-
-    def new_page(page_label=None, footer=True):
-        nonlocal page_num
-        if footer:
-            _ai_pdf_footer(c, page_w, margin, page_num)
-        c.showPage()
-        page_num += 1
-        return header(page_label)
-
-    if include_cover_page:
-        _ai_draw_cover_page(
-            c,
-            page_w,
-            page_h,
-            margin,
-            title=title,
-            area_level=area_level,
-            client_name=client_name,
-            candidate_name=candidate_name,
-            prepared_for=prepared_for,
-            candidate_party=candidate_party,
-            report_generated_text=generated_text,
-        )
-        c.showPage()
-        page_num += 1
-
-    y = header("Profile")
-
-    total = totals.get("total", 0)
-    dem = totals.get("dem", 0)
-    rep = totals.get("rep", 0)
-    other = totals.get("other", 0)
-    male = totals.get("male", 0)
-    female = totals.get("female", 0)
-    unknown_gender = totals.get("unknown_gender", 0)
-    avg_age = totals.get("avg_age", 0)
-    new_reg = totals.get("new_reg", 0)
-    mail_apps_total = totals.get("mail_apps_total", 0)
-    mail_apps_approved = totals.get("mail_apps_approved", 0)
-    mail_apps_declined = totals.get("mail_apps_declined", 0)
-    mail_sent = totals.get("mail_sent", 0)
-    mail_returned = totals.get("mail_returned", 0)
-    mail_outstanding = totals.get("mail_outstanding", 0)
-
-    _ai_pdf_text(c, f"{area_level} Profile", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, f"{int(precinct_count):,} precinct row(s) included", margin, y - 14, size=8, color_hex="#64748b")
-    y -= 30
-
-    card_gap = 10
-    card_w = (page_w - margin * 2 - card_gap * 2) / 3
-    cards = [
-        ("Total Voters", _ai_pdf_num(total), "profile universe"),
-        ("Democratic", _ai_pdf_num(dem), _ai_pdf_pct(dem, total)),
-        ("Republican", _ai_pdf_num(rep), _ai_pdf_pct(rep, total)),
-        ("Other / Unaffiliated", _ai_pdf_num(other), _ai_pdf_pct(other, total)),
-        ("Average Age", f"{float(avg_age or 0):.1f}" if avg_age else "—", "weighted"),
-        ("New Registrations", _ai_pdf_num(new_reg), _ai_pdf_pct(new_reg, total)),
-        ("Male", _ai_pdf_num(male), _ai_pdf_pct(male, total)),
-        ("Female", _ai_pdf_num(female), _ai_pdf_pct(female, total)),
-        ("Unknown Gender", _ai_pdf_num(unknown_gender), _ai_pdf_pct(unknown_gender, total)),
-    ]
-    for idx, card in enumerate(cards):
-        row_i = idx // 3
-        col_i = idx % 3
-        _ai_pdf_card(c, card[0], card[1], card[2], margin + col_i * (card_w + card_gap), y - row_i * 54, card_w, h=46)
-    y -= 176
-
-    y = _ai_pdf_filter_summary_box(c, filter_lines, margin, y, page_w - margin * 2)
-
-    _ai_pdf_text(c, "Mail Program", margin, y, size=12, bold=True, color_hex="#142033")
-    y -= 14
-    mail_cols = [130, 76, 80, 88]
-    mail_table_top = y
-    y = _ai_pdf_table(c, mail_df, margin, y, mail_cols, row_h=17, max_rows=10, font_size=7.4)
-
-    side_x = page_w - margin - 152
-    _ai_pdf_card(c, "Outstanding Ballots", _ai_pdf_num(mail_outstanding), _ai_pdf_pct(mail_outstanding, mail_apps_approved) + " of approved", side_x, mail_table_top - 6, 152, 48)
-    _ai_pdf_card(c, "Return Rate", _ai_pdf_pct(mail_returned, mail_apps_approved), "Returned / Approved", side_x, mail_table_top - 62, 152, 48)
-
-    y -= 16
-    _ai_pdf_text(c, f"{normalize_export_text(candidate_party) or 'Republican'} Path to Victory Lens", margin, y, size=12, bold=True, color_hex="#142033")
-    y -= 18
-    badge_x = margin
-    for text, tone in strategy_badges[:6]:
-        badge_w = min(180, max(72, c.stringWidth(text, "Helvetica-Bold", 7.2) + 18))
-        if badge_x + badge_w > page_w - margin:
-            badge_x = margin
-            y -= 20
-        tone_colors = {
-            "good": ("#e8f5e9", "#1b5e20"),
-            "watch": ("#fff8e1", "#8a5a00"),
-            "priority": ("#ffebee", "#b71c1c"),
-            "info": ("#e3f2fd", "#0d47a1"),
-            "neutral": ("#f5f5f5", "#374151"),
-        }
-        bg, fg = tone_colors.get(tone, tone_colors["neutral"])
-        c.setFillColor(colors.HexColor(bg))
-        c.roundRect(badge_x, y - 12, badge_w, 15, 7, fill=1, stroke=0)
-        _ai_pdf_text(c, text, badge_x + 8, y - 8.5, size=7.2, bold=True, color_hex=fg, max_width=badge_w - 14)
-        badge_x += badge_w + 6
-    y -= 24
-    y = _ai_pdf_draw_bullets(c, strategy_notes[:3], margin, y, page_w - margin * 2, size=8.0, max_items=3)
-
-    recommendations = _build_area_intelligence_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
-    if recommendations:
-        y -= 4
-        _ai_pdf_text(c, "Recommended Next Actions", margin, y, size=9.2, bold=True, color_hex="#153d73")
-        y -= 13
-        y = _ai_pdf_draw_bullets(c, recommendations[:4], margin, y, page_w - margin * 2, size=7.7, max_items=4)
-
-    # Charts page.
-    y = new_page("Charts")
-    _ai_pdf_text(c, "Profile Charts", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, "Quick visual summary of the selected Area Intelligence profile.", margin, y - 13, size=7.8, color_hex="#64748b")
-    y -= 26
-
-    chart_gap = 12
-    chart_w = (page_w - margin * 2 - chart_gap) / 2
-    _ai_pdf_bar_chart(
-        c,
-        "Party Composition",
-        [("Dem", dem, _ai_pdf_pct(dem, total)), ("Rep", rep, _ai_pdf_pct(rep, total)), ("Other", other, _ai_pdf_pct(other, total))],
-        margin,
-        y,
-        chart_w,
-        h=82,
-        color_hex="#153d73",
+    if "Target_Voters" in table_df.columns:
+        table_df["Target_Voters"] = table_df["Target_Voters"].round(0).astype(int)
+    for c in ["Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"]:
+        if c in table_df.columns:
+            table_df[c] = pd.to_numeric(table_df[c], errors="coerce").round(1)
+    st.markdown(
+        '<div class="table-card"><div class="small-header">Top Heat-Map Priorities</div>'
+        '<div class="tiny-muted">Use this as the ranked planning table behind the boundary map.</div></div>',
+        unsafe_allow_html=True,
     )
-    _ai_pdf_bar_chart(
-        c,
-        "Gender Composition",
-        [("Male", male, _ai_pdf_pct(male, total)), ("Female", female, _ai_pdf_pct(female, total)), ("Unknown", unknown_gender, _ai_pdf_pct(unknown_gender, total))],
-        margin + chart_w + chart_gap,
-        y,
-        chart_w,
-        h=82,
-        color_hex="#7a1523",
-    )
-    y -= 100
-
-    _ai_pdf_bar_chart(
-        c,
-        "Mail Program Snapshot",
-        [
-            ("Approved", mail_apps_approved, _ai_pdf_pct(mail_apps_approved, mail_apps_total)),
-            ("Sent", mail_sent, _ai_pdf_pct(mail_sent, mail_apps_approved)),
-            ("Returned", mail_returned, _ai_pdf_pct(mail_returned, mail_apps_approved)),
-            ("Outstanding", mail_outstanding, _ai_pdf_pct(mail_outstanding, mail_apps_approved)),
-        ],
-        margin,
-        y,
-        page_w - margin * 2,
-        h=92,
-        color_hex="#2e7d32",
-    )
-
-    # Turnout Intelligence and smarter turf recommendations page.
-    y = new_page("Turnout Intelligence & Turf")
-    turnout_profile = _build_area_turnout_profile(totals, display_df, candidate_party=candidate_party)
-    _ai_pdf_text(c, "Turnout Intelligence", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, "Practical turnout-readiness model using age, new registrations, and vote history when available.", margin, y - 13, size=7.8, color_hex="#64748b")
-    y -= 26
-
-    _ai_pdf_bar_chart(
-        c,
-        f"Turnout Factor Snapshot — {turnout_profile.get('tier', 'Turnout environment')}",
-        [
-            ("Overall", turnout_profile.get("overall_score", 0), f"{turnout_profile.get('overall_score', 0):.1f}/100"),
-            ("Age", turnout_profile.get("age_score", 0), turnout_profile.get("age_label", "")),
-            ("Vote Hist", turnout_profile.get("vote_history_score", 0), turnout_profile.get("vote_history_label", "")),
-            ("New Reg", turnout_profile.get("new_registration_score", 0), turnout_profile.get("new_registration_label", "")),
-        ],
-        margin,
-        y,
-        page_w - margin * 2,
-        h=96,
-        color_hex="#153d73",
-    )
-    y -= 112
-    y = _ai_pdf_draw_bullets(c, turnout_profile.get("notes", []), margin, y, page_w - margin * 2, size=7.8, max_items=4)
-    y -= 10
-
-    _ai_pdf_text(c, "Canvassing Efficiency & Turf Recommendations", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, f"Ranks areas for a {normalize_export_text(candidate_party) or 'Republican'} candidate by target-party voters per estimated door, turnout signal, voter size, and mail chase opportunity.", margin, y - 13, size=7.8, color_hex="#64748b")
-    y -= 26
-    canvass_notes = _build_area_intelligence_canvassing_insights(display_df, candidate_party=candidate_party)
-    y = _ai_pdf_draw_bullets(c, canvass_notes, margin, y, page_w - margin * 2, size=7.5, max_items=3)
-    y -= 8
-    turf_df = _build_area_intelligence_turf_recommendations(area_level, title, totals, display_df, candidate_party=candidate_party)
-    if turf_df is not None and not turf_df.empty:
-        _ai_pdf_table(c, turf_df, margin, y, [36, 170, 68, 54, 62, 124], row_h=17, max_rows=8, font_size=6.3)
-    else:
-        _ai_pdf_text(c, "No turf recommendation data available.", margin, y, size=8, color_hex="#64748b")
-
-    # Dedicated breakdown page.
-    y = new_page("Area Breakdown")
-    _ai_pdf_text(c, "Area Breakdown", margin, y, size=12, bold=True, color_hex="#142033")
-    _ai_pdf_text(c, "Top rows sorted by Total Voters.", margin, y - 13, size=7.8, color_hex="#64748b")
-    y -= 24
-    preferred_cols = [col for col in ["USC", "STS", "STH", "School District", "County", "Municipality", "Precinct", "Total_Voters", "Dem_%", "Rep_%", "Mail_Return_%", "Outstanding_%"] if col in display_df.columns]
-    breakdown = display_df[preferred_cols].copy() if preferred_cols else display_df.copy()
-    col_count = min(len(breakdown.columns), 8)
-    usable_w = page_w - margin * 2
-    col_widths = [usable_w / col_count] * col_count if col_count else [usable_w]
-    _ai_pdf_table(c, breakdown.iloc[:, :col_count], margin, y, col_widths, row_h=16, max_rows=30, font_size=6.8)
-
-    _ai_pdf_footer(c, page_w, margin, page_num)
-    c.save()
-    return buffer.getvalue()
+    st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 
-
-# Area Intelligence table renderer: centered values, comma formatting, sticky headers/label columns.
-def _ai_format_cell_value(value, col_name=""):
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-    text = str(value).strip()
-    if text.lower() in {"nan", "none", "nat"}:
-        return ""
-    if text == "":
-        return ""
-    if "%" in text or text == "—":
-        return text
-    try:
-        cleaned = text.replace(",", "")
-        num = float(cleaned)
-        if col_name in {"Avg_Age", "Dem_%", "Rep_%", "Other_%", "Mail_Return_%", "Outstanding_%"}:
-            return f"{num:,.1f}".rstrip("0").rstrip(".")
-        if abs(num - round(num)) < 0.000001:
-            return f"{int(round(num)):,}"
-        return f"{num:,.1f}"
-    except Exception:
-        return text
-
-
-def _ai_clean_display_df(df):
-    if df is None or df.empty:
-        return pd.DataFrame()
-    out = df.copy()
-    drop_cols = []
-    for c in out.columns:
-        name = str(c).strip()
-        if name == "" or name.lower().startswith("unnamed") or name.lower() in {"index", "level_0"}:
-            drop_cols.append(c)
-    if drop_cols:
-        out = out.drop(columns=drop_cols, errors="ignore")
-    for c in out.columns:
-        out[c] = out[c].map(lambda v, col=c: _ai_format_cell_value(v, str(col)))
-    return out
-
-
-def _ai_render_table(df, height=360, sticky_cols=None, key=""):
-    display = _ai_clean_display_df(df)
-    if display.empty:
-        st.caption("No table data available.")
-        return
-    sticky_cols = sticky_cols or []
-    cols = [str(c) for c in display.columns]
-    sticky_set = {c for c in sticky_cols if c in cols}
-    import html as _html
-    def esc(x):
-        return _html.escape(str(x))
-    sticky_positions = {cols[i]: i * 155 for i in range(min(3, len(cols))) if cols[i] in sticky_set}
-    table_id = f"ai-table-{key}" if key else "ai-table"
-    css = f"""
-    <style>
-    .{table_id}-wrap {{ width:100%; max-height:{int(height)}px; overflow:auto; border:1px solid #e5e7eb; border-radius:12px; background:white; }}
-    table.{table_id} {{ border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; font-size:12px; }}
-    table.{table_id} th, table.{table_id} td {{ border-right:1px solid #edf0f2; border-bottom:1px solid #edf0f2; padding:8px 10px; text-align:center !important; vertical-align:middle; white-space:nowrap; min-width:110px; }}
-    table.{table_id} th {{ position:sticky; top:0; z-index:5; background:#f8fafc; color:#24303f; font-weight:800; }}
-    table.{table_id} td {{ background:white; color:#24303f; }}
-    table.{table_id} tr:hover td {{ background:#f7fbff; }}
-    table.{table_id} .sticky-col {{ position:sticky; z-index:4; background:#ffffff; box-shadow:1px 0 0 #e5e7eb; font-weight:700; }}
-    table.{table_id} th.sticky-col {{ z-index:7; background:#f8fafc; }}
-    </style>
-    """
-    header_cells = []
-    for c in cols:
-        cls = "sticky-col" if c in sticky_set else ""
-        style = f"left:{sticky_positions.get(c, 0)}px; min-width:155px;" if c in sticky_set else ""
-        header_cells.append(f'<th class="{cls}" style="{style}">{esc(c)}</th>')
-    rows_html = []
-    for _, r in display.iterrows():
-        tds = []
-        for c in cols:
-            cls = "sticky-col" if c in sticky_set else ""
-            style = f"left:{sticky_positions.get(c, 0)}px; min-width:155px;" if c in sticky_set else ""
-            tds.append(f'<td class="{cls}" style="{style}">{esc(r[c])}</td>')
-        rows_html.append("<tr>" + "".join(tds) + "</tr>")
-    html_table = css + '<div class="{}-wrap"><table class="{}"><thead><tr>{}</tr></thead><tbody>{}</tbody></table></div>'.format(table_id, table_id, "".join(header_cells), "".join(rows_html))
-    st.markdown(html_table, unsafe_allow_html=True)
 
 def render_area_intelligence_workspace():
     st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 area profiles, mail program, and strategy foundation.</div></div>', unsafe_allow_html=True)
