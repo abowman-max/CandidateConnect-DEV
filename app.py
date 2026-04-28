@@ -5231,7 +5231,7 @@ def _ai_geo_municipality_type_suffix(props: dict) -> str:
     return ""
 
 
-def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str | None = None):
+def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str | None = None, duplicate_muni_bases=None):
     """Create robust match keys for a GeoJSON feature.
 
     The PA municipality GeoJSON stores names as MUNICIPAL_NAME without TWP/BORO,
@@ -5256,9 +5256,28 @@ def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str 
         muni_base = _ai_geo_muni_base_key(muni)
         county_key = _ai_geo_normalize_key(county)
         # Composite keys are preferred so duplicate municipality names across
-        # counties do not collide. Include both pipe and space versions.
-        for mk in [muni_key, muni_base, f"{muni_base} {suffix}" if suffix else "", f"{muni_key} {suffix}" if suffix else ""]:
+        # counties do not collide. Keep municipal class suffixes when needed.
+        # This prevents same-base places from merging on the map, such as
+        # YORK CITY vs YORK TWP or MANHEIM BORO vs MANHEIM TWP.
+        duplicate_muni_bases = duplicate_muni_bases or set()
+        base_composite = f"{county_key}|{muni_base}" if county_key and muni_base else muni_base
+
+        strict_suffix_keys = []
+        if suffix:
+            strict_suffix_keys.extend([f"{muni_base} {suffix}", f"{muni_key} {suffix}"])
+        strict_suffix_keys.append(muni_key)
+
+        for mk in strict_suffix_keys:
             mk = _ai_geo_normalize_key(mk)
+            if county_key and mk:
+                add(f"{county_key}|{mk}")
+                add(f"{county_key} {mk}")
+            add(mk)
+
+        # Add bare base-name only when safe. This keeps boroughs that appear in
+        # the voter file without BORO matching, but blocks ambiguous duplicate bases.
+        if base_composite not in duplicate_muni_bases:
+            mk = _ai_geo_normalize_key(muni_base)
             if county_key and mk:
                 add(f"{county_key}|{mk}")
                 add(f"{county_key} {mk}")
@@ -5356,9 +5375,11 @@ def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
     if layer_label == "Municipality Boundaries" and "Municipality" in data_cols:
         muni = row.get("Municipality", "")
         county = row.get("County", "")
-        muni_key = _ai_geo_muni_base_key(muni)
+        # Preserve municipal class suffixes when the data has them. This keeps
+        # same-base municipalities separate on the map.
+        muni_key = _ai_geo_normalize_key(muni)
         county_key = _ai_geo_normalize_key(county)
-        return f"{county_key} {muni_key}".strip() if county_key else muni_key
+        return f"{county_key}|{muni_key}".strip("|") if county_key else muni_key
     if data_cols:
         return _ai_geo_normalize_key(row.get(data_cols[-1], ""))
     return ""
@@ -5425,6 +5446,20 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
 
     lookup_records = lookup_df.set_index("Geo_Key").to_dict(orient="index")
     lookup_keys = set(lookup_records.keys())
+
+    duplicate_muni_bases = set()
+    if layer_label == "Municipality Boundaries":
+        base_counts = {}
+        for feat in (geo or {}).get("features", []):
+            props = (feat or {}).get("properties") or {}
+            county_key = _ai_geo_normalize_key(props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY") or "")
+            muni = props.get("MUNICIPAL_NAME") or props.get("MUNICIPAL_NAM") or props.get("MUNICIPAL") or props.get("NAME")
+            base = _ai_geo_muni_base_key(muni)
+            composite = f"{county_key}|{base}" if county_key and base else base
+            if composite:
+                base_counts[composite] = base_counts.get(composite, 0) + 1
+        duplicate_muni_bases = {k for k, n in base_counts.items() if n > 1}
+
     matched_features = []
     unmatched_sample = []
 
@@ -5432,7 +5467,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         if not isinstance(feat, dict):
             continue
         props = dict(feat.get("properties") or {})
-        candidate_keys = _ai_geo_feature_candidate_keys(layer_label, props, data_cols[-1] if data_cols else None)
+        candidate_keys = _ai_geo_feature_candidate_keys(layer_label, props, data_cols[-1] if data_cols else None, duplicate_muni_bases)
         matched_key = next((k for k in candidate_keys if k in lookup_keys), None)
         if not matched_key:
             if len(unmatched_sample) < 8 and candidate_keys:
