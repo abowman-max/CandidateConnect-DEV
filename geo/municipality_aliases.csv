@@ -1,4 +1,10 @@
 COUNTY,SURE_MUNICIPALITY,OFFICIAL_MUNICIPALITY,FIPS_MUN_CODE,GEOID,NOTES
-Allegheny,CASL SHANNON,CASTLE SHANNON,11680,4200311680,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,ROSSALYN FARM,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,ROSSALYN FARMS,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
+Allegheny,Bradfordwood,Bradford Woods Boro,08064,4200308064,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Casl Shannon,Castle Shannon Boro,11680,4200311680,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Franklin Pk,Franklin Park Boro,27552,4200327552,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Pennsbury Vlg,Pennsbury Village Boro,59152,4200359152,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Rosslyn Farm,Rosslyn Farms Boro,66320,4200366320,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Springdal Boro,Springdale Boro,72960,4200372960,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Springdal Twp,Springdale Boro,72960,4200372960,auto-suggested from unmatched Area Intelligence map row; review before production
