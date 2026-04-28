@@ -5924,8 +5924,8 @@ def render_area_intelligence_workspace():
     area_level = st.selectbox(
         "Report Level",
         available_levels,
-        index=available_levels.index("Precinct") if "Precinct" in available_levels else 0,
-        key="ai_area_level",
+        index=0,
+        key="ai_area_level_v29",
         help="Choose whether this profile should summarize a county, municipality, precinct, or district."
     )
 
