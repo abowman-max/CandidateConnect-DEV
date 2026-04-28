@@ -39,6 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
+# Candidate Connect Area Intelligence mapping build: v33 fuzzy municipality matching
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5098,6 +5099,22 @@ def _ai_geo_compact_join_key(value):
     return key.replace(" ", "")
 
 
+def _ai_geo_fuzzy_join_key(value):
+    """Return a sorted-word alias for stubborn GIS/voter-file name order differences."""
+    key = _ai_geo_normalize_join_key(value)
+    if not key:
+        return ""
+
+    def sort_part(part: str) -> str:
+        words = [w for w in str(part).split() if w]
+        return " ".join(sorted(words))
+
+    if "|" in key:
+        parts = [sort_part(part) for part in key.split("|")]
+        return "|".join([part for part in parts if part])
+    return sort_part(key)
+
+
 def _ai_geo_available_layers():
     """Return local GeoJSON layers that are present next to the Streamlit app."""
     found = []
@@ -5278,6 +5295,9 @@ def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str 
         compact_key = _ai_geo_compact_join_key(value)
         if compact_key and compact_key not in keys:
             keys.append(compact_key)
+        fuzzy_key = _ai_geo_fuzzy_join_key(value)
+        if fuzzy_key and fuzzy_key not in keys:
+            keys.append(fuzzy_key)
 
     if layer == "Municipality Boundaries":
         county = props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY")
@@ -5478,7 +5498,8 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     for _, alias_row in lookup_df.iterrows():
         base_key = _ai_geo_normalize_join_key(alias_row.get("Geo_Key", ""))
         compact_key = _ai_geo_compact_join_key(base_key)
-        for alias_key in [base_key, compact_key]:
+        fuzzy_key = _ai_geo_fuzzy_join_key(base_key)
+        for alias_key in [base_key, compact_key, fuzzy_key]:
             if alias_key:
                 row_copy = alias_row.copy()
                 row_copy["Geo_Key"] = alias_key
