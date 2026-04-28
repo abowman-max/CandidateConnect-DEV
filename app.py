@@ -6427,7 +6427,7 @@ def render_area_intelligence_workspace():
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="small-header">Select Area</div>', unsafe_allow_html=True)
 
-    available_levels = ["County", "Municipality", "Precinct"]
+    available_levels = ["Statewide", "County", "Municipality", "Precinct"]
     for _lvl in ["USC", "STS", "STH", "School District"]:
         if _lvl in area_df.columns and any(str(x).strip() for x in area_df[_lvl].unique().tolist()):
             available_levels.append(_lvl)
@@ -6462,7 +6462,17 @@ def render_area_intelligence_workspace():
     profile_df = pd.DataFrame()
     title = ""
 
-    if area_level in ["County", "Municipality", "Precinct"]:
+    if area_level == "Statewide":
+        with c1:
+            st.caption("Statewide report")
+        with c2:
+            st.caption("All counties included")
+        with c3:
+            st.caption("Default breakdown: municipalities")
+        profile_df = area_df.copy()
+        title = "Statewide"
+
+    elif area_level in ["County", "Municipality", "Precinct"]:
         counties = _clean_options(area_df["County"])
         with c1:
             selected_county = st.selectbox("County", counties, key="ai_county") if counties else ""
