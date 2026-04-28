@@ -6394,7 +6394,7 @@ def render_area_intelligence_workspace():
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="small-header">Select Area</div>', unsafe_allow_html=True)
 
-    available_levels = ["County", "Municipality", "Precinct"]
+    available_levels = ["Statewide", "County", "Municipality", "Precinct"]
     for _lvl in ["USC", "STS", "STH", "School District"]:
         if _lvl in area_df.columns and any(str(x).strip() for x in area_df[_lvl].unique().tolist()):
             available_levels.append(_lvl)
@@ -6429,7 +6429,17 @@ def render_area_intelligence_workspace():
     profile_df = pd.DataFrame()
     title = ""
 
-    if area_level in ["County", "Municipality", "Precinct"]:
+    if area_level == "Statewide":
+        with c1:
+            st.caption("Statewide report")
+        with c2:
+            st.caption("All counties included")
+        with c3:
+            st.caption("Municipalities/precincts are included in the breakdown below")
+        profile_df = area_df.copy()
+        title = "Statewide"
+
+    elif area_level in ["County", "Municipality", "Precinct"]:
         counties = _clean_options(area_df["County"])
         with c1:
             selected_county = st.selectbox("County", counties, key="ai_county") if counties else ""
@@ -6641,7 +6651,16 @@ def render_area_intelligence_workspace():
     breakdown_df["Mail_Ballots_Returned"] = breakdown_df["Mail_Ballots_Returned"].where(breakdown_df["Mail_Ballots_Returned"] > 0, breakdown_df["Mail_Voters"])
 
     breakdown_mode = ""
-    if area_level == "County":
+    if area_level == "Statewide":
+        with breakdown_tab:
+            breakdown_mode = st.radio("Breakdown View", ["By County", "By Municipality", "By Precinct"], index=1, horizontal=True, key="ai_statewide_breakdown_mode")
+        if breakdown_mode == "By County":
+            group_cols = ["County"]
+        elif breakdown_mode == "By Municipality":
+            group_cols = ["County", "Municipality"]
+        else:
+            group_cols = ["County", "Municipality", "Precinct"]
+    elif area_level == "County":
         with breakdown_tab:
             breakdown_mode = st.radio("Breakdown View", ["By Municipality", "By Precinct"], horizontal=True, key="ai_county_breakdown_mode")
         group_cols = ["County", "Municipality"] if breakdown_mode == "By Municipality" else ["County", "Municipality", "Precinct"]
