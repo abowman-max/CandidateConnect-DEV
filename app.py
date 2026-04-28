@@ -13,6 +13,8 @@ import requests
 import streamlit as st
 import boto3
 
+AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v31-opacity-and-muni-aliases"
+
 from io import BytesIO
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -5057,6 +5059,10 @@ def _ai_geo_normalize_key(value):
     """Normalize map/data join keys so case, punctuation, and suffix spacing do not break joins."""
     s = normalize_export_text(value).upper()
     s = re.sub(r"\bCOUNTY\b", "", s)
+    # Common PA name aliases that appear differently across voter files and GIS layers.
+    s = re.sub(r"\bMOUNT\b", "MT", s)
+    s = re.sub(r"\bSAINT\b", "ST", s)
+    s = re.sub(r"\bFORT\b", "FT", s)
     s = re.sub(r"\bBOROUGH\b", "BORO", s)
     s = re.sub(r"\bTOWNSHIP\b", "TWP", s)
     s = re.sub(r"[^A-Z0-9]+", " ", s)
@@ -5569,10 +5575,10 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
             try:
                 v = float(value)
             except Exception:
-                return [210, 210, 210, 120]
+                return [210, 210, 210, 90]
             if vmax <= vmin:
                 # Single-value maps should still be visible.
-                return [252, 210, 95, 185]
+                return [252, 210, 95, 125]
             t = (v - vmin) / (vmax - vmin)
             # red -> yellow -> green
             if t <= 0.5:
@@ -5585,7 +5591,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
                 r = _blend(255, 0, tt)
                 g = _blend(221, 135, tt)
                 b = _blend(115, 68, tt)
-            return [r, g, b, 190]
+            return [r, g, b, 125]
 
         min_lon, min_lat, max_lon, max_lat = 999, 999, -999, -999
 
@@ -5643,6 +5649,7 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
             get_fill_color="properties.__fill_color",
             get_line_color=[255, 255, 255, 230],
             line_width_min_pixels=1,
+            opacity=0.72,
         )
         view_state = pdk.ViewState(
             latitude=(min_lat + max_lat) / 2,
