@@ -5614,6 +5614,64 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
             return False
 
 
+
+def _ai_build_grouped_area_display(df: pd.DataFrame, group_cols):
+    """Build the same Area Intelligence summary table for a requested map/detail geography."""
+    if df is None or df.empty or not group_cols:
+        return pd.DataFrame()
+    work = df.copy()
+    group_cols = [c for c in group_cols if c in work.columns]
+    if not group_cols:
+        return pd.DataFrame()
+    numeric_cols = [
+        "Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters",
+        "New_Registrations", "Mail_Applications", "Mail_Applications_Total",
+        "Mail_Applications_Approved", "Mail_Applications_Declined",
+        "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding",
+        "Mail_Voters", "Geo_Issue_Rows", "Avg_Age"
+    ]
+    for col in numeric_cols:
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
+        else:
+            work[col] = 0
+    work["Mail_Ballots_Returned"] = work["Mail_Ballots_Returned"].where(work["Mail_Ballots_Returned"] > 0, work["Mail_Voters"])
+    out = (
+        work.groupby(group_cols, dropna=False)
+        .agg(
+            Total_Voters=("Total_Voters", "sum"),
+            Dem_Voters=("Dem_Voters", "sum"),
+            Rep_Voters=("Rep_Voters", "sum"),
+            Other_Voters=("Other_Voters", "sum"),
+            New_Registrations=("New_Registrations", "sum"),
+            Mail_Applications=("Mail_Applications", "sum"),
+            Mail_Applications_Total=("Mail_Applications_Total", "sum"),
+            Mail_Applications_Approved=("Mail_Applications_Approved", "sum"),
+            Mail_Applications_Declined=("Mail_Applications_Declined", "sum"),
+            Mail_Ballots_Sent=("Mail_Ballots_Sent", "sum"),
+            Mail_Ballots_Returned=("Mail_Ballots_Returned", "sum"),
+            Mail_Ballots_Outstanding=("Mail_Ballots_Outstanding", "sum"),
+            Geo_Issue_Rows=("Geo_Issue_Rows", "sum"),
+        )
+        .reset_index()
+    )
+    weighted_age = (
+        work.assign(_AgeWeight=work["Avg_Age"] * work["Total_Voters"])
+        .groupby(group_cols, dropna=False)
+        .agg(_AgeWeight=("_AgeWeight", "sum"), _AgeTotal=("Total_Voters", "sum"))
+        .reset_index()
+    )
+    weighted_age["Avg_Age"] = weighted_age.apply(lambda r: 0 if r["_AgeTotal"] <= 0 else round(float(r["_AgeWeight"] / r["_AgeTotal"]), 1), axis=1)
+    out = out.merge(weighted_age[group_cols + ["Avg_Age"]], on=group_cols, how="left")
+    for col in ["Total_Voters", "Dem_Voters", "Rep_Voters", "Other_Voters", "New_Registrations", "Mail_Applications", "Mail_Applications_Total", "Mail_Applications_Approved", "Mail_Applications_Declined", "Mail_Ballots_Sent", "Mail_Ballots_Returned", "Mail_Ballots_Outstanding", "Geo_Issue_Rows"]:
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0).astype(int)
+    out["Dem_%"] = out.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Dem_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    out["Rep_%"] = out.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Rep_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    out["Other_%"] = out.apply(lambda r: 0 if r["Total_Voters"] <= 0 else round((r["Other_Voters"] / r["Total_Voters"]) * 100, 1), axis=1)
+    out["Mail_Return_%"] = out.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Returned"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
+    out["Outstanding_%"] = out.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
+    return out.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
+
 def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
     """Render the Area Intelligence heat-map panel."""
     party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
@@ -6088,8 +6146,21 @@ def render_area_intelligence_workspace():
     display_df["Outstanding_%"] = display_df.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     display_df = display_df.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
 
+    heatmap_display_df = display_df
+    # Maps should usually show the next-lowest geography, not just the report
+    # summary row. For district reports (STS/STH/USC/school district), this
+    # means municipality boundaries inside the selected district by default.
+    if "Municipality" not in heatmap_display_df.columns and "Municipality" in breakdown_df.columns:
+        lower_group_cols = []
+        if area_level in ["USC", "STS", "STH", "School District"] and area_level in breakdown_df.columns:
+            lower_group_cols.append(area_level)
+        if "County" in breakdown_df.columns:
+            lower_group_cols.append("County")
+        lower_group_cols.append("Municipality")
+        heatmap_display_df = _ai_build_grouped_area_display(breakdown_df, lower_group_cols)
+
     with heatmap_tab:
-        _render_area_intelligence_heat_map(display_df, candidate_party=st.session_state.get("ai_pdf_candidate_party", "Republican"), title=title)
+        _render_area_intelligence_heat_map(heatmap_display_df, candidate_party=st.session_state.get("ai_pdf_candidate_party", "Republican"), title=title)
 
     with pdf_tab:
         st.markdown('<div class="section-card"><div class="small-header">PDF Report Generator</div><div class="tiny-muted">Builds a branded client-ready PDF for the selected Area Intelligence profile.</div></div>', unsafe_allow_html=True)
