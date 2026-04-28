@@ -39,7 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
-# Candidate Connect Area Intelligence mapping build: v38 live mapping status and alias reload
+# Candidate Connect Area Intelligence mapping build: v39 apply municipality aliases before final FIPS join
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5442,14 +5442,38 @@ def _ai_load_municipality_crosswalk_alias_map():
         except Exception:
             pass
 
-    # Keep only unambiguous aliases. If one alias points to multiple FIPS/name
-    # targets, it is safer to skip it than to color the wrong municipality.
+    # Keep aliases only when they resolve to one stable official boundary.
+    # Earlier builds discarded aliases that had FIPS + GEOID + name targets,
+    # which meant municipality_aliases.csv was loaded but not actually used.
+    # Prefer a single FIPS target, then a single GEOID target, then a single
+    # name target. If an alias points to multiple FIPS/GEOID values, skip it
+    # so Township/Borough/City boundaries do not merge incorrectly.
     safe = {}
-    for alias, targets in raw_alias_map.items():
-        targets = {t for t in targets if t}
+
+    def _pick_stable_target(targets):
+        targets = {_ai_geo_normalize_join_key(t) for t in (targets or []) if t}
+        if not targets:
+            return None
+        fips_targets = sorted([t for t in targets if str(t).startswith("FIPS|")])
+        if len(fips_targets) == 1:
+            return fips_targets[0]
+        if len(fips_targets) > 1:
+            return None
+        geoid_targets = sorted([t for t in targets if str(t).startswith("GEOID|")])
+        if len(geoid_targets) == 1:
+            return geoid_targets[0]
+        if len(geoid_targets) > 1:
+            return None
         if len(targets) == 1:
-            safe.setdefault(alias, set()).update(targets)
-    return {alias: sorted(vals) for alias, vals in safe.items()}
+            return next(iter(targets))
+        return None
+
+    for alias, targets in raw_alias_map.items():
+        alias = _ai_geo_normalize_join_key(alias)
+        target = _pick_stable_target(targets)
+        if alias and target:
+            safe[alias] = [target]
+    return safe
 
 
 
