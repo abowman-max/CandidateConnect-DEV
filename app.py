@@ -5738,34 +5738,91 @@ def _ai_build_alias_suggestions(unmatched_source_df: pd.DataFrame, min_score: fl
             })
     return pd.DataFrame(rows, columns=empty_cols)
 def _ai_render_alias_suggestion_download(unmatched_source_df: pd.DataFrame):
-    """Show a production-friendly alias CSV download for remaining unmatched municipalities."""
-    suggestions = _ai_build_alias_suggestions(unmatched_source_df)
-    if suggestions.empty:
+    """Show alias CSV tools for remaining unmatched municipalities.
+
+    This always provides a downloadable municipality_aliases.csv when there are
+    unmatched rows. If there are no high-confidence auto-suggestions, it creates
+    manual-review rows with the SURE municipality filled in and blank official
+    fields so the user can correct them in Excel and re-upload/commit the file.
+    """
+    if unmatched_source_df is None or unmatched_source_df.empty:
         return
+
+    suggestions = _ai_build_alias_suggestions(unmatched_source_df)
     existing = _ai_existing_alias_dataframe()
     existing_cols = ["COUNTY", "SURE_MUNICIPALITY", "OFFICIAL_MUNICIPALITY", "FIPS_MUN_CODE", "GEOID", "NOTES"]
+
+    if existing is None or existing.empty:
+        existing = pd.DataFrame(columns=existing_cols)
     for col in existing_cols:
         if col not in existing.columns:
             existing[col] = ""
-    add_df = suggestions.copy()
-    for col in existing_cols:
-        if col not in add_df.columns:
-            add_df[col] = ""
-    combined = pd.concat([existing[existing_cols], add_df[existing_cols]], ignore_index=True)
+
+    # Build manual rows for any unmatched items that did not receive a high-confidence suggestion.
+    suggested_keys = set()
+    if suggestions is not None and not suggestions.empty:
+        suggested_keys = {
+            f"{_ai_geo_normalize_key(r.get('COUNTY',''))}|{_ai_geo_normalize_key(r.get('SURE_MUNICIPALITY',''))}"
+            for _, r in suggestions.iterrows()
+        }
+
+    existing_keys = _ai_existing_alias_key_set()
+    manual_rows = []
+    seen_manual = set()
+    for _, src in unmatched_source_df.iterrows():
+        county, sure_muni = _ai_split_county_muni_from_join_key(src.get("Geo_Key", ""))
+        if not county or not sure_muni:
+            continue
+        key = f"{_ai_geo_normalize_key(county)}|{_ai_geo_normalize_key(sure_muni)}"
+        if key in existing_keys or key in suggested_keys or key in seen_manual:
+            continue
+        seen_manual.add(key)
+        manual_rows.append({
+            "COUNTY": county.title(),
+            "SURE_MUNICIPALITY": sure_muni.title(),
+            "OFFICIAL_MUNICIPALITY": "",
+            "FIPS_MUN_CODE": "",
+            "GEOID": "",
+            "NOTES": "manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv",
+        })
+    manual_df = pd.DataFrame(manual_rows, columns=existing_cols)
+
+    add_parts = []
+    if suggestions is not None and not suggestions.empty:
+        add_df = suggestions.copy()
+        for col in existing_cols:
+            if col not in add_df.columns:
+                add_df[col] = ""
+        add_parts.append(add_df[existing_cols])
+    if not manual_df.empty:
+        add_parts.append(manual_df[existing_cols])
+
+    if add_parts:
+        additions = pd.concat(add_parts, ignore_index=True)
+    else:
+        additions = pd.DataFrame(columns=existing_cols)
+
+    combined = pd.concat([existing[existing_cols], additions[existing_cols]], ignore_index=True)
     combined["_dedupe"] = combined.apply(lambda r: f"{_ai_geo_normalize_key(r.get('COUNTY',''))}|{_ai_geo_normalize_key(r.get('SURE_MUNICIPALITY',''))}", axis=1)
     combined = combined.drop_duplicates(subset=["_dedupe"], keep="first").drop(columns=["_dedupe"])
 
-    with st.expander("Unmatched municipality alias suggestions", expanded=False):
-        st.caption("These are high-confidence matches between SURE municipality names and the official map crosswalk. Existing reviewed aliases are protected and will not be overwritten by suggestions. Review the new rows, then replace geo/municipality_aliases.csv with the updated download.")
-        st.dataframe(suggestions, width="stretch", hide_index=True)
+    with st.expander("Unmatched municipality alias suggestions", expanded=True):
+        st.caption("Download this CSV, review/correct the new rows, then replace geo/municipality_aliases.csv with the updated file. Existing reviewed aliases are protected and will not be overwritten by suggestions.")
+        if suggestions is not None and not suggestions.empty:
+            st.markdown("**Auto-suggested aliases**")
+            st.dataframe(suggestions, width="stretch", hide_index=True)
+        else:
+            st.info("No high-confidence automatic suggestions were found for the remaining unmatched rows. A manual-review CSV is still available below.")
+        if not manual_df.empty:
+            st.markdown("**Manual-review rows added to download**")
+            st.dataframe(manual_df, width="stretch", hide_index=True)
         st.download_button(
             "Download updated municipality_aliases.csv",
             data=combined.to_csv(index=False).encode("utf-8"),
             file_name="municipality_aliases.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
-
 
 def _ai_preferred_boundary_layers(heat_df: pd.DataFrame, title: str = ""):
     """Default to the next-lowest useful layer for the selected report.
