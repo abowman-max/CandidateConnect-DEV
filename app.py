@@ -5322,7 +5322,14 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
         st.caption("Only one matched boundary/value is visible for this selection. Choose a more detailed boundary layer, such as State Senate or Municipality, when available.")
 
     scheme = _ai_boundary_color_scheme(metric_label)
-    chart = alt.Chart(alt.Data(values=matched_geo["features"])).mark_geoshape(
+    # IMPORTANT: pass the full GeoJSON FeatureCollection to Vega-Lite and tell it
+    # to read the features array. Passing only a Python list of features can
+    # render a blank chart/NaN legend in Streamlit.
+    geo_source = alt.Data(
+        values=matched_geo,
+        format=alt.DataFormat(type="json", property="features")
+    )
+    chart = alt.Chart(geo_source).mark_geoshape(
         stroke="#24303f", strokeWidth=0.7
     ).encode(
         color=alt.Color("properties.__metric_value:Q", title=metric_label, scale=alt.Scale(scheme=scheme), legend=alt.Legend(orient="right")),
