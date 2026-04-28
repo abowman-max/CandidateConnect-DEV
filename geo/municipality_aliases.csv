@@ -1,4 +1,4 @@
-COUNTY,SURE_MUNICIPALITY,OFFICIAL_MUNICIPALITY,FIPS_MUN_CODE,GEOID,NOTES
+﻿COUNTY,SURE_MUNICIPALITY,OFFICIAL_MUNICIPALITY,FIPS_MUN_CODE,GEOID,NOTES
 Allegheny,ROSSALYN FARM,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,ROSSALYN FARMS,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,Casl Shannon,Castle Shannon Boro,11680,4200311680,auto-suggested from unmatched Area Intelligence map row; review before production
@@ -8,15 +8,12 @@ Allegheny,Rosslyn Farm,Rosslyn Farms Boro,66320,4200366320,auto-suggested from u
 Allegheny,Springdal Boro,Springdale Boro,72960,4200372960,auto-suggested from unmatched Area Intelligence map row; review before production
 Allegheny,Springdal Twp,Springdale Twp,72968,4200372968,auto-suggested from unmatched Area Intelligence map row; review before production
 Allegheny,Bradfordwood,Bradford Woods Boro,08064,4200308064,auto-suggested from unmatched Area Intelligence map row; review before production
-Cambria,Ncambria Boro,Cambria,10880,4202110880,auto-suggested from unmatched Area Intelligence map row; review before production
 Indiana,Cherry Tree Twp,Cherry Tree Boro,13120,4206313120,auto-suggested from unmatched Area Intelligence map row; review before production
 Juniata,Tuscarora E Waterford,Tuscarora,77952,4206777952,auto-suggested from unmatched Area Intelligence map row; review before production
-Juniata,Tuscarora Tuscarora,Tuscarora,77952,4206777952,auto-suggested from unmatched Area Intelligence map row; review before production
 Montgomery,Trappe Boro Boro,Trappe Boro,77304,4209177304,auto-suggested from unmatched Area Intelligence map row; review before production
 Northampton,Allen Twsp,Allen,00948,4209500948,auto-suggested from unmatched Area Intelligence map row; review before production
-Northampton,Bethlehem Twsp,Bethlehem City,06088,4209506088,auto-suggested from unmatched Area Intelligence map row; review before production
+,,,,,
 Northampton,Bushkill Twsp,Bushkill,10400,4209510400,auto-suggested from unmatched Area Intelligence map row; review before production
-Northampton,E Allen Twsp,Allen,00948,4209500948,auto-suggested from unmatched Area Intelligence map row; review before production
 Northampton,Lehigh Twsp,Lehigh,42424,4209542424,auto-suggested from unmatched Area Intelligence map row; review before production
 Northampton,Lower Saucon Twsp,Lower Saucon,45104,4209545104,auto-suggested from unmatched Area Intelligence map row; review before production
 Northampton,Moore Twsp,Moore,50824,4209550824,auto-suggested from unmatched Area Intelligence map row; review before production
@@ -34,5 +31,28 @@ Union,Limestone Twsp,Limestone,43368,4211943368,auto-suggested from unmatched Ar
 Union,Union Twsp,Union,78424,4211978424,auto-suggested from unmatched Area Intelligence map row; review before production
 Union,White Deer Twsp,White Deer,84496,4211984496,auto-suggested from unmatched Area Intelligence map row; review before production
 Washington,Finlyville Boro,Finleyville Boro,25944,4212525944,auto-suggested from unmatched Area Intelligence map row; review before production
-Westmoreland,S W Greensburg,S Greensburg Boro,72192,4212972192,auto-suggested from unmatched Area Intelligence map row; review before production
-Wyoming,Windham Independent,Windham,85680,4213185680,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Mcdonald,Mcdonald Borough,46072,4212546072,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Allegheny,Trafford,Trafford Borough,77272,4212977272,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Allegheny,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Bucks,Telford Boro,Telford Borough,76304,4209176304,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Cambria,Ncambria Boro,Northern Cambria Borough,55000,4202155000,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Clearfield,Sandy Twp,Dubois City,20136,4203320136,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Clearfield,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Crawford,Unassigned New Current,Spring Township,72840,4203972840,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Delaware,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Erie,Law Park Twp,Lawrence Park Township,41984,4204941984,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Fayette,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Franklin,W End Shippensburg,Shippensburg Borough,70352,4204170352,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Greene,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Juniata,Tuscarora Tuscarora,Tuscarora,77952,4206777952,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Lehigh,Bethlehem,Bethlehem City,06088,4209506088,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Mercer,Wheatland,Hermitage City,34064,4208534064,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Mifflin,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Northampton,E Allen Twsp,East Allen Township,20736,4209520736,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Northampton,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Perry,Sandy Hill Dist,Northeast Madison Township,54968,4209954968,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Washington,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Westmoreland,S W Greensburg,South Greensburg Borough,72192,4212972192,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Wyoming,Windham Independent,Windham Township,85680,4213185680,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+York,Unassigned New Current,,,,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
+Northampton,Bethlehem Twsp,Bethlehem Township,06096,4209506096,manual review needed; fill official municipality/FIPS/GEOID from municipality_crosswalk.csv
