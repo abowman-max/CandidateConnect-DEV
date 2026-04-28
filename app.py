@@ -6047,7 +6047,14 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
 
     if layer_label == "Municipality Boundaries" and not unmatched_source_df.empty:
         with st.expander("Remaining unmatched municipalities", expanded=False):
-            show_cols = [c for c in ["__source_geo_key", "Area_Label", "Total_Voters", metric_col] if c in unmatched_source_df.columns]
+            # Build the display column list without duplicates. If the selected
+            # heat metric is Total_Voters, the old list included Total_Voters
+            # twice, which causes Streamlit/PyArrow to raise a duplicate-column
+            # ValueError and prevents the alias download section from rendering.
+            show_cols = []
+            for c in ["__source_geo_key", "Area_Label", "Total_Voters", metric_col]:
+                if c in unmatched_source_df.columns and c not in show_cols:
+                    show_cols.append(c)
             st.dataframe(unmatched_source_df[show_cols].head(200), width="stretch", hide_index=True)
         _ai_render_alias_suggestion_download(unmatched_source_df)
 
