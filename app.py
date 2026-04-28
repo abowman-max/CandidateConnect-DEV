@@ -39,7 +39,7 @@ except Exception:
 if APP_ENV not in {"DEV", "LIVE"}:
     APP_ENV = "DEV"
 
-# Candidate Connect Area Intelligence mapping build: v33 fuzzy municipality matching
+# Candidate Connect Area Intelligence mapping build: v35 FIPS municipality crosswalk matching
 st.set_page_config(
     page_title="Candidate Connect DEV" if APP_ENV == "DEV" else "Candidate Connect",
     layout="wide"
@@ -5295,76 +5295,126 @@ def _ai_geo_municipality_suffix_from_text(value) -> str:
 
 @st.cache_data(show_spinner=False)
 def _ai_load_municipality_crosswalk_alias_map():
-    """Load geo/municipalities.csv and build safe alias -> official-key mappings.
+    """Load an optional municipality crosswalk and build safe alias -> official map keys.
 
-    The CSV should have COUNTY, MUNICIPALITY, and optionally CLASS columns.
-    We only keep aliases that resolve to exactly one official municipality key so
-    ambiguous places like YORK CITY vs YORK TWP do not merge accidentally.
+    Preferred file:
+        geo/municipality_crosswalk.csv
+
+    Required useful columns in the preferred file:
+        COUNTY, MUNICIPALITY, FIPS_MUN_CODE
+    Optional columns:
+        OFFICIAL_COUNTY_NAME, OFFICIAL_MUNICIPAL_NAME, OFFICIAL_CLASS_OF_MUNIC,
+        GEOID, CLASS
+
+    The function returns aliases that point to stable GeoJSON IDs such as
+    FIPS|12345 whenever available. That is much safer than pure name matching.
+    Ambiguous aliases are discarded so York City and York Township do not merge.
     """
-    path = GEO_PATH / "municipalities.csv"
+    preferred_path = GEO_PATH / "municipality_crosswalk.csv"
+    fallback_path = GEO_PATH / "municipalities.csv"
+    path = preferred_path if preferred_path.exists() else fallback_path
     if not path.exists():
         return {}
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, dtype=str).fillna("")
     except Exception:
         return {}
 
     cols = {str(c).strip().lower(): c for c in df.columns}
-    county_col = cols.get("county") or cols.get("county_name")
-    muni_col = cols.get("municipality") or cols.get("municipal_name") or cols.get("name")
-    class_col = cols.get("class") or cols.get("class_of_munic") or cols.get("municipality_class")
+    county_col = cols.get("county") or cols.get("county_name") or cols.get("official_county_name")
+    muni_col = cols.get("municipality") or cols.get("municipal_name") or cols.get("official_municipal_name") or cols.get("name")
+    class_col = cols.get("class") or cols.get("class_of_munic") or cols.get("official_class_of_munic") or cols.get("municipality_class")
+    fips_col = cols.get("fips_mun_code")
+    geoid_col = cols.get("geoid")
+    official_county_col = cols.get("official_county_name") or cols.get("county_name")
+    official_muni_col = cols.get("official_municipal_name") or cols.get("municipal_name")
+    official_class_col = cols.get("official_class_of_munic") or cols.get("class_of_munic")
     if not county_col or not muni_col:
         return {}
 
     raw_alias_map = {}
 
-    def add_alias(alias, official):
+    def make_official_targets(row, county, official_muni):
+        targets = set()
+        fips = normalize_export_text(row.get(fips_col, "")) if fips_col else ""
+        geoid = normalize_export_text(row.get(geoid_col, "")) if geoid_col else ""
+        if fips:
+            targets.add(_ai_geo_normalize_join_key(f"FIPS|{fips}"))
+        if geoid:
+            targets.add(_ai_geo_normalize_join_key(f"GEOID|{geoid}"))
+
+        # Name targets remain as backup for older / custom GeoJSON layers.
+        if county and official_muni:
+            targets.add(_ai_geo_normalize_join_key(f"{county}|{official_muni}"))
+            targets.add(_ai_geo_normalize_join_key(f"{county} {official_muni}"))
+        return {t for t in targets if t}
+
+    def add_alias(alias, targets):
         alias = _ai_geo_normalize_join_key(alias)
-        official = _ai_geo_normalize_join_key(official)
-        if not alias or not official:
+        targets = {_ai_geo_normalize_join_key(t) for t in (targets or []) if t}
+        if not alias or not targets:
             return
-        raw_alias_map.setdefault(alias, set()).add(official)
+        raw_alias_map.setdefault(alias, set()).update(targets)
         compact_alias = _ai_geo_compact_join_key(alias)
         if compact_alias:
-            raw_alias_map.setdefault(compact_alias, set()).add(official)
+            raw_alias_map.setdefault(compact_alias, set()).update(targets)
         fuzzy_alias = _ai_geo_fuzzy_join_key(alias)
         if fuzzy_alias:
-            raw_alias_map.setdefault(fuzzy_alias, set()).add(official)
+            raw_alias_map.setdefault(fuzzy_alias, set()).update(targets)
 
     for _, row in df.iterrows():
         county = _ai_geo_normalize_key(row.get(county_col, ""))
         muni_full = _ai_geo_normalize_key(row.get(muni_col, ""))
         if not county or not muni_full:
             continue
+
         suffix = _ai_geo_municipality_suffix_from_text(row.get(class_col, "")) if class_col else ""
         if not suffix:
             suffix = _ai_geo_municipality_suffix_from_text(muni_full)
         muni_base = _ai_geo_muni_base_key(muni_full)
-        official_muni = muni_full
-        if suffix and suffix not in official_muni.split():
-            official_muni = _ai_geo_normalize_key(f"{muni_base} {suffix}")
-        official = f"{county}|{official_muni}"
 
-        # Exact/full aliases.
-        add_alias(f"{county}|{muni_full}", official)
-        add_alias(f"{county} {muni_full}", official)
-        add_alias(f"{county}|{official_muni}", official)
-        add_alias(f"{county} {official_muni}", official)
+        # If the crosswalk has official GIS fields, use them for the target.
+        official_county = _ai_geo_normalize_key(row.get(official_county_col, "")) if official_county_col else county
+        official_muni_name = _ai_geo_normalize_key(row.get(official_muni_col, "")) if official_muni_col else ""
+        official_suffix = _ai_geo_municipality_suffix_from_text(row.get(official_class_col, "")) if official_class_col else suffix
+        if official_muni_name:
+            official_base = _ai_geo_muni_base_key(official_muni_name)
+            official_muni = _ai_geo_normalize_key(f"{official_base} {official_suffix}".strip()) if official_suffix else official_muni_name
+        else:
+            official_muni = muni_full
+            if suffix and suffix not in official_muni.split():
+                official_muni = _ai_geo_normalize_key(f"{muni_base} {suffix}")
 
-        # Bare base aliases are useful when voter data omits BORO/TWP. Ambiguous
-        # base aliases are discarded below so City/Township/Borough do not merge.
+        targets = make_official_targets(row, official_county or county, official_muni)
+
+        # Full aliases from the voter/dashboard naming side.
+        possible_munis = {muni_full, official_muni}
+        if suffix:
+            possible_munis.add(_ai_geo_normalize_key(f"{muni_base} {suffix}"))
         if muni_base:
-            add_alias(f"{county}|{muni_base}", official)
-            add_alias(f"{county} {muni_base}", official)
+            possible_munis.add(muni_base)
 
-    # Keep only unambiguous aliases.
+        for muni_alias in possible_munis:
+            if not muni_alias:
+                continue
+            add_alias(f"{county}|{muni_alias}", targets)
+            add_alias(f"{county} {muni_alias}", targets)
+
+        # Also add aliases from official GIS naming side if different.
+        if official_county and official_county != county:
+            for muni_alias in possible_munis:
+                add_alias(f"{official_county}|{muni_alias}", targets)
+                add_alias(f"{official_county} {muni_alias}", targets)
+
+    # Keep only unambiguous aliases. If one alias points to multiple FIPS/name
+    # targets, it is safer to skip it than to color the wrong municipality.
     safe = {}
-    for alias, officials in raw_alias_map.items():
-        officials = {o for o in officials if o}
-        if len(officials) == 1:
-            official = next(iter(officials))
-            safe.setdefault(alias, set()).add(official)
+    for alias, targets in raw_alias_map.items():
+        targets = {t for t in targets if t}
+        if len(targets) == 1:
+            safe.setdefault(alias, set()).update(targets)
     return {alias: sorted(vals) for alias, vals in safe.items()}
+
 
 
 def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str | None = None, duplicate_muni_bases=None):
@@ -5391,6 +5441,12 @@ def _ai_geo_feature_candidate_keys(layer_label: str, props: dict, data_col: str 
             keys.append(fuzzy_key)
 
     if layer == "Municipality Boundaries":
+        # Prefer stable official IDs when available. Name aliases are kept below
+        # as fallback for custom layers or missing crosswalk rows.
+        for id_field, prefix in [("FIPS_MUN_CODE", "FIPS"), ("GEOID", "GEOID"), ("CTY_MUN_CODE", "CTY_MUN")]:
+            if id_field in props and normalize_export_text(props.get(id_field)):
+                add(f"{prefix}|{normalize_export_text(props.get(id_field))}")
+
         county = props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY")
         muni = props.get("MUNICIPAL_NAME") or props.get("MUNICIPAL_NAM") or props.get("MUNICIPAL") or props.get("NAME")
         suffix = _ai_geo_municipality_type_suffix(props)
