@@ -5482,40 +5482,136 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     matched_geo["features"] = matched_features
 
     try:
-        # Render with Altair geoshape so the app does not depend on Plotly being
-        # installed in Streamlit Cloud. The metric values were already written
-        # into each matched GeoJSON feature above.
-        feature_collection = {
-            "type": "FeatureCollection",
-            "features": matched_features,
-        }
-        chart = alt.Chart(alt.Data(values=feature_collection["features"])).mark_geoshape(
-            stroke="#ffffff",
-            strokeWidth=0.45,
-        ).encode(
-            color=alt.Color(
-                "__metric_value:Q",
-                title=metric_label,
-                scale=alt.Scale(scheme="redyellowgreen"),
-            ),
-            tooltip=[
-                alt.Tooltip("__area_label:N", title="Area"),
-                alt.Tooltip("__metric_value:Q", title=metric_label, format=",.1f"),
-                alt.Tooltip("__total_voters:Q", title="Total Voters", format=",.0f"),
-                alt.Tooltip("__target_voters:Q", title="Target Voters", format=",.0f"),
-                alt.Tooltip("__target_per_door:Q", title="Target/Door", format=".2f"),
-            ],
-        ).project(
-            type="mercator",
-        ).properties(
-            height=650,
+        # Render with PyDeck's GeoJsonLayer. This is more reliable for raw
+        # GeoJSON polygons in Streamlit than Altair geoshape because PyDeck
+        # reads the geometry directly from each feature.
+        import pydeck as pdk
+
+        metric_values = [float((feat.get("properties") or {}).get("__metric_value", 0) or 0) for feat in matched_features]
+        vmin = min(metric_values) if metric_values else 0.0
+        vmax = max(metric_values) if metric_values else 0.0
+
+        def _blend(a, b, t):
+            return int(round(a + (b - a) * max(0.0, min(1.0, float(t)))))
+
+        def _metric_fill(value):
+            try:
+                v = float(value)
+            except Exception:
+                return [210, 210, 210, 120]
+            if vmax <= vmin:
+                # Single-value maps should still be visible.
+                return [252, 210, 95, 185]
+            t = (v - vmin) / (vmax - vmin)
+            # red -> yellow -> green
+            if t <= 0.5:
+                tt = t / 0.5
+                r = _blend(190, 255, tt)
+                g = _blend(0, 221, tt)
+                b = _blend(35, 115, tt)
+            else:
+                tt = (t - 0.5) / 0.5
+                r = _blend(255, 0, tt)
+                g = _blend(221, 135, tt)
+                b = _blend(115, 68, tt)
+            return [r, g, b, 190]
+
+        min_lon, min_lat, max_lon, max_lat = 999, 999, -999, -999
+
+        def _walk_coords(coords):
+            nonlocal min_lon, min_lat, max_lon, max_lat
+            if not coords:
+                return
+            if isinstance(coords[0], (int, float)):
+                lon, lat = float(coords[0]), float(coords[1])
+                min_lon = min(min_lon, lon)
+                max_lon = max(max_lon, lon)
+                min_lat = min(min_lat, lat)
+                max_lat = max(max_lat, lat)
+            else:
+                for part in coords:
+                    _walk_coords(part)
+
+        deck_features = []
+        for feat in matched_features:
+            nf = dict(feat)
+            props = dict(nf.get("properties") or {})
+            val = float(props.get("__metric_value", 0) or 0)
+            props["__fill_color"] = _metric_fill(val)
+            props["__metric_display"] = f"{val:,.1f}"
+            props["__total_voters_display"] = f"{float(props.get('__total_voters', 0) or 0):,.0f}"
+            props["__target_voters_display"] = f"{float(props.get('__target_voters', 0) or 0):,.0f}"
+            props["__target_per_door_display"] = f"{float(props.get('__target_per_door', 0) or 0):.2f}"
+            nf["properties"] = props
+            geom = nf.get("geometry") or {}
+            _walk_coords(geom.get("coordinates"))
+            deck_features.append(nf)
+
+        feature_collection = {"type": "FeatureCollection", "features": deck_features}
+        if min_lon == 999:
+            raise ValueError("No usable polygon coordinates found in matched GeoJSON features.")
+
+        span = max(max_lon - min_lon, max_lat - min_lat)
+        if span < 0.18:
+            zoom = 10.5
+        elif span < 0.45:
+            zoom = 9.5
+        elif span < 0.9:
+            zoom = 8.6
+        elif span < 1.8:
+            zoom = 7.6
+        else:
+            zoom = 6.4
+
+        layer = pdk.Layer(
+            "GeoJsonLayer",
+            data=feature_collection,
+            pickable=True,
+            stroked=True,
+            filled=True,
+            get_fill_color="properties.__fill_color",
+            get_line_color=[255, 255, 255, 230],
+            line_width_min_pixels=1,
         )
-        st.altair_chart(chart, width="stretch")
+        view_state = pdk.ViewState(
+            latitude=(min_lat + max_lat) / 2,
+            longitude=(min_lon + max_lon) / 2,
+            zoom=zoom,
+            pitch=0,
+            bearing=0,
+        )
+        tooltip = {
+            "html": "<b>{__area_label}</b><br/>" + metric_label + ": {__metric_display}<br/>Total Voters: {__total_voters_display}<br/>Target Voters: {__target_voters_display}<br/>Target/Door: {__target_per_door_display}",
+            "style": {"backgroundColor": "white", "color": "#1f2d3d", "fontSize": "12px"},
+        }
+        st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip, map_style=None))
         return True
     except Exception as e:
-        st.warning(f"Boundary map could not render ({e}). Showing the top-priority planning table below.")
-        return False
-
+        try:
+            # Fallback renderer: Altair geoshape. Keep this path as a safety net
+            # in case PyDeck is unavailable in a future environment.
+            chart = alt.Chart(alt.Data(values=matched_features)).mark_geoshape(
+                stroke="#ffffff",
+                strokeWidth=0.45,
+            ).encode(
+                color=alt.Color(
+                    "properties.__metric_value:Q",
+                    title=metric_label,
+                    scale=alt.Scale(scheme="redyellowgreen"),
+                ),
+                tooltip=[
+                    alt.Tooltip("properties.__area_label:N", title="Area"),
+                    alt.Tooltip("properties.__metric_value:Q", title=metric_label, format=",.1f"),
+                    alt.Tooltip("properties.__total_voters:Q", title="Total Voters", format=",.0f"),
+                    alt.Tooltip("properties.__target_voters:Q", title="Target Voters", format=",.0f"),
+                    alt.Tooltip("properties.__target_per_door:Q", title="Target/Door", format=".2f"),
+                ],
+            ).project(type="mercator").properties(height=650)
+            st.altair_chart(chart, width="stretch")
+            return True
+        except Exception as alt_e:
+            st.warning(f"Boundary map could not render (PyDeck: {e}; Altair: {alt_e}). Showing the top-priority planning table below.")
+            return False
 
 
 def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
