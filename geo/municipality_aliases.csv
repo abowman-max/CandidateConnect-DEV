@@ -1,4 +1,38 @@
 COUNTY,SURE_MUNICIPALITY,OFFICIAL_MUNICIPALITY,FIPS_MUN_CODE,GEOID,NOTES
-Allegheny,CASL SHANNON,CASTLE SHANNON,11680,4200311680,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,ROSSALYN FARM,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
 Allegheny,ROSSALYN FARMS,ROSSLYN FARMS,66320,4200366320,starter alias from user-observed SURE/GIS spelling difference
+Allegheny,Casl Shannon,Castle Shannon Boro,11680,4200311680,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Franklin Pk,Franklin Park Boro,27552,4200327552,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Pennsbury Vlg,Pennsbury Village Boro,59152,4200359152,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Rosslyn Farm,Rosslyn Farms Boro,66320,4200366320,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Springdal Boro,Springdale Boro,72960,4200372960,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Springdal Twp,Springdale Twp,72968,4200372968,auto-suggested from unmatched Area Intelligence map row; review before production
+Allegheny,Bradfordwood,Bradford Woods Boro,08064,4200308064,auto-suggested from unmatched Area Intelligence map row; review before production
+Cambria,Ncambria Boro,Cambria,10880,4202110880,auto-suggested from unmatched Area Intelligence map row; review before production
+Indiana,Cherry Tree Twp,Cherry Tree Boro,13120,4206313120,auto-suggested from unmatched Area Intelligence map row; review before production
+Juniata,Tuscarora E Waterford,Tuscarora,77952,4206777952,auto-suggested from unmatched Area Intelligence map row; review before production
+Juniata,Tuscarora Tuscarora,Tuscarora,77952,4206777952,auto-suggested from unmatched Area Intelligence map row; review before production
+Montgomery,Trappe Boro Boro,Trappe Boro,77304,4209177304,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Allen Twsp,Allen,00948,4209500948,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Bethlehem Twsp,Bethlehem City,06088,4209506088,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Bushkill Twsp,Bushkill,10400,4209510400,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,E Allen Twsp,Allen,00948,4209500948,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Lehigh Twsp,Lehigh,42424,4209542424,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Lower Saucon Twsp,Lower Saucon,45104,4209545104,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Moore Twsp,Moore,50824,4209550824,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Plainfield Twsp,Plainfield,61088,4209561088,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Washington Twsp,Washington,81296,4209581296,auto-suggested from unmatched Area Intelligence map row; review before production
+Northampton,Williams Twsp,Williams,85256,4209585256,auto-suggested from unmatched Area Intelligence map row; review before production
+Perry,Madison Twp,Northeast Madison,54968,4209954968,auto-suggested from unmatched Area Intelligence map row; review before production
+Susquehanna,Susquehanna Boro,Susquehanna Depot Boro,75568,4211575568,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Buffalo Twsp,Buffalo,10016,4211910016,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Gregg Twsp,Gregg,31480,4211931480,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Hartley Twsp,Hartley,32952,4211932952,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Kelly Twsp,Kelly,39136,4211939136,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Lewis Twsp,Lewis,42960,4211942960,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Limestone Twsp,Limestone,43368,4211943368,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,Union Twsp,Union,78424,4211978424,auto-suggested from unmatched Area Intelligence map row; review before production
+Union,White Deer Twsp,White Deer,84496,4211984496,auto-suggested from unmatched Area Intelligence map row; review before production
+Washington,Finlyville Boro,Finleyville Boro,25944,4212525944,auto-suggested from unmatched Area Intelligence map row; review before production
+Westmoreland,S W Greensburg,S Greensburg Boro,72192,4212972192,auto-suggested from unmatched Area Intelligence map row; review before production
+Wyoming,Windham Independent,Windham,85680,4213185680,auto-suggested from unmatched Area Intelligence map row; review before production
