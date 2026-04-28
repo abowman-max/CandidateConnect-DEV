@@ -5358,7 +5358,7 @@ def _ai_data_join_key_from_row(row, layer_label: str, data_cols):
         county = row.get("County", "")
         muni_key = _ai_geo_muni_base_key(muni)
         county_key = _ai_geo_normalize_key(county)
-        return f"{county_key}|{muni_key}" if county_key else muni_key
+        return f"{county_key} {muni_key}".strip() if county_key else muni_key
     if data_cols:
         return _ai_geo_normalize_key(row.get(data_cols[-1], ""))
     return ""
@@ -5379,6 +5379,24 @@ def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_
     if not geo:
         st.warning("That boundary file could not be loaded. Check the GeoJSON file format.")
         return False
+
+    # Scope large statewide boundary files to the selected county/counties before matching.
+    if layer_label == "Municipality Boundaries" and "County" in heat_df.columns:
+        selected_counties = {
+            _ai_geo_normalize_key(v)
+            for v in heat_df["County"].dropna().astype(str).tolist()
+            if _ai_geo_normalize_key(v)
+        }
+        if selected_counties:
+            scoped_features = []
+            for feat in (geo or {}).get("features", []):
+                props = (feat or {}).get("properties") or {}
+                county_key = _ai_geo_normalize_key(props.get("COUNTY_NAME") or props.get("COUNTY_NAM") or props.get("COUNTY") or "")
+                if county_key in selected_counties:
+                    scoped_features.append(feat)
+            if scoped_features:
+                geo = {k: v for k, v in geo.items() if k != "features"}
+                geo["features"] = scoped_features
 
     data_cols = _ai_heat_data_key_columns(layer_label, heat_df)
     if not data_cols:
