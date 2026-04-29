@@ -5982,17 +5982,18 @@ def _ai_mapping_file_status():
         except Exception:
             status["alias_rows"] = -1
     return status
-def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican", title=""):
+def _ai_render_boundary_heat_map(heat_df: pd.DataFrame, metric_col: str, metric_label: str, candidate_party="Republican", title="", layer_label_override=None):
     """Render a true GeoJSON choropleth when local /geo boundary files are available."""
-    available_layers = _ai_preferred_boundary_layers(heat_df, title=title)
-    if not available_layers:
-        st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
-        return False
+    if layer_label_override:
+        layer_label = layer_label_override
+    else:
+        available_layers = _ai_preferred_boundary_layers(heat_df, title=title)
+        if not available_layers:
+            st.info("No local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
+            return False
+        layer_context = sanitize_filename_part(str(title or "area"))
+        layer_label = st.selectbox("Boundary layer", available_layers, index=0, key=f"ai_geo_boundary_layer_{layer_context}")
 
-    # Use a context-specific key so an old Streamlit selection does not keep the map stuck
-    # on County Boundaries after the user changes report levels.
-    layer_context = sanitize_filename_part(str(title or "area"))
-    layer_label = st.selectbox("Boundary layer", available_layers, index=0, key=f"ai_geo_boundary_layer_{layer_context}")
     geo = _ai_load_geojson_layer(layer_label)
     if not geo:
         st.warning("That boundary file could not be loaded. Check the GeoJSON file format.")
@@ -6375,14 +6376,46 @@ def _ai_build_grouped_area_display(df: pd.DataFrame, group_cols):
     out["Outstanding_%"] = out.apply(lambda r: 0 if r["Mail_Applications_Approved"] <= 0 else round((r["Mail_Ballots_Outstanding"] / r["Mail_Applications_Approved"]) * 100, 1), axis=1)
     return out.sort_values("Total_Voters", ascending=False).reset_index(drop=True)
 
-def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title=""):
-    """Render the Area Intelligence heat-map panel."""
-    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
-    heat_df = _ai_add_heatmap_metrics(display_df, candidate_party=candidate_party, title=title)
-    if heat_df.empty:
-        st.info("No heat-map data is available for this selection.")
-        return
+def _ai_map_group_cols_for_layer(layer_label: str, source_df: pd.DataFrame):
+    """Choose the correct Area Intelligence aggregation level for the selected boundary layer."""
+    if source_df is None or source_df.empty:
+        return []
+    candidates = {
+        "County Boundaries": ["County"],
+        "Municipality Boundaries": ["County", "Municipality"],
+        "School District Boundaries": ["School District"],
+        "State House Boundaries": ["STH"],
+        "State Senate Boundaries": ["STS"],
+        "Congressional Boundaries": ["USC"],
+    }.get(layer_label, [])
+    return [c for c in candidates if c in source_df.columns]
 
+
+def _ai_available_layers_for_source(source_df: pd.DataFrame, title: str = ""):
+    """Return map layers that have both a local GeoJSON file and matching data columns."""
+    available = _ai_geo_available_layers()
+    if not available:
+        return []
+    ordered = []
+    def add(label):
+        if label in available and label not in ordered and _ai_map_group_cols_for_layer(label, source_df):
+            ordered.append(label)
+    add("Municipality Boundaries")
+    add("County Boundaries")
+    add("Congressional Boundaries")
+    add("State Senate Boundaries")
+    add("State House Boundaries")
+    add("School District Boundaries")
+    for label in available:
+        add(label)
+    return ordered
+
+
+def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party="Republican", title="", source_df=None):
+    """Render the Area Intelligence heat-map panel. Data is regrouped to match the selected boundary layer."""
+    source_for_layers = source_df if source_df is not None and not source_df.empty else display_df
+    available_layers = _ai_available_layers_for_source(source_for_layers, title=title)
+    party_key, party_label, party_plural, party_pct_col, _, _ = _ai_candidate_party_key(candidate_party)
     metric_options = {
         f"{party_label} %": party_pct_col,
         "Field Priority": "Field_Priority",
@@ -6396,20 +6429,36 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
     }
     metric_label = st.selectbox("Heat metric", list(metric_options.keys()), index=1, key="ai_heat_metric")
     metric_col = metric_options[metric_label]
+    st.markdown('<div class="section-card"><div class="small-header">Area Heat Map</div><div class="tiny-muted">Boundary heat maps use GeoJSON files from the local /geo folder. The map data is automatically regrouped to match the selected boundary layer.</div></div>', unsafe_allow_html=True)
 
-    heat_df[metric_col] = pd.to_numeric(heat_df[metric_col], errors="coerce").fillna(0)
-    ranked = heat_df.sort_values(metric_col, ascending=False).head(30).copy()
-    ranked["Rank"] = range(1, len(ranked) + 1)
-
-    st.markdown(
-        '<div class="section-card"><div class="small-header">Area Heat Map</div>'
-        '<div class="tiny-muted">Boundary heat maps use GeoJSON files from the local /geo folder. The default view uses the next-lowest available geography for the selected report.</div></div>',
-        unsafe_allow_html=True,
-    )
-
-    boundary_rendered = _ai_render_boundary_heat_map(heat_df, metric_col, metric_label, candidate_party=candidate_party, title=title)
+    heat_df = pd.DataFrame()
+    boundary_rendered = False
+    if not available_layers:
+        st.info("No matching local GeoJSON boundary files were found yet. Put files in a /geo folder next to app.py to enable true boundary heat maps.")
+        heat_df = _ai_add_heatmap_metrics(display_df, candidate_party=candidate_party, title=title)
+    else:
+        layer_context = sanitize_filename_part(str(title or "area"))
+        saved = st.session_state.get(f"ai_geo_boundary_layer_{layer_context}")
+        default_index = available_layers.index(saved) if saved in available_layers else 0
+        layer_label = st.selectbox("Boundary layer", available_layers, index=default_index, key=f"ai_geo_boundary_layer_{layer_context}")
+        group_cols = _ai_map_group_cols_for_layer(layer_label, source_for_layers)
+        map_display_df = _ai_build_grouped_area_display(source_for_layers, group_cols) if group_cols else display_df
+        heat_df = _ai_add_heatmap_metrics(map_display_df, candidate_party=candidate_party, title=title)
+        if heat_df.empty:
+            st.info("No heat-map data is available for this selection.")
+            return
+        heat_df[metric_col] = pd.to_numeric(heat_df[metric_col], errors="coerce").fillna(0)
+        boundary_rendered = _ai_render_boundary_heat_map(heat_df, metric_col, metric_label, candidate_party=candidate_party, title=title, layer_label_override=layer_label)
 
     if not boundary_rendered:
+        if heat_df is None or heat_df.empty:
+            heat_df = _ai_add_heatmap_metrics(display_df, candidate_party=candidate_party, title=title)
+        if heat_df.empty:
+            st.info("No heat-map data is available for this selection.")
+            return
+        heat_df[metric_col] = pd.to_numeric(heat_df[metric_col], errors="coerce").fillna(0)
+        ranked = heat_df.sort_values(metric_col, ascending=False).head(30).copy()
+        ranked["Rank"] = range(1, len(ranked) + 1)
         st.caption("Boundary map is not available for this selection yet. Showing top-priority planning table instead.")
         table_cols = [c for c in ["Area_Label", "Total_Voters", "Target_Voters", "Estimated_Doors", "Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"] if c in ranked.columns]
         table_df = ranked[table_cols].copy()
@@ -6418,13 +6467,8 @@ def _render_area_intelligence_heat_map(display_df: pd.DataFrame, candidate_party
         for c in ["Target_Per_Door", "Turnout_Score", "Canvass_Efficiency", "Field_Priority", "Mail_Return_%", "Outstanding_%"]:
             if c in table_df.columns:
                 table_df[c] = pd.to_numeric(table_df[c], errors="coerce").round(1)
-        st.markdown(
-            '<div class="table-card"><div class="small-header">Top Heat-Map Priorities</div>'
-            '<div class="tiny-muted">Use this as the ranked planning table when the boundary map is unavailable.</div></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="table-card"><div class="small-header">Top Heat-Map Priorities</div><div class="tiny-muted">Use this as the ranked planning table when the boundary map is unavailable.</div></div>', unsafe_allow_html=True)
         st.dataframe(table_df, width="stretch", hide_index=True)
-
 
 
 def _ai_format_cell_value(value, col_name=""):
@@ -6882,7 +6926,7 @@ def render_area_intelligence_workspace():
         heatmap_display_df = _ai_build_grouped_area_display(breakdown_df, lower_group_cols)
 
     with heatmap_tab:
-        _render_area_intelligence_heat_map(heatmap_display_df, candidate_party=st.session_state.get("ai_pdf_candidate_party", "Republican"), title=title)
+        _render_area_intelligence_heat_map(heatmap_display_df, candidate_party=st.session_state.get("ai_pdf_candidate_party", "Republican"), title=title, source_df=breakdown_df)
 
     with pdf_tab:
         st.markdown('<div class="section-card"><div class="small-header">PDF Report Generator</div><div class="tiny-muted">Builds a branded client-ready PDF for the selected Area Intelligence profile.</div></div>', unsafe_allow_html=True)
