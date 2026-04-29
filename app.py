@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import boto3
 
-AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v38-live-mapping-status"
+AREA_INTELLIGENCE_MAP_PATCH_VERSION = "v45-reviewed-alias-overrides"
 
 from io import BytesIO
 from datetime import datetime
@@ -5473,6 +5473,63 @@ def _ai_load_municipality_crosswalk_alias_map():
         target = _pick_stable_target(targets)
         if alias and target:
             safe[alias] = [target]
+
+    # User-reviewed aliases must override broad crosswalk/fuzzy guesses.
+    # Without this pass, an alias like BETHLEHEM -> BETHLEHEM TWP can conflict
+    # with the automatic crosswalk row BETHLEHEM -> BETHLEHEM CITY, causing the
+    # alias to be discarded as ambiguous. The reviewed alias file is the source of truth.
+    alias_path = GEO_PATH / "municipality_aliases.csv"
+    if alias_path.exists():
+        try:
+            alias_df = pd.read_csv(alias_path, dtype=str).fillna("")
+            alias_cols = {str(c).strip().lower(): c for c in alias_df.columns}
+            a_county_col = alias_cols.get("county") or alias_cols.get("sure_county") or alias_cols.get("county_name")
+            a_sure_col = alias_cols.get("sure_municipality") or alias_cols.get("data_municipality") or alias_cols.get("municipality") or alias_cols.get("sure_name")
+            a_official_col = alias_cols.get("official_municipality") or alias_cols.get("official_municipal_name") or alias_cols.get("map_municipality") or alias_cols.get("gis_municipality")
+            a_fips_col = alias_cols.get("fips_mun_code")
+            a_geoid_col = alias_cols.get("geoid")
+
+            def _force_reviewed_alias(alias_value, target_value):
+                alias_value = _ai_geo_normalize_join_key(alias_value)
+                target_value = _ai_geo_normalize_join_key(target_value)
+                if not alias_value or not target_value:
+                    return
+                for alias_variant in [
+                    alias_value,
+                    _ai_geo_compact_join_key(alias_value),
+                    _ai_geo_fuzzy_join_key(alias_value),
+                ]:
+                    alias_variant = _ai_geo_normalize_join_key(alias_variant)
+                    if alias_variant:
+                        safe[alias_variant] = [target_value]
+
+            if a_county_col and a_sure_col:
+                for _, arow in alias_df.iterrows():
+                    acounty = _ai_geo_normalize_key(arow.get(a_county_col, ""))
+                    asure = _ai_geo_normalize_key(arow.get(a_sure_col, ""))
+                    if not acounty or not asure:
+                        continue
+                    afips = normalize_export_text(arow.get(a_fips_col, "")) if a_fips_col else ""
+                    ageoid = normalize_export_text(arow.get(a_geoid_col, "")) if a_geoid_col else ""
+                    aofficial = _ai_geo_normalize_key(arow.get(a_official_col, "")) if a_official_col else ""
+
+                    reviewed_target = ""
+                    if afips:
+                        reviewed_target = f"FIPS|{afips}"
+                    elif ageoid:
+                        reviewed_target = f"GEOID|{ageoid}"
+                    elif aofficial:
+                        reviewed_target = f"{acounty}|{aofficial}"
+                    if not reviewed_target:
+                        continue
+
+                    for sure_alias in [asure, _ai_geo_muni_base_key(asure)]:
+                        if sure_alias:
+                            _force_reviewed_alias(f"{acounty}|{sure_alias}", reviewed_target)
+                            _force_reviewed_alias(f"{acounty} {sure_alias}", reviewed_target)
+        except Exception:
+            pass
+
     return safe
 
 
