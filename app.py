@@ -2143,9 +2143,16 @@ def get_filtered_voter_count_fast(active_filters, columns) -> int:
     except Exception:
         return 0
 
+# Large-universe guard
+# The old threshold was 50,000, which was too strict now that the app is using
+# speed tables + local/R2 shards. Full State Senate / State House / Congressional
+# districts should be usable for charts and exports. Keep the guard only for
+# truly massive universes, such as statewide or near-statewide selections.
+LARGE_UNIVERSE_ROW_LIMIT = 1_000_000
+
 def use_large_filter_mode(active_filters, columns) -> bool:
     try:
-        return get_filtered_voter_count_fast(active_filters, columns) >= 50000
+        return get_filtered_voter_count_fast(active_filters, columns) >= LARGE_UNIVERSE_ROW_LIMIT
     except Exception:
         return False
 
@@ -6997,14 +7004,7 @@ def _geo_options_for_column(geo_df: pd.DataFrame, target_col: str, current_selec
 
 
 def render_interdependent_geo_filters(cols, opts) -> dict:
-    """Render geography filters with mutual narrowing.
-
-    Streamlit does not allow changing st.session_state for a widget key after
-    that widget has been instantiated. To make Clear Filters and Load Universe
-    safe, these widgets use a generation suffix in their keys. Clearing or
-    loading increments the generation, so Streamlit creates a fresh set of
-    widgets instead of us modifying existing widget state.
-    """
+    """Render geography filters with mutual narrowing."""
     geo_cols = [c for c in GEO_FILTER_COLUMNS if c in cols]
     geo_df = load_geo_dependency_table()
     selections = {}
@@ -7012,33 +7012,14 @@ def render_interdependent_geo_filters(cols, opts) -> dict:
     st.markdown("<div class='cc-active-section-title'>Geography</div>", unsafe_allow_html=True)
     st.caption("Geography options narrow together as selections are made.")
 
-    if "geo_widget_generation" not in st.session_state:
-        st.session_state.geo_widget_generation = 0
-
-    if st.session_state.pop("reset_geo_filter_widgets", False):
-        st.session_state.geo_widget_generation += 1
-
-    _pending_geo_filters = st.session_state.pop("pending_geo_widget_filters", None)
-    if isinstance(_pending_geo_filters, dict):
-        st.session_state.geo_widget_generation += 1
-        # Use active_filters as the source of defaults for the new widget generation.
-        # Do not assign to geo_dep_* widget keys directly.
-        merged = dict(st.session_state.get("active_filters", {}) or {})
-        for _geo_col in GEO_FILTER_COLUMNS:
-            _vals = _pending_geo_filters.get(_geo_col, []) or []
-            merged[_geo_col] = _vals if isinstance(_vals, list) else []
-        st.session_state.active_filters = merged
-
-    gen = st.session_state.geo_widget_generation
-
     current = {}
     for col in geo_cols:
-        key = f"geo_dep_{_norm_col_name(col)}__{gen}"
+        key = f"geo_dep_{_norm_col_name(col)}"
         existing = st.session_state.get(key, st.session_state.active_filters.get(col, []))
         current[col] = existing if isinstance(existing, list) else []
 
     for col in geo_cols:
-        key = f"geo_dep_{_norm_col_name(col)}__{gen}"
+        key = f"geo_dep_{_norm_col_name(col)}"
         fallback = opts.get(col, []) or []
         options = _geo_options_for_column(geo_df, col, current, fallback)
 
@@ -7724,8 +7705,6 @@ if "columns" not in st.session_state:
     st.session_state.columns = []
 if "options" not in st.session_state:
     st.session_state.options = {}
-if "geo_widget_generation" not in st.session_state:
-    st.session_state.geo_widget_generation = 0
 
 
 def _mb_clean_options(values, field=None):
@@ -8594,10 +8573,10 @@ with st.sidebar:
 
             if clear_filters:
                 st.session_state.active_filters = {}
-                # Do not directly modify geo_dep_* widget keys here. Streamlit forbids
-                # changing a widget's session_state after it has been instantiated.
-                # Set a reset flag and apply it before widgets render on the next run.
-                st.session_state.reset_geo_filter_widgets = True
+                for _geo_col in GEO_FILTER_COLUMNS:
+                    _geo_key = f"geo_dep_{_norm_col_name(_geo_col)}"
+                    if _geo_key in st.session_state:
+                        st.session_state[_geo_key] = []
                 st.session_state.filters_applied = False
                 st.session_state.workspace_mode = "landing"
                 st.session_state.lookup_view_active = False
@@ -8693,12 +8672,9 @@ with st.sidebar:
                         if st.button("Load Universe", width="stretch", key="load_sidebar_universe"):
                             loaded_filters = universe_info.get("filters", {}) or {}
                             st.session_state.active_filters = loaded_filters
-                            # Apply loaded geo widget values before the geography widgets
-                            # render on the next run, not after they have already rendered.
-                            st.session_state.pending_geo_widget_filters = {
-                                _geo_col: loaded_filters.get(_geo_col, []) or []
-                                for _geo_col in GEO_FILTER_COLUMNS
-                            }
+                            for _geo_col in GEO_FILTER_COLUMNS:
+                                _geo_key = f"geo_dep_{_norm_col_name(_geo_col)}"
+                                st.session_state[_geo_key] = loaded_filters.get(_geo_col, []) or []
                             st.session_state.filters_applied = False
                             st.session_state.workspace_mode = "universe"
                             st.session_state.lookup_view_active = False
@@ -8827,13 +8803,13 @@ else:
     divider()
 
     if large_filter_mode:
-        st.warning("Large statewide universe detected. Narrow by geography or voter filters for detailed charts and grouped tables.")
+        st.warning("Large universe detected. Summary mode is active only for very large selections to keep the app stable. Full districts under the safety limit now stay interactive.")
 
     dashboard_tabs = st.tabs(["Overview", "Contact Tracking", "Output Center"])
 
     with dashboard_tabs[0]:
         if large_filter_mode:
-            st.info("Summary view is active for this large universe. Narrow by geography or voter filters for deeper charts and tables.")
+            st.info("Summary view is active for this very large universe. Narrow by geography or voter filters for deeper charts and grouped tables.")
             summary_only_df = pd.DataFrame([
                 {"Metric": "Voters", "Value": f"{safe_int(metrics.get('voters')):,}"},
                 {"Metric": "Households", "Value": "—" if metrics.get("households") is None else f"{safe_int(metrics.get('households')):,}"},
@@ -8874,7 +8850,7 @@ else:
 
     with dashboard_tabs[1]:
         if large_filter_mode:
-            st.info("Summary-only mode is active for this large statewide filter. Narrow by county, municipality, or precinct to load Contact Tracking details.")
+            st.info("Summary-only mode is active for this very large universe. Narrow by geography or voter filters to load Contact Tracking details.")
         else:
             tracking_cols = st.columns(2, gap="medium")
             with tracking_cols[0]:
@@ -8902,19 +8878,19 @@ else:
         st.markdown('<div class="small-header">Output Center</div>', unsafe_allow_html=True)
 
         if large_filter_mode:
-            st.warning("Large statewide universe detected. Interactive outputs are paused here to keep the app stable. Use the statewide summary report below, or narrow geography to restore the normal Output Center.")
-            if st.button("Prepare Statewide Summary Report", width="stretch"):
+            st.warning("Very large universe detected. Full detail exports are still protected here to keep the app stable. District-level universes under the safety limit now use the normal Output Center.")
+            if st.button("Prepare Large Universe Summary Report", width="stretch"):
                 with st.spinner("Building statewide summary report..."):
                     st.session_state["statewide_summary_report_bytes"] = build_statewide_summary_report_bytes(active, columns)
             if "statewide_summary_report_bytes" in st.session_state and st.session_state["statewide_summary_report_bytes"]:
                 st.download_button(
-                    "Download Statewide Summary Report",
+                    "Download Large Universe Summary Report",
                     data=st.session_state["statewide_summary_report_bytes"],
-                    file_name="candidate_connect_statewide_summary_report.xlsx",
+                    file_name="candidate_connect_large_universe_summary_report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     width="stretch",
                 )
-            st.caption("This workbook includes Overview, Filters, County, Congressional, State Senate, and State House sheets for the current universe.")
+            st.caption("This workbook includes Overview, Filters, County, Congressional, State Senate, and State House sheets for the current universe. Full Senate/House/Congressional district exports under 1,000,000 voters now use the normal Output Center.")
         else:
             output_tabs = st.tabs(["Exports", "Reports"])
             with output_tabs[0]:
