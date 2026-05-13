@@ -41,6 +41,18 @@ st.set_page_config(
     layout="wide"
 )
 
+
+st.markdown('\n<style id="cc-final-hard-fixes">\n/* Hard fixes for real logos, KPI icons, and no \'Ready\' overlay */\n.cc-donut::after,\n.cc-donut:after {\n  content: none !important;\n  display: none !important;\n}\n.logo-tss,\nimg[src*="TSS_Logo_Transparent"] {\n  max-width: 330px !important;\n  max-height: 112px !important;\n  width: auto !important;\n  height: auto !important;\n  object-fit: contain !important;\n  object-position: center center !important;\n  display: block !important;\n  filter: brightness(1.15) saturate(1.18) contrast(1.08) drop-shadow(0 10px 18px rgba(0,0,0,.58)) !important;\n}\n.brand-right {\n  overflow: visible !important;\n}\n.cc-open-metric .icon img {\n  width: 38px !important;\n  height: 38px !important;\n  object-fit: contain !important;\n  display: block !important;\n}\n</style>\n', unsafe_allow_html=True)
+
+
+st.markdown('\n<style id="cc-no-unknown-and-real-tss">\n.cc-open-metrics {\n  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;\n}\n.logo-tss,\nimg[src*="TSS_Logo_Transparent"] {\n  max-width: 330px !important;\n  max-height: 120px !important;\n  width: auto !important;\n  height: auto !important;\n  object-fit: contain !important;\n  display: block !important;\n  filter: drop-shadow(0 10px 18px rgba(0,0,0,.55)) !important;\n}\n</style>\n', unsafe_allow_html=True)
+
+
+st.markdown('\n<style id="cc-true-black-background-fix">\n/* True black foundation for consistent display across monitors */\n:root {\n  --cc-bg: #000000 !important;\n  --cc-bg-2: #000000 !important;\n  --cc-sidebar: #000000 !important;\n  --cc-panel: #05080d !important;\n  --cc-panel-2: #07101a !important;\n  --cc-card: #07101a !important;\n  --cc-card-soft: #0a111c !important;\n}\n\nhtml,\nbody,\n[data-testid="stAppViewContainer"],\n[data-testid="stApp"],\n.stApp {\n  background: #000000 !important;\n}\n\n[data-testid="stSidebar"],\n[data-testid="stSidebarContent"] {\n  background: #000000 !important;\n}\n\n.main,\n.block-container,\nsection.main,\n[data-testid="stMain"],\n[data-testid="stMainBlockContainer"] {\n  background: #000000 !important;\n}\n\n/* Remove gray monitor-dependent page glow while keeping subtle red header depth */\n[data-testid="stAppViewContainer"] > .main {\n  background: #000000 !important;\n}\n\n/* Keep cards dark, not gray */\n.top-shell,\n.section-card,\n.chart-card,\n.table-card,\n.metric-card,\n.cc-opening-shell,\n.cc-open-card,\n.cc-open-metric,\n.cc-open-table,\n.cc-filter-shell,\n.stTabs [data-baseweb="tab-panel"] {\n  background: linear-gradient(180deg, #07101a 0%, #03070c 100%) !important;\n}\n\n/* Header stays dramatic but starts from black */\n.top-shell,\n.cc-opening-header,\n.brand-shell {\n  background:\n    radial-gradient(circle at 72% 8%, rgba(185,28,28,.22), transparent 34%),\n    linear-gradient(90deg, #000000 0%, #05070c 43%, #180405 100%) !important;\n}\n\n/* Sidebar controls on black */\n[data-testid="stSidebar"] .stButton > button,\n[data-testid="stSidebar"] [data-baseweb="select"] > div,\n[data-testid="stSidebar"] input,\n[data-testid="stSidebar"] textarea {\n  background-color: #07101a !important;\n}\n\n/* Make Streamlit white gaps less likely */\ndiv[data-testid="stVerticalBlock"],\ndiv[data-testid="stHorizontalBlock"] {\n  background: transparent !important;\n}\n</style>\n', unsafe_allow_html=True)
+
+
+st.markdown('\n<style id="cc-single-panel-nav-css">\n[data-testid="stSidebar"] .cc-nav-menu-title {\n  font-size: 11px;\n  font-weight: 900;\n  letter-spacing: .08em;\n  color: #ff3b3b;\n  text-transform: uppercase;\n  margin: 16px 0 8px 2px;\n}\n[data-testid="stSidebar"] .cc-active-section-title {\n  font-size: 15px;\n  font-weight: 900;\n  color: #ffffff;\n  margin: 16px 0 10px 0;\n}\n[data-testid="stSidebar"] .stButton > button {\n  min-height: 38px !important;\n}\n[data-testid="stSidebar"] .stButton > button[kind="secondary"] {\n  justify-content: flex-start !important;\n  text-align: left !important;\n  border: 1px solid rgba(148,163,184,.20) !important;\n  background: #05080d !important;\n  color: #e5e7eb !important;\n}\n[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {\n  border-color: rgba(248,113,113,.85) !important;\n  background: linear-gradient(90deg, rgba(185,28,28,.32), rgba(7,16,26,.95)) !important;\n  color: #ffffff !important;\n}\n</style>\n', unsafe_allow_html=True)
+
 # R2 public-read setup
 R2_BASE_BY_ENV = {
     "DEV": "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev",
@@ -65,82 +77,454 @@ except Exception:
 LOCAL_ROOT = Path("/tmp/candidate_connect_r2")
 LOCAL_MANIFEST = LOCAL_ROOT / "dataset_manifest.json"
 
+# DEV data source setup
+# DEV first tries local Athenix/Candidate Connect files, then falls back to R2.
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+USE_LOCAL_DATA = APP_ENV == "DEV"
+try:
+    USE_LOCAL_DATA = _truthy(st.secrets.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
+except Exception:
+    USE_LOCAL_DATA = _truthy(os.environ.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
+
+ATHENIX_OUTPUT_PATH = Path.home() / "Desktop" / "Athenix_Data_Pipeline" / "07_outputs"
+LOCAL_DEV_SHARDS_DIR = Path("data/shards")
+LOCAL_DEV_INDEX_SHARDS_DIR = LOCAL_DEV_SHARDS_DIR / "index"
+LOCAL_DEV_DETAIL_SHARDS_DIR = LOCAL_DEV_SHARDS_DIR / "detail"
+LOCAL_DEV_SPEED_DIR = LOCAL_DEV_SHARDS_DIR / "speed"
+LOCAL_DEV_VOTERS_CSV = Path("data/local_data/voters.csv")
+LOCAL_CANDIDATE_CONNECT_CSV = Path("data/raw/voter_file/candidate_connect_data.csv")
+LOCAL_ATHENIX_FEATURED_CSV = ATHENIX_OUTPUT_PATH / "master" / "PA_VOTER_MASTER_FEATURED.csv"
+
 CC_LOGO = Path("candidate_connect_logo.png")
 TSS_LOGO = Path("TSS_Logo_Transparent.png")
+TSS_REPORTING_LOGO = Path("TSS_Logo_Transparent_REPORTING.png")
 SAVED_UNIVERSES_PATH = Path("saved_universes.json")
 SAVED_UNIVERSES_R2_KEY = "app_state/saved_universes.json"
+# Voter corrections are app-state/data, not code. Store them with the
+# Athenix pipeline outputs so they can be re-applied after every SURE/CURRENT/contact refresh.
+VOTER_CORRECTIONS_PATH = ATHENIX_OUTPUT_PATH / "app_state" / "voter_record_corrections.json"
+VOTER_CORRECTIONS_LOCAL_FALLBACK_PATH = Path("voter_record_corrections.json")
 
 
-PARTY_COLOR_MAP = {"R": "#c62828", "D": "#1565c0", "O": "#2e7d32"}
-AGE_COLOR_RANGE = ["#7a1523","#9f2032","#b8454f","#c96a6c","#d88f87","#e8b8aa","#f2dbcf","#f7ebe5","#fbf5f2"]
-GENDER_COLOR_RANGE = ["#7a1523","#4b4f54","#b98088","#9b9da1","#d8b6bb"]
+
+# -----------------------------------------------------------------------------
+# Candidate Connect centralized dark-theme engine
+# Keep all major UI/chart colors here so future sections inherit one system.
+# -----------------------------------------------------------------------------
+CC_THEME = {
+    "bg_primary": "#070A10",
+    "bg_secondary": "#0B111A",
+    "panel": "#0E1621",
+    "panel_alt": "#131C28",
+    "panel_soft": "#182331",
+    "border": "#3A2630",
+    "border_soft": "#2A3340",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#D7DEE8",
+    "text_muted": "#98A3B3",
+    "brand_red": "#D71920",
+    "brand_red_dark": "#8F1118",
+    "brand_blue": "#1D4ED8",
+    "brand_blue_hover": "#2563EB",
+    "brand_gold": "#F2B84B",
+    "rep_red": "#C91F27",
+    "dem_blue": "#1D4ED8",
+    "other_green": "#4C9A2A",
+}
+
+# Required global political colors. Do not use lighter ad-hoc variants elsewhere.
+PARTY_COLOR_MAP = {"R": CC_THEME["rep_red"], "D": CC_THEME["dem_blue"], "O": CC_THEME["other_green"]}
+PARTY_NAME_COLOR_MAP = {"Republican": CC_THEME["rep_red"], "Democrat": CC_THEME["dem_blue"], "Democratic": CC_THEME["dem_blue"], "Other": CC_THEME["other_green"]}
+
+# Muted dark-dashboard chart palettes for non-party charts.
+AGE_COLOR_RANGE = ["#6E0F14", "#8F1118", "#A9161D", "#C91F27", "#E03A3E", "#B87333", "#F2B84B", "#8F1118", "#C91F27"]
+GENDER_COLOR_RANGE = [CC_THEME["rep_red"], CC_THEME["dem_blue"], CC_THEME["other_green"], CC_THEME["brand_gold"], "#64748B"]
+CHART_NEUTRAL_COLOR_RANGE = [CC_THEME["rep_red"], CC_THEME["dem_blue"], CC_THEME["other_green"], CC_THEME["brand_gold"], "#A78BFA", "#22D3EE", "#FB7185"]
+
+
+
+# Global Altair dark theme so charts do not render on white panels.
+def _cc_altair_dark_theme():
+    return {
+        "config": {
+            "background": "transparent",
+            "view": {"stroke": "transparent"},
+            "axis": {
+                "labelColor": "#E5E7EB",
+                "titleColor": "#F8FAFC",
+                "gridColor": "rgba(148, 163, 184, 0.14)",
+                "domainColor": "rgba(148, 163, 184, 0.38)",
+                "tickColor": "rgba(148, 163, 184, 0.30)",
+                "labelFontSize": 12,
+                "titleFontSize": 12,
+            },
+            "legend": {
+                "labelColor": "#E5E7EB",
+                "titleColor": "#F8FAFC",
+                "labelFontSize": 12,
+                "titleFontSize": 12,
+                "symbolStrokeColor": "rgba(255,255,255,.35)",
+            },
+            "title": {"color": "#F8FAFC"},
+            "range": {
+                "category": [CC_THEME["rep_red"], CC_THEME["dem_blue"], CC_THEME["other_green"], CC_THEME["brand_gold"], "#64748B"]
+            },
+        }
+    }
+
+try:
+    alt.themes.register("candidate_connect_dark", _cc_altair_dark_theme)
+    alt.themes.enable("candidate_connect_dark")
+except Exception:
+    pass
+
+GEO_DISPLAY_LABELS = {
+    "USC": "Congressional",
+    "STS": "State Senate",
+    "STH": "State House",
+}
+
+
+def geo_label(col: str) -> str:
+    return GEO_DISPLAY_LABELS.get(col, col)
 
 st.markdown("""
 <style>
-.block-container {padding-top: 1.35rem; padding-bottom: .75rem; max-width: 1600px;}
-.top-shell, .section-card, .chart-card, .table-card, .metric-card {
-    border: 1px solid #ded7d7;
-    border-radius: 14px;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+/* --------------------------------------------------------------------------
+   Candidate Connect Professional Dark Theme
+   Centralized CSS variables are the source of truth for the entire UI.
+   -------------------------------------------------------------------------- */
+:root {
+  --cc-bg-primary: #070A10;
+  --cc-bg-secondary: #0B111A;
+  --cc-bg-tertiary: #0E1621;
+  --cc-panel: #0E1621;
+  --cc-panel-alt: #131C28;
+  --cc-panel-soft: #182331;
+  --cc-panel-hover: #241B22;
+  --cc-border: #3A2630;
+  --cc-border-soft: #2A3340;
+  --cc-text-primary: #F8FAFC;
+  --cc-text-secondary: #CBD5E1;
+  --cc-text-muted: #94A3B8;
+  --cc-text-faint: #64748B;
+  --cc-red: #C91F27;
+  --cc-blue: #1D4ED8;
+  --cc-green: #4C9A2A;
+  --cc-gold: #F2B84B;
+  --cc-cyan: #F2B84B;
+  --cc-shadow: 0 14px 34px rgba(0, 0, 0, .35);
+  --cc-shadow-soft: 0 8px 18px rgba(0, 0, 0, .22);
+  --cc-radius-lg: 16px;
+  --cc-radius-md: 11px;
+  --cc-radius-sm: 8px;
+  --cc-input-bg: #0F172A;
+  --cc-input-border: #334155;
+  --cc-input-focus: #F2B84B;
+  --cc-button-bg: linear-gradient(180deg, #9F151C 0%, #6E0F14 100%);
+  --cc-button-hover: linear-gradient(180deg, #C91F27 0%, #8F1118 100%);
+  --cc-button-secondary: #1E293B;
+  --cc-button-danger: linear-gradient(180deg, #B91C1C 0%, #991B1B 100%);
 }
-.top-shell {padding: 1.2rem 1rem 1rem 1rem; margin-top: .35rem; margin-bottom: .95rem; overflow: visible;}
-.section-card, .chart-card, .table-card {padding: .8rem .9rem; margin-bottom: .8rem;}
-.metric-card {padding: .6rem .7rem; height: 94px; display:flex; flex-direction:column; justify-content:center;}
-.metric-label {font-size: 11px; color: #666; margin-bottom: .12rem;}
-.metric-value {font-size: 1.55rem; font-weight: 700; color: #24303f; line-height: 1.1;}
-.small-header {font-size: 16px; font-weight: 900; color: #142033; margin-bottom: .45rem;}
-.tiny-muted {font-size: 10px; color: #596579;}
-.brand-grid {display:grid; grid-template-columns: 200px 1fr 170px; gap:18px; align-items:center;}
-.brand-left {display:flex; align-items:center; justify-content:flex-start; min-height:78px;}
+
+html, body, [data-testid="stAppViewContainer"], .stApp {
+  background: radial-gradient(circle at top left, rgba(201, 31, 39, .16), transparent 32%),
+              radial-gradient(circle at top right, rgba(242, 184, 75, .07), transparent 26%),
+              linear-gradient(180deg, var(--cc-bg-secondary) 0%, var(--cc-bg-primary) 100%) !important;
+  color: var(--cc-text-primary) !important;
+}
+
+.block-container {padding-top: 1.15rem; padding-bottom: 1rem; max-width: 1660px;}
+[data-testid="stHeader"] {background: rgba(7,10,16,.82) !important; backdrop-filter: blur(10px);}
+[data-testid="stToolbar"] {right: 1rem;}
+
+/* Sidebar */
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #0A0D12 0%, #07101A 100%) !important; border-right: 1px solid rgba(201,31,39,.28);}
+[data-testid="stSidebar"] * {color: var(--cc-text-secondary) !important;}
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] .stMarkdown strong {color: var(--cc-text-primary) !important;}
+.sidebar-note {font-size:10.5px; color:var(--cc-text-muted) !important; margin-top:-.25rem; margin-bottom:.55rem; line-height:1.35;}
+
+/* Main cards/shells */
+.top-shell, .section-card, .chart-card, .table-card, .metric-card, .empty-shell, .lookup-result-card {
+  border: 1px solid var(--cc-border-soft);
+  border-radius: var(--cc-radius-lg);
+  background: linear-gradient(180deg, rgba(18,27,38,.97) 0%, rgba(10,16,24,.97) 100%);
+  box-shadow: var(--cc-shadow-soft);
+  color: var(--cc-text-primary);
+}
+.top-shell {padding: 1.05rem 1.25rem 1.05rem 1.25rem; margin-top: .35rem; margin-bottom: .95rem; overflow: visible; border-color: rgba(201,31,39,.82); background: radial-gradient(circle at 78% 20%, rgba(201,31,39,.20), transparent 32%), radial-gradient(circle at 92% 60%, rgba(242,184,75,.09), transparent 22%), linear-gradient(90deg, rgba(12,18,26,.98) 0%, rgba(9,12,18,.98) 48%, rgba(19,8,10,.98) 100%); box-shadow: 0 0 0 1px rgba(242,184,75,.10), 0 18px 40px rgba(0,0,0,.42);}
+.section-card, .chart-card, .table-card {padding: .9rem .95rem; margin-bottom: .85rem;}
+.metric-card {padding: .72rem .82rem; min-height: 94px; display:flex; flex-direction:column; justify-content:center; border-left: 3px solid rgba(201,31,39,.78);}
+.metric-label {font-size: 11px; color: var(--cc-text-muted); margin-bottom: .12rem; letter-spacing:.02em; text-transform: uppercase;}
+.metric-value {font-size: 1.58rem; font-weight: 800; color: var(--cc-text-primary); line-height: 1.1;}
+.small-header {font-size: 16px; font-weight: 900; color: var(--cc-text-primary); margin-bottom: .48rem; letter-spacing:.01em;}
+.tiny-muted, .stCaption, div[data-testid="stCaptionContainer"] {font-size: 10.5px; color: var(--cc-text-muted) !important;}
+.empty-shell {padding: 1.2rem 1rem; text-align:center; color:var(--cc-text-secondary);}
+
+/* Brand header */
+.brand-grid {display:grid; grid-template-columns: 220px 1fr 250px; gap:22px; align-items:center;}
+.brand-left {display:flex; align-items:center; justify-content:flex-start; min-height:86px; padding-right:18px; border-right:1px solid rgba(242,184,75,.28);}
 .brand-center {display:flex; flex-direction:column; justify-content:center;}
-.brand-right {display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:78px;}
-.brand-title {font-size: 24px; font-weight: 800; color:#153d73; line-height:1.05; margin-bottom:.12rem;}
-.brand-sub {font-size: 11px; color:#334a6a; font-weight:700;}
-.brand-status {font-size: 11px; color:#506078; margin-top:.28rem; font-weight:600;}
-.powered-by {font-size:10px; color:#777; margin-bottom:.18rem; text-align:center; font-weight:700;}
-.logo-cc {max-width:168px; height:auto; display:block;}
-.logo-tss {max-width:102px; height:auto; display:block; margin:0 auto;}
-.section-divider {height:1px; background:linear-gradient(to right, rgba(0,0,0,0), #d7d1d1 12%, #d7d1d1 88%, rgba(0,0,0,0)); margin:.5rem 0 .8rem 0;}
-.sidebar-note {font-size:10px; color:#687487; margin-top:-.25rem; margin-bottom:.4rem;}
-.stButton > button {width:100%; border-radius:9px; min-height: 2.1rem; font-weight: 600;}
-.cc-mini-table {width:100%; border-collapse:collapse; font-size:11px; margin-top:.35rem;}
-.cc-mini-table th {text-align:center; padding:4px 6px; color:#364152; font-weight:800; border-bottom:1px solid #ece7e7;}
-.cc-mini-table td {padding:4px 6px; border-bottom:1px solid #f0ebeb;}
+.brand-right {display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:86px; padding:.55rem .75rem; border-radius:14px; background:rgba(0,0,0,.24); box-shadow: inset 0 0 0 1px rgba(242,184,75,.10);}
+.brand-title {font-size: 25px; font-weight: 900; color: var(--cc-text-primary); line-height:1.05; margin-bottom:.12rem; letter-spacing:.01em;}
+.brand-sub {font-size: 11px; color: var(--cc-red); font-weight:900; letter-spacing:.04em; text-transform: uppercase;}
+.brand-status {font-size: 11px; color: var(--cc-text-muted); margin-top:.30rem; font-weight:650;}
+.powered-by {font-size:10px; color:#FFFFFF; margin-bottom:.18rem; text-align:center; font-weight:900; letter-spacing:.02em;}
+.logo-cc {max-width:205px; height:auto; display:block; filter: brightness(1.18) saturate(1.22) contrast(1.10) drop-shadow(0 10px 18px rgba(0,0,0,.48));}
+.logo-tss {max-width:205px; height:auto; display:block; margin:0 auto; opacity:1; filter: brightness(1.22) saturate(1.35) contrast(1.16) drop-shadow(0 10px 18px rgba(0,0,0,.48));}
+.section-divider {height:1px; background:linear-gradient(to right, rgba(96,165,250,0), rgba(201,31,39,.55) 12%, rgba(242,184,75,.58) 50%, rgba(201,31,39,.55) 88%, rgba(96,165,250,0)); margin:.55rem 0 .9rem 0;}
+
+/* Text and links */
+p, li, label, span, div {color: inherit;}
+a {color:#F2B84B !important;}
+hr {border-color: var(--cc-border-soft) !important;}
+
+/* Buttons */
+.stButton > button, div[data-testid="stDownloadButton"] > button, button[kind="primary"] {
+  width:100%; border-radius: var(--cc-radius-md) !important; min-height: 2.22rem; font-weight: 800 !important;
+  color: var(--cc-text-primary) !important; background: var(--cc-button-bg) !important;
+  border: 1px solid rgba(242,184,75,.38) !important; box-shadow: 0 6px 16px rgba(201,31,39,.22);
+  transition: all .12s ease-in-out;
+}
+.stButton > button:hover, div[data-testid="stDownloadButton"] > button:hover, button[kind="primary"]:hover {
+  background: var(--cc-button-hover) !important; border-color: #F2B84B !important; transform: translateY(-1px);
+}
+.stButton > button:active, div[data-testid="stDownloadButton"] > button:active {transform: translateY(0); box-shadow:none;}
+button[kind="secondary"] {background: var(--cc-button-secondary) !important; color: var(--cc-text-secondary) !important; border:1px solid var(--cc-border) !important;}
+
+/* Inputs, filters, multiselects, sliders */
+[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input,
+.stTextInput input, .stNumberInput input, .stDateInput input {
+  background: var(--cc-input-bg) !important; color: var(--cc-text-primary) !important; border-color: var(--cc-input-border) !important; border-radius: var(--cc-radius-sm) !important;
+}
+[data-baseweb="select"] span, [data-baseweb="select"] div {color: var(--cc-text-primary) !important;}
+[data-baseweb="tag"] {background: rgba(201,31,39,.28) !important; color: var(--cc-text-primary) !important; border:1px solid rgba(242,184,75,.28);}
+[data-baseweb="popover"], [data-baseweb="menu"] {background: var(--cc-panel-soft) !important; color: var(--cc-text-primary) !important; border:1px solid var(--cc-border) !important;}
+[role="option"] {background: var(--cc-panel-soft) !important; color: var(--cc-text-primary) !important;}
+[role="option"]:hover {background: var(--cc-panel-hover) !important;}
+.stSlider [data-baseweb="slider"] div {color: var(--cc-text-secondary) !important;}
+.stSlider [data-baseweb="slider"] div[role="slider"] {background: #F2B84B !important; box-shadow: 0 0 0 4px rgba(242,184,75,.18) !important;}
+.stCheckbox label, .stRadio label {color: var(--cc-text-secondary) !important;}
+
+/* Tabs and expanders */
+.stTabs [data-baseweb="tab-list"] {gap: .35rem; border-bottom:1px solid var(--cc-border-soft);}
+.stTabs [data-baseweb="tab"] {background: #101B2E; border:1px solid var(--cc-border-soft); border-bottom:none; border-radius: 10px 10px 0 0; padding: .45rem .8rem; color:var(--cc-text-muted) !important;}
+.stTabs [aria-selected="true"] {background: var(--cc-panel-soft) !important; color: var(--cc-text-primary) !important; border-color: rgba(242,184,75,.42) !important;}
+.streamlit-expanderHeader {background: var(--cc-panel-alt) !important; color: var(--cc-text-primary) !important; border-radius: var(--cc-radius-md) !important; border:1px solid var(--cc-border-soft) !important;}
+.streamlit-expanderContent {background: rgba(15,23,42,.65) !important; border:1px solid var(--cc-border-soft) !important; border-top:0 !important; border-radius: 0 0 var(--cc-radius-md) var(--cc-radius-md) !important;}
+
+/* Tables / dataframes */
+[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame {border:1px solid var(--cc-border-soft) !important; border-radius: var(--cc-radius-md) !important; overflow:hidden; background: var(--cc-panel) !important;}
+[data-testid="stDataFrame"] * {color: var(--cc-text-primary) !important;}
+table {color: var(--cc-text-primary);}
+thead tr th {background: #0F1A2C !important; color: var(--cc-text-primary) !important; border-bottom:1px solid var(--cc-border) !important; font-weight:800 !important;}
+tbody tr:nth-child(odd) {background: rgba(15,23,42,.96) !important;}
+tbody tr:nth-child(even) {background: rgba(30,41,59,.72) !important;}
+tbody tr:hover {background: rgba(201,31,39,.18) !important;}
+td, th {border-color: var(--cc-border-soft) !important;}
+
+/* Mini summary tables */
+.cc-mini-table {width:100%; border-collapse:collapse; font-size:11px; margin-top:.38rem; color:var(--cc-text-secondary);}
+.cc-mini-table th {text-align:center; padding:5px 6px; color:var(--cc-text-primary); font-weight:900; border-bottom:1px solid var(--cc-border); background:#0F1A2C;}
+.cc-mini-table td {padding:5px 6px; border-bottom:1px solid var(--cc-border-soft); color:var(--cc-text-secondary);}
 .cc-mini-table td.label-cell {text-align:left;}
-.cc-mini-table td.num-cell {text-align:center;}
-.cc-mini-table tr.total-row td {font-weight:700; border-top:1px solid #dcd6d6;}
-.cc-swatch {display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:8px; position:relative; top:-1px; border:1px solid rgba(0,0,0,.08);}
-.empty-shell {padding: 1.2rem 1rem; text-align:center; color:#556273;}
-.lookup-result-card {border:1px solid #d9dfe8; border-radius:14px; background:#fff; padding:.8rem .9rem; margin:.2rem 0 .35rem 0; box-shadow:0 1px 2px rgba(0,0,0,.03);} 
-.lookup-result-card.selected {border:2px solid #2b6fd3; background:#f7fbff;}
-.lookup-result-line0 {font-size:15px; font-weight:800; color:#1f2d3d; margin-bottom:.22rem;}
-.lookup-result-line1, .lookup-result-line2, .lookup-result-line3 {font-size:13px; color:#334155; line-height:1.35;}
+.cc-mini-table td.num-cell {text-align:center; font-variant-numeric: tabular-nums;}
+.cc-mini-table tr.total-row td {font-weight:800; color:var(--cc-text-primary); border-top:1px solid var(--cc-border); background:rgba(201,31,39,.10);}
+.cc-swatch {display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:8px; position:relative; top:-1px; border:1px solid rgba(255,255,255,.22);}
+
+/* Alerts */
+.stAlert {background: rgba(30,41,59,.96) !important; color: var(--cc-text-primary) !important; border:1px solid var(--cc-border-soft) !important; border-radius: var(--cc-radius-md) !important;}
+
+/* Voter lookup */
+.lookup-result-card {padding:.85rem .95rem; margin:.25rem 0 .4rem 0;}
+.lookup-result-card.selected {border:2px solid #F2B84B; background:linear-gradient(180deg, rgba(201,31,39,.18), rgba(18,27,38,.96));}
+.lookup-result-line0 {font-size:15px; font-weight:900; color:var(--cc-text-primary); margin-bottom:.22rem;}
+.lookup-result-line1, .lookup-result-line2, .lookup-result-line3 {font-size:13px; color:var(--cc-text-secondary); line-height:1.35;}
 .lookup-vh-wrap {margin:.35rem 0 .85rem 0;}
-.lookup-vh-title {font-size:16px; font-weight:800; color:#22324a; margin:.15rem 0 .35rem 0;}
+.lookup-vh-title {font-size:16px; font-weight:900; color:var(--cc-text-primary); margin:.15rem 0 .35rem 0;}
 .lookup-vh-table {width:100%; border-collapse:collapse; font-size:12px;}
-.lookup-vh-table th, .lookup-vh-table td {border:1px solid #d9dde4; padding:7px 6px; text-align:center;}
-.lookup-vh-table th {background:#f4f6f8; font-weight:800; color:#24303f;}
-.lookup-vh-rowhead {background:#fafafa; font-weight:700; text-align:left !important; min-width:76px;}
-.lookup-vh-cell {background:#ffffff; font-weight:700; min-width:48px;}
-.lookup-vh-dnv {background:#eceff3; color:#8a94a6;}
-.lookup-legend {display:flex; flex-wrap:wrap; gap:16px; font-size:12px; color:#475569; margin-top:.2rem; padding:.55rem .7rem; border:1px solid #dde3ea; border-radius:10px; background:#fff;}
+.lookup-vh-table th, .lookup-vh-table td {border:1px solid var(--cc-border-soft); padding:7px 6px; text-align:center;}
+.lookup-vh-table th {background:#0F1A2C; font-weight:900; color:var(--cc-text-primary);}
+.lookup-vh-rowhead {background:#101B2E; font-weight:800; text-align:left !important; min-width:76px; color:var(--cc-text-secondary);}
+.lookup-vh-cell {background:#111827; font-weight:800; min-width:48px; color:var(--cc-text-primary);}
+.lookup-vh-dnv {background:#1E293B; color:var(--cc-text-faint);}
+.lookup-legend {display:flex; flex-wrap:wrap; gap:16px; font-size:12px; color:var(--cc-text-secondary); margin-top:.2rem; padding:.55rem .7rem; border:1px solid var(--cc-border-soft); border-radius:10px; background:#111827;}
 .lookup-legend-icon {display:inline-block; min-width:18px; text-align:center; margin-right:4px;}
-.lookup-legend-swatch {display:inline-block; width:14px; height:14px; vertical-align:middle; margin-right:6px; background:#eceff3; border:1px solid #c8d0da; border-radius:3px;}
+.lookup-legend-swatch {display:inline-block; width:14px; height:14px; vertical-align:middle; margin-right:6px; background:#1E293B; border:1px solid var(--cc-border); border-radius:3px;}
+
+.tss-fallback {font-size:23px; line-height:1.02; font-weight:900; color:#fff; text-align:left;}
+.tss-fallback span {color: var(--cc-blue) !important;}
+
+
+
+/* Opening dashboard preview shown before a universe is applied. */
+.cc-open-dashboard {border:1px solid rgba(201,31,39,.72); border-radius:18px; padding:18px; background:radial-gradient(circle at 80% 0%, rgba(201,31,39,.18), transparent 32%), linear-gradient(180deg, rgba(10,17,27,.96), rgba(5,10,16,.98)); box-shadow:0 22px 60px rgba(0,0,0,.36);}
+.cc-open-title {font-size:28px; font-weight:950; color:#fff; margin-bottom:4px;}
+.cc-open-subtitle {font-size:13px; color:#CBD5E1; margin-bottom:16px;}
+.cc-open-filters {display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; margin-bottom:16px;}
+.cc-filter-preview {border:1px solid rgba(148,163,184,.24); border-radius:12px; background:#07101A; padding:10px 12px;}
+.cc-filter-preview b {display:block; color:#EF4444; font-size:11px; text-transform:uppercase; margin-bottom:8px;}
+.cc-filter-preview span {color:#F8FAFC; font-weight:800;}
+.cc-open-metrics {display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; margin-bottom:16px;}
+.cc-open-metric {border:1px solid rgba(148,163,184,.24); border-radius:14px; background:linear-gradient(180deg,#0D1724,#08111B); padding:16px; min-height:100px;}
+.cc-open-metric .label {font-size:12px; font-weight:900; letter-spacing:.04em; text-transform:uppercase;}
+.cc-open-metric .value {font-size:27px; font-weight:950; color:#fff; margin-top:8px;}
+.cc-open-metric.red {border-left:4px solid var(--cc-red);} .cc-open-metric.red .label{color:var(--cc-red);}
+.cc-open-metric.blue {border-left:4px solid var(--cc-blue);} .cc-open-metric.blue .label{color:#4AA3FF;}
+.cc-open-metric.green {border-left:4px solid var(--cc-green);} .cc-open-metric.green .label{color:#7ED957;}
+.cc-open-metric.gold {border-left:4px solid var(--cc-gold);} .cc-open-metric.gold .label{color:var(--cc-gold);}
+.cc-open-grid {display:grid; grid-template-columns:1.05fr 1.55fr; gap:16px;}
+.cc-open-card {border:1px solid rgba(148,163,184,.24); border-radius:16px; background:radial-gradient(circle at 50% 0%, rgba(29,78,216,.08), transparent 35%), #07101A; padding:18px;}
+.cc-open-card h3 {margin:0 0 14px 0; color:#F8FAFC; font-size:18px;}
+.cc-donut {width:245px; height:245px; border-radius:50%; margin:0 auto 12px auto; background:conic-gradient(var(--cc-red) 0 48%, var(--cc-blue) 48% 89%, var(--cc-green) 89% 99%, var(--cc-gold) 99% 100%); position:relative; box-shadow:inset 0 0 0 1px rgba(255,255,255,.14), 0 14px 28px rgba(0,0,0,.35);}
+.cc-donut:after {content:none !important; display:none !important;}
+.cc-legend-row {display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid rgba(148,163,184,.14); padding:7px 0; color:#CBD5E1;}
+.cc-legend-row b {color:#fff;}
+.cc-dot {display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:8px;}
+.cc-bars {display:grid; grid-template-columns:repeat(8,1fr); gap:12px; height:230px; align-items:end; border-bottom:1px solid rgba(148,163,184,.35); padding:0 8px;}
+.cc-bar {border-radius:7px 7px 0 0; background:linear-gradient(180deg,#EF4444,#8F1118); box-shadow:0 0 18px rgba(201,31,39,.18); min-height:30px;}
+.cc-bar-labels {display:grid; grid-template-columns:repeat(8,1fr); gap:12px; padding:8px 8px 0; font-size:12px; color:#CBD5E1; text-align:center;}
+.cc-open-note {margin-top:16px; color:#94A3B8; font-size:13px;}
+@media (max-width: 1200px) { .cc-open-filters, .cc-open-metrics {grid-template-columns:1fr 1fr;} .cc-open-grid {grid-template-columns:1fr;} }
+
+/* Party accent helpers */
+.cc-party-r, .party-r {color: var(--cc-red) !important;}
+.cc-party-d, .party-d {color: var(--cc-blue) !important;}
+.cc-party-o, .party-o {color: var(--cc-green) !important;}
 
 @media (max-width: 1100px) {
   .brand-grid {grid-template-columns: 1fr; gap:10px;}
   .brand-left, .brand-right {justify-content:center;}
   .brand-center {text-align:center;}
 }
+
+
+/* Final red/gold executive dashboard polish: stronger logo treatment and dark chart surfaces. */
+[data-testid="stVegaLiteChart"] {
+  background: transparent !important;
+  border-radius: 12px !important;
+}
+[data-testid="stVegaLiteChart"] > div {
+  background: transparent !important;
+}
+.brand-grid {grid-template-columns: 260px 1fr 310px;}
+.brand-right {
+  align-items:center !important;
+  justify-content:center !important;
+  padding:.32rem .55rem !important;
+  background:linear-gradient(135deg, rgba(0,0,0,.44), rgba(31,12,16,.32)) !important;
+  border:1px solid rgba(242,184,75,.18) !important;
+}
+.logo-tss {max-width:285px !important; max-height:92px !important; width:100% !important; object-fit:contain; filter: brightness(1.16) saturate(1.18) contrast(1.08) drop-shadow(0 10px 18px rgba(0,0,0,.58)) !important;}
+.logo-cc {filter: brightness(1.35) saturate(1.45) contrast(1.18) drop-shadow(0 10px 18px rgba(0,0,0,.58)) !important;}
+.top-shell {border-color:rgba(201,31,39,.95) !important;}
+.chart-card, .table-card, .section-card {background: radial-gradient(circle at 50% 0%, rgba(29,78,216,.06), transparent 30%), linear-gradient(180deg, rgba(13,22,32,.98), rgba(6,11,17,.98)) !important;}
+.small-header {color:#F8FAFC !important;}
+.stDataFrame, [data-testid="stDataFrame"] {background:transparent !important;}
+[data-testid="stDataFrame"] div, [data-testid="stDataFrame"] span {color:#E5E7EB !important;}
+.cc-mini-table {background:#0B111A !important; border:1px solid rgba(148,163,184,.22); border-radius:10px; overflow:hidden;}
+.cc-mini-table th {background:#101827 !important; color:#F2B84B !important;}
+.cc-mini-table td {background:#0D1521 !important; color:#E5E7EB !important;}
+.cc-mini-table tr:nth-child(even) td {background:#111B2A !important;}
+.cc-mini-table tr.total-row td {background:rgba(201,31,39,.18) !important; color:#F8FAFC !important;}
+
+
+/* Opening preview mockup layout refinements */
+.cc-opening-dashboard{display:flex;flex-direction:column;gap:16px;margin-top:4px;}
+.cc-open-filters{display:grid;grid-template-columns:1.15fr 1.1fr 1fr 1fr .9fr 1fr;gap:18px;align-items:end;border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(7,16,26,.92);padding:18px 20px;box-shadow:0 16px 34px rgba(0,0,0,.28);}
+.cc-open-filters label{display:block;color:#EF4444;font-size:12px;font-weight:950;margin-bottom:8px;letter-spacing:.04em;}
+.cc-open-select{height:42px;border:1px solid #334155;border-radius:8px;background:#060C12;color:#fff;display:flex;align-items:center;padding:0 14px;font-weight:800;}
+.cc-open-apply{height:44px;border:1px solid #D71920;border-radius:8px;background:rgba(79,9,13,.72);color:#fff;font-weight:950;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 18px rgba(215,25,32,.14);}
+.cc-open-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;}
+.cc-open-metric{min-height:102px;border:1px solid rgba(148,163,184,.24);border-radius:14px;background:linear-gradient(180deg,rgba(16,27,39,.98),rgba(7,13,20,.98));display:flex;align-items:center;gap:16px;padding:16px 18px;box-shadow:0 12px 26px rgba(0,0,0,.25);}
+.cc-open-metric .icon{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#C91F27,#6E0F14);border:1px solid rgba(255,255,255,.18);font-size:24px;color:#fff;font-weight:950;box-shadow:0 0 22px rgba(201,31,39,.22);}
+.cc-open-metric.blue .icon{background:linear-gradient(180deg,#2563EB,#0B3A94);}.cc-open-metric.green .icon{background:linear-gradient(180deg,#4C9A2A,#245817);}.cc-open-metric.gold .icon{background:linear-gradient(180deg,#B87333,#6B3A10);}
+.cc-open-metric .label{font-size:12px;font-weight:950;color:#EF4444;letter-spacing:.04em;}.cc-open-metric.blue .label{color:#2F8CFF}.cc-open-metric.green .label{color:#7ED957}.cc-open-metric.gold .label{color:#F2B84B}
+.cc-open-metric .value{font-size:28px;font-weight:950;color:#fff;line-height:1.1;}.cc-open-metric .sub{font-size:12px;color:#CBD5E1;margin-top:8px;}
+.cc-open-main-grid{display:grid;grid-template-columns:1.05fr 1.55fr;gap:16px;}.cc-open-card{border:1px solid rgba(255,255,255,.20);border-radius:16px;background:radial-gradient(circle at 50% 0%,rgba(29,78,216,.08),transparent 35%),linear-gradient(180deg,rgba(9,18,28,.98),rgba(5,10,16,.98));padding:20px 22px;box-shadow:0 16px 34px rgba(0,0,0,.30);}
+.cc-open-card h3{display:flex;justify-content:space-between;align-items:center;margin:0 0 18px 0;color:#F8FAFC;font-size:18px;font-weight:950;letter-spacing:.01em;}.cc-open-card h3 span{color:#fff;letter-spacing:3px}.cc-open-card p{margin:14px 0 0;color:#94A3B8;font-size:13px;}.cc-open-split{display:grid;grid-template-columns:1fr .95fr;gap:22px;align-items:center;}
+.cc-donut{width:250px;height:250px;border-radius:50%;margin:0 auto;position:relative;box-shadow:inset 0 0 0 1px rgba(255,255,255,.20),0 14px 28px rgba(0,0,0,.35);}.cc-donut-center{position:absolute;inset:76px;border-radius:50%;background:#07101A;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);}.cc-donut-center b{font-size:22px;color:#fff}.cc-donut-center span{font-size:14px;color:#CBD5E1}.cc-legend-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.14);padding:9px 0;color:#CBD5E1;font-size:14px}.cc-legend-row b{color:#fff;font-weight:800}.cc-dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:9px;vertical-align:-2px;box-shadow:0 0 10px rgba(255,255,255,.12)}
+.cc-bars{display:grid;grid-template-columns:repeat(8,1fr);gap:16px;height:240px;align-items:end;border-left:1px solid rgba(148,163,184,.20);border-bottom:1px solid rgba(148,163,184,.35);padding:0 14px;}.cc-open-bar-wrap{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;}.cc-open-bar-value{font-size:12px;color:#fff;font-weight:800;margin-bottom:7px}.cc-bar{width:100%;border-radius:7px 7px 0 0;background:linear-gradient(180deg,#EF4444,#8F1118);box-shadow:0 0 18px rgba(201,31,39,.22);border:1px solid rgba(239,68,68,.55);}.cc-bar-labels{display:grid;grid-template-columns:repeat(8,1fr);gap:16px;padding:9px 14px 0 15px;font-size:13px;color:#CBD5E1;text-align:center;}
+.gender-card{min-height:315px}.geo-card{min-height:315px}.cc-open-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid rgba(148,163,184,.22);border-radius:8px;overflow:hidden;font-size:14px}.cc-open-table th{padding:12px 10px;background:#08111B;color:#F2B84B;text-align:left;font-weight:950}.cc-open-table td{padding:12px 10px;border-top:1px solid rgba(148,163,184,.18);color:#E5E7EB}.cc-open-table tr:nth-child(even) td{background:rgba(15,23,42,.52)}.cc-open-table .red{color:#EF4444}.cc-open-table .blue{color:#2F8CFF}.cc-open-table .green{color:#7ED957}.cc-open-table .gold{color:#F2B84B}.cc-open-note{color:#94A3B8;font-size:13px;margin:2px 0 12px 0;text-align:center;}
+@media(max-width:1300px){.cc-open-filters{grid-template-columns:1fr 1fr 1fr}.cc-open-metrics{grid-template-columns:1fr 1fr}.cc-open-main-grid{grid-template-columns:1fr}.cc-open-split{grid-template-columns:1fr}.cc-donut{width:220px;height:220px}.cc-donut-center{inset:66px}}
+
+
+
+/* v3 mockup opening corrections: no fake filter bar, no cropped TSS logo, sharper KPI icons. */
+.top-shell{overflow:visible !important; padding:1.05rem 1.05rem 1.05rem 1.05rem !important;}
+.brand-grid{grid-template-columns:260px 1fr 350px !important; min-height:108px !important;}
+.brand-right{min-height:104px !important; max-height:none !important; overflow:visible !important; padding:.35rem .7rem !important;}
+.logo-tss{width:330px !important; max-width:330px !important; max-height:104px !important; object-fit:contain !important; display:block !important;}
+.logo-cc{max-width:245px !important; max-height:96px !important; object-fit:contain !important;}
+.cc-opening-dashboard{margin-top:14px !important;}
+.cc-open-filters{display:none !important;}
+.cc-open-metric{display:flex !important; align-items:center !important; gap:18px !important; min-height:118px !important; padding:18px 18px !important;}
+.cc-open-metric .icon{width:58px;height:58px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 58px;font-size:25px;font-weight:950;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 8px 18px rgba(0,0,0,.38)}
+.cc-open-metric.red .icon{background:radial-gradient(circle at 35% 30%,#EF4444,#8F1118);border:1px solid #EF4444;}
+.cc-open-metric.blue .icon{background:radial-gradient(circle at 35% 30%,#2F8CFF,#0B3B96);border:1px solid #2F8CFF;}
+.cc-open-metric.green .icon{background:radial-gradient(circle at 35% 30%,#66B845,#215A22);border:1px solid #66B845;}
+.cc-open-metric.gold .icon{background:radial-gradient(circle at 35% 30%,#F2B84B,#8B5A12);border:1px solid #F2B84B;}
+.cc-open-metric .icon svg{width:34px;height:34px;display:block;fill:currentColor;}
+.cc-open-metric .icon .dletter{font-size:27px;font-weight:950;line-height:1;}
+.cc-donut-center b{font-size:19px !important; line-height:1.05; text-align:center;}
+.cc-donut-center span{font-size:13px !important;}
+.cc-open-card{border-color:rgba(255,255,255,.24) !important;}
+.cc-open-card h3{letter-spacing:.08em !important;}
+
 </style>
 """, unsafe_allow_html=True)
+
+
+def get_reporting_tss_logo_path() -> Path:
+    """Use print/reporting-safe TSS logo for PDFs, fallback to dashboard logo."""
+    return TSS_REPORTING_LOGO if "TSS_REPORTING_LOGO" in globals() and TSS_REPORTING_LOGO.exists() else TSS_LOGO
+
 
 def img_to_data_uri(path: Path) -> str:
     if not path.exists():
         return ""
     encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
     return f"data:image/png;base64,{encoded}"
+
+
+def svg_to_data_uri(svg: str) -> str:
+    """Inline SVG asset helper for dark-theme-safe brand marks."""
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def tss_dark_logo_uri() -> str:
+    """Dark-theme-safe Political Technology Company header mark."""
+    svg = r"""<svg xmlns="http://www.w3.org/2000/svg" width="520" height="150" viewBox="0 0 520 150">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#5DB2FF"/><stop offset="1" stop-color="#0B4BC8"/></linearGradient>
+    <linearGradient id="red" x1="0" x2="1"><stop offset="0" stop-color="#FF4B55"/><stop offset="1" stop-color="#C91F27"/></linearGradient>
+  </defs>
+  <rect x="4" y="4" width="512" height="142" rx="20" fill="rgba(22,9,11,.72)" stroke="#78421B" stroke-width="2"/>
+  <g transform="translate(24,25)" filter="url(#glow)">
+    <path d="M62 0 L69 22 L92 22 L73 35 L80 58 L62 44 L43 58 L50 35 L31 22 L55 22 Z" fill="#F2B84B"/>
+    <rect x="15" y="82" width="116" height="12" rx="4" fill="url(#red)"/>
+    <rect x="26" y="69" width="94" height="12" rx="4" fill="url(#blue)"/>
+    <path d="M33 65 Q73 25 113 65 Z" fill="url(#blue)"/>
+    <rect x="41" y="48" width="10" height="21" rx="2" fill="#EAF4FF"/>
+    <rect x="61" y="41" width="10" height="28" rx="2" fill="#EAF4FF"/>
+    <rect x="81" y="48" width="10" height="21" rx="2" fill="#EAF4FF"/>
+    <rect x="101" y="52" width="10" height="17" rx="2" fill="#EAF4FF"/>
+    <path d="M68 23 L78 41 L58 41 Z" fill="#F2B84B"/>
+    <circle cx="27" cy="106" r="3.5" fill="#F2B84B"/><circle cx="49" cy="110" r="3.5" fill="#EF4444"/><circle cx="72" cy="112" r="3.5" fill="#F2B84B"/><circle cx="95" cy="110" r="3.5" fill="#EF4444"/><circle cx="118" cy="106" r="3.5" fill="#F2B84B"/>
+  </g>
+  <g transform="translate(175,28)">
+    <text x="0" y="14" fill="#FFFFFF" font-size="14" font-weight="800" font-family="Arial, Helvetica, sans-serif">Powered By</text>
+    <text x="0" y="48" fill="#FFFFFF" font-size="27" font-weight="900" font-family="Arial, Helvetica, sans-serif">The Political</text>
+    <text x="0" y="80" fill="#2F8CFF" font-size="27" font-weight="900" font-family="Arial, Helvetica, sans-serif">Technology</text>
+    <text x="0" y="112" fill="#EF4444" font-size="27" font-weight="900" font-family="Arial, Helvetica, sans-serif">Company</text>
+  </g>
+</svg>"""
+    return svg_to_data_uri(svg)
 
 def file_modified_text(path: Path) -> str:
     if not path.exists():
@@ -153,6 +537,105 @@ def file_modified_text(path: Path) -> str:
 
 def divider():
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+
+
+# Strict PA school district whitelist. If it is not in this list, it is not shown
+# as a School District filter option. This prevents school regions from leaking
+# into the School District dropdown.
+VALID_PA_SCHOOL_DISTRICTS = ['Abington Heights SD', 'Abington SD', 'Albert Gallatin Area SD', 'Aliquippa SD', 'Allegheny Valley SD', 'Allegheny-Clarion Valley SD', 'Allentown City SD', 'Altoona Area SD', 'Ambridge Area SD', 'Annville-Cleona SD', 'Antietam SD', 'Apollo Ridge SD', 'Armstrong SD', 'Athens Area SD', 'Austin Area SD', 'Avella Area SD', 'Avon Grove SD', 'Avonworth SD', 'Bald Eagle Area SD', 'Baldwin-Whitehall SD', 'Bangor Area SD', 'Beaver Area SD', 'Bedford Area SD', 'Belle Vernon Area SD', 'Bellefonte Area SD', 'Bellwood-Antis SD', 'Bensalem Township SD', 'Benton Area SD', 'Bentworth SD', 'Berlin Brothersvalley SD', 'Bermudian Springs SD', 'Berwick Area SD', 'Bethel Park SD', 'Bethlehem Area SD', 'Bethlehem-Center SD', 'Big Beaver Falls Area SD', 'Big Spring SD', 'Blackhawk SD', 'Blacklick Valley SD', 'Blairsville-Saltsburg SD', 'Bloomsburg Area SD', 'Blue Mountain SD', 'Blue Ridge SD', 'Boyertown Area SD', 'Bradford Area SD', 'Brandywine Heights Area SD', 'Brentwood Borough SD', 'Bristol Borough SD', 'Bristol Township SD', 'Brockway Area SD', 'Brookville Area SD', 'Brownsville Area SD', 'Bryn Athyn SD', 'Burgettstown Area SD', 'Burrell SD', 'Butler Area SD', 'California Area SD', 'Cambria Heights SD', 'Cameron County SD', 'Camp Hill SD', 'Canon-McMillan SD', 'Canton Area SD', 'Carbondale Area SD', 'Carlisle Area SD', 'Carlynton SD', 'Carmichaels Area SD', 'Catasauqua Area SD', 'Centennial SD', 'Center Valley SD', 'Central Bucks SD', 'Central Cambria SD', 'Central Columbia SD', 'Central Dauphin SD', 'Central Fulton SD', 'Central Greene SD', 'Central York SD', 'Chambersburg Area SD', 'Charleroi SD', 'Chartiers Valley SD', 'Chartiers-Houston SD', 'Cheltenham Township SD', 'Chester-Upland SD', 'Chestnut Ridge SD', 'Chichester SD', 'Clairton City SD', 'Clarion Area SD', 'Clarion-Limestone Area SD', 'Claysburg-Kimmel SD', 'Clearfield Area SD', 'Coatesville Area SD', 'Cocalico SD', 'Colonial SD', 'Columbia Borough SD', 'Commodore Perry SD', 'Conemaugh Township Area SD', 'Conemaugh Valley SD', 'Conestoga Valley SD', 'Conewago Valley SD', 'Conneaut SD', 'Connellsville Area SD', 'Conrad Weiser Area SD', 'Cornell SD', 'Cornwall-Lebanon SD', 'Corry Area SD', 'Coudersport Area SD', 'Council Rock SD', 'Cranberry Area SD', 'Crawford Central SD', 'Crestwood SD', 'Cumberland Valley SD', 'Curwensville Area SD', 'Dallas SD', 'Dallastown Area SD', 'Daniel Boone Area SD', 'Danville Area SD', 'Deer Lakes SD', 'Delaware Valley SD', 'Derry Area SD', 'Derry Township SD', 'Donegal SD', 'Dover Area SD', 'Downingtown Area SD', 'DuBois Area SD', 'Dunmore SD', 'Duquesne City SD', 'East Allegheny SD', 'East Lycoming SD', 'East Penn SD', 'East Pennsboro SD', 'East Stroudsburg Area SD', 'Eastern Lancaster Co SD', 'Eastern Lebanon County SD', 'Eastern York SD', 'Easton Area SD', 'Elizabeth Forward SD', 'Elizabethtown Area SD', 'Elk Lake SD', 'Ellwood City Area SD', 'Ephrata Area SD', 'Erie City SD', 'Everett Area SD', 'Exeter Township SD', 'Fairfield Area SD', 'Fairview SD', 'Fannett-Metal SD', 'Farrell Area SD', 'Ferndale Area SD', 'Fleetwood Area SD', 'Forbes Road SD', 'Forest Area SD', 'Forest City Regional SD', 'Forest Hills SD', 'Fort Cherry SD', 'Fort LeBoeuf SD', 'Fox Chapel Area SD', 'Franklin Area SD', 'Franklin Regional SD', 'Frazier SD', 'Freedom Area SD', 'Freeport Area SD', 'Galeton Area SD', 'Garnet Valley SD', 'Gateway SD', 'General McLane SD', 'Gettysburg Area SD', 'Girard SD', 'Glendale SD', 'Governor Mifflin SD', 'Great Valley SD', 'Greater Johnstown SD', 'Greater Latrobe SD', 'Greater Nanticoke Area SD', 'Greencastle-Antrim SD', 'Greensburg Salem SD', 'Greenville Area SD', 'Greenwood SD', 'Grove City Area SD', 'Halifax Area SD', 'Hamburg Area SD', 'Hampton Township SD', 'Hanover Area SD', 'Hanover Public SD', 'Harbor Creek SD', 'Harmony Area SD', 'Harrisburg City SD', 'Hatboro-Horsham SD', 'Haverford Township SD', 'Hazleton Area SD', 'Hempfield Area SD', 'Hempfield SD', 'Hermitage SD', 'Highlands SD', 'Hollidaysburg SD', 'Homer-Center SD', 'Hopewell Area SD', 'Huntingdon Area SD', 'Indiana Area SD', 'Interboro SD', 'Iroquois SD', 'Jamestown Area SD', 'Jeanette City SD', 'Jefferson-Morgan SD', 'Jenkintown SD', 'Jersey Shore Area SD', 'Jim Thorpe Area SD', 'Johnsonburg Area SD', 'Juniata County SD', 'Juniata Valley SD', 'Kane Area SD', 'Karns City Area SD', 'Kennett Consolidated SD', 'Keystone Central SD', 'Keystone Oaks SD', 'Keystone SD', 'Kiski Area SD', 'Kutztown Area SD', 'Lackawanna Trail SD', 'Lake Lehman SD', 'Lakeland SD', 'Lakeview SD', 'Lampeter-Strasburg SD', 'Lancaster SD', 'Laurel Area SD', 'Laurel Highlands SD', 'Lebanon SD', 'Leechburg Area SD', 'Lehighton Area SD', 'Lewisburg Area SD', 'Ligonier Valley SD', 'Line Mountain SD', 'Littlestown Area SD', 'Lower Dauphin SD', 'Lower Merion SD', 'Lower Moreland Twp SD', 'Loyalsock Township SD', 'Mahanoy Area SD', 'Manheim Central SD', 'Manheim Township SD', 'Marion Center Area SD', 'Marple Newtown SD', 'Mars Area SD', 'McGuffey SD', 'McKeesport Area SD', 'Mechanicsburg Area SD', 'Mercer Area SD', 'Methacton SD', 'Meyers Dale Area SD', 'Mid Valley SD', 'Midd-West SD', 'Middletown Area SD', 'Midland Borough SD', 'Mifflin County SD', 'Mifflinburg Area SD', 'Millcreek Township SD', 'Millersburg Area SD', 'Millville Area SD', 'Milton Area SD', 'Minersville Area SD', 'Mohawk Area SD', 'Monessen City SD', 'Moniteau SD', 'Montgomery Area SD', 'Montour SD', 'Montoursville Area SD', 'Montrose Area SD', 'Moon Area SD', 'Morrisville Borough SD', 'Moshannon Valley SD', 'Mount Carmel Area SD', 'Mount Pleasant Area SD', 'Mount Union Area SD', 'Mountain View SD', 'Mt Lebanon SD', 'Muhlenberg SD', 'Muncy SD', 'Nazareth Area SD', 'Neshaminy SD', 'Neshannock Township SD', 'New Brighton Area SD', 'New Castle Area SD', 'New Hope-Solebury SD', 'New Kensington-Arnold SD', 'Newport SD', 'Norristown Area SD', 'North Allegheny SD', 'North Clarion County SD', 'North East SD', 'North Hills SD', 'North Penn SD', 'North Pocono SD', 'North Schuylkill SD', 'North Star SD', 'Northampton Area SD', 'Northeast Bradford SD', 'Northeastern York SD', 'Northern Bedford County SD', 'Northern Cambria SD', 'Northern Lebanon SD', 'Northern Lehigh SD', 'Northern Potter SD', 'Northern Tioga SD', 'Northern York County SD', 'Northgate SD', 'Northwest Area SD', 'Northwestern Lehigh SD', 'Northwestern SD', 'Norwin SD', 'Octorara Area SD', 'Oil City Area SD', 'Old Forge SD', 'Oley Valley SD', 'Oswayo Valley SD', 'Otto-Eldred SD', 'Owen J Roberts SD', 'Oxford Area SD', 'Palisades SD', 'Palmerton Area SD', 'Palmyra Area SD', 'Panther Valley SD', 'Parkland SD', 'Pen Argyl Area SD', 'Penn Cambria SD', 'Penn Hills SD', 'Penn Manor SD', 'Penn-Delco SD', 'Penn-Trafford SD', 'Penncrest SD', 'Pennridge SD', 'Penns Manor Area SD', 'Penns Valley Area SD', 'Pennsbury SD', 'Pequea Valley SD', 'Perkiomen Valley SD', 'Peters Township SD', 'Philadelphia City SD', 'Philipsburg-Osceola Area SD', 'Phoenixville Area SD', 'Pine Grove SD', 'Pine-Richland SD', 'Pittsburgh SD', 'Pittston Area SD', 'Pleasant Valley SD', 'Plum Borough SD', 'Pocono Mountain SD', 'Port Allegany SD', 'Portage Area SD', 'Pottsgrove SD', 'Pottstown SD', 'Pottsville Area SD', 'Punxsutawney Area SD', 'Purchase Line SD', 'Quaker Valley SD', 'Quakertown Community SD', 'Radnor Township SD', 'Reading SD', 'Red Lion Area SD', 'Redbank Valley SD', 'Reynolds SD', 'Richland SD', 'Ridgway Area SD', 'Ridley SD', 'Ringgold SD', 'Riverside Beaver County SD', 'Riverside SD', 'Riverview SD', 'Rochester Area SD', 'Rockwood Area SD', 'Rose Tree Media SD', 'Saint Clair Area SD', 'Saint Marys Area SD', 'Salisbury Township SD', 'Salisbury-Elk Lick SD', 'Saucon Valley SD', 'Sayre Area SD', 'Schuylkill Haven Area SD', 'Schuylkill Valley SD', 'Scranton City SD', 'Selinsgrove Area SD', 'Seneca Valley SD', 'Shade-Central City SD', 'Shaler Area SD', 'Shamokin Area SD', 'Shanksville-Stony Creek SD', 'Sharon City SD', 'Sharpsville Area SD', 'Shenandoah Valley SD', 'Shenango Area SD', 'Shikellamy SD', 'Shippensburg Area SD', 'Slippery Rock Area SD', 'Smethport Area SD', 'Solanco SD', 'Somerset Area SD', 'Souderton Area SD', 'South Allegheny SD', 'South Butler County SD', 'South Eastern SD', 'South Fayette Twp SD', 'South Middleton SD', 'South Park SD', 'South Side Area SD', 'South Western SD', 'South Williamsport SD', 'Southeast Delco SD', 'Southeastern Greene SD', 'Southern Columbia Area SD', 'Southern Fulton SD', 'Southern Huntingdon Co SD', 'Southern Lehigh SD', 'Southern Tioga SD', 'Southern York County SD', 'Southmoreland SD', 'Spring Cove SD', 'Spring Grove Area SD', 'Spring-Ford Area SD', 'Springfield SD', 'Springfield Township SD', 'State College Area SD', 'Steel Valley SD', 'Steelton-Highspire SD', 'Sto-Rox SD', 'Stroudsburg Area SD', 'Sullivan County SD', 'Susquehanna Community SD', 'Susquehanna Township SD', 'Susquenita SD', 'Tamaqua Area SD', 'Titusville Area SD', 'Towanda Area SD', 'Tredyffrin-Easttown SD', 'Tri-Valley SD', 'Trinity Area SD', 'Troy Area SD', 'Tulpehocken Area SD', 'Tunkhannock Area SD', 'Turkeyfoot Valley Area SD', 'Tuscarora SD', 'Tussey Mountain SD', 'Twin Valley SD', 'Tyrone Area SD', 'Union Area SD', 'Union City Area SD', 'Union SD', 'Uniontown Area SD', 'Unionville Chadds-Ford SD', 'United SD', 'Upper Adams SD', 'Upper Darby SD', 'Upper Dauphin SD', 'Upper Dublin SD', 'Upper Merion Area SD', 'Upper Moreland Twp SD', 'Upper Perkiomen SD', 'Upper Saint Clair SD', 'Valley Grove SD', 'Valley View SD', 'Wallenpaupack Area SD', 'Wallingford-Swarthmore SD', 'Warren County SD', 'Warrior Run SD', 'Warwick SD', 'Washington SD', 'Wattsburg Area SD', 'Wayne Highlands SD', 'Waynesboro Area SD', 'Weatherly Area SD', 'Wellsboro Area SD', 'West Allegheny SD', 'West Branch Area SD', 'West Chester Area SD', 'West Greene SD', 'West Jefferson Hills SD', 'West Middlesex Area SD', 'West Mifflin Area SD', 'West Perry SD', 'West Shore SD', 'West York Area SD', 'Western Beaver County SD', 'Western Wayne SD', 'Westmont Hilltop SD', 'Whitehall-Coplay SD', 'Wilkes-Barre Area SD', 'Wilkinsburg Borough SD', 'William Penn SD', 'Williams Valley SD', 'Williamsburg Community SD', 'Williamsport Area SD', 'Wilmington Area SD', 'Wilson Area SD', 'Wilson SD', 'Windber Area SD', 'Wissahickon SD', 'Woodland Hills SD', 'Wyalusing Area SD', 'Wyoming Area SD', 'Wyoming Valley West SD', 'Wyomissing Area SD', 'York City SD', 'York Suburban SD', 'Yough SD']
+
+def _norm_school_key(value: str) -> str:
+    s = str(value or '').upper().strip()
+    if not s or s in {'NAN','NONE','NULL','(BLANK)'}:
+        return ''
+    s = re.sub(r'\([^)]*\)', ' ', s)
+    s = s.replace('&', ' AND ')
+    s = re.sub(r'\bA\s*/\s*C\b', 'ALLEGHENY CLARION', s)
+    s = re.sub(r'\bALLEGHENY\s+CLARION\b', 'ALLEGHENY CLARION', s)
+    s = re.sub(r'\bSCHOOL\s+DISTRICT\b', 'SD', s)
+    s = re.sub(r'\bSCHOOL\s+DIST\b', 'SD', s)
+    s = re.sub(r'\bSCH\s+DIST\b', 'SD', s)
+    s = re.sub(r'\bDISTRICT\b', 'SD', s)
+    s = re.sub(r'\bS D\b', 'SD', s)
+    s = re.sub(r'[^A-Z0-9]+', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+VALID_PA_SCHOOL_DISTRICT_BY_KEY = {_norm_school_key(v): v for v in VALID_PA_SCHOOL_DISTRICTS}
+
+def normalize_school_district_option(value: str) -> str:
+    key = _norm_school_key(value)
+    if not key:
+        return ''
+    if key in VALID_PA_SCHOOL_DISTRICT_BY_KEY:
+        return VALID_PA_SCHOOL_DISTRICT_BY_KEY[key]
+    # Some SURE values omit SD after parenthetical cleanup; try adding it.
+    if not key.endswith(' SD') and (key + ' SD') in VALID_PA_SCHOOL_DISTRICT_BY_KEY:
+        return VALID_PA_SCHOOL_DISTRICT_BY_KEY[key + ' SD']
+    return ''
+
+def geo_display_case_py(value) -> str:
+    """Option B display: Title Case precinct/geo names while preserving useful codes."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    s = str(value).strip()
+    if s.lower() in {"", "nan", "none", "null", "(blank)"}:
+        return ""
+    s = s.replace("_", " ")
+    s = re.sub(r"\s*,\s*", ", ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    replacements = {
+        r"\bTWP\b": "Township",
+        r"\bTWP\.\b": "Township",
+        r"\bBORO\b": "Borough",
+        r"\bBORO\.\b": "Borough",
+        r"\bPREC\b": "Precinct",
+        r"\bPCT\b": "Precinct",
+        r"\bDIST\b": "District",
+    }
+    for pat, repl in replacements.items():
+        s = re.sub(pat, repl, s, flags=re.IGNORECASE)
+
+    keep_upper = {"SD", "IU", "CTC", "AVTS", "MDJ", "PA", "US", "USA", "VTD", "WD", "DIV"}
+
+    def cap_piece(piece: str) -> str:
+        if not piece:
+            return piece
+        up = piece.upper()
+        if up in keep_upper:
+            return up
+        if re.fullmatch(r"\d+[A-Z]?", up):
+            return up
+        if re.fullmatch(r"\d+(ST|ND|RD|TH)", up):
+            return up
+        if re.fullmatch(r"[IVXLCM]+", up):
+            return up
+        return piece[:1].upper() + piece[1:].lower()
+
+    words = []
+    for word in s.split(" "):
+        # preserve punctuation around the core word
+        prefix = re.match(r"^[^A-Za-z0-9]*", word).group(0)
+        suffix = re.search(r"[^A-Za-z0-9]*$", word).group(0)
+        core = word[len(prefix): len(word)-len(suffix) if suffix else len(word)]
+        if not core:
+            words.append(word)
+            continue
+        slash_parts = []
+        for slash in core.split("/"):
+            hy_parts = []
+            for hy in slash.split("-"):
+                apos_parts = [cap_piece(part) for part in hy.split("'")]
+                hy_parts.append("'".join(apos_parts))
+            slash_parts.append("-".join(hy_parts))
+        words.append(prefix + "/".join(slash_parts) + suffix)
+    return " ".join(words).strip()
 
 def quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
@@ -172,6 +655,10 @@ def get_conn():
         con.execute("PRAGMA memory_limit='768MB'")
     except Exception:
         pass
+    try:
+        con.create_function("geo_display_case", geo_display_case_py, [str], str)
+    except Exception:
+        pass
     return con
 
 def first_existing(columns, candidates):
@@ -182,6 +669,50 @@ def first_existing(columns, candidates):
         hit = lower_map.get(str(col).strip().lower())
         if hit is not None:
             return hit
+    return None
+
+
+def _norm_col_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).strip().lower())
+
+
+def first_existing_fuzzy(columns, candidates):
+    """Find a column using exact, normalized, and cautious contains matching."""
+    hit = first_existing(columns, candidates)
+    if hit is not None:
+        return hit
+
+    norm_map = {_norm_col_name(c): c for c in columns}
+    for cand in candidates:
+        n = _norm_col_name(cand)
+        if not n:
+            continue
+        if n in norm_map:
+            return norm_map[n]
+
+    # Cautious fuzzy pass for long Athenix-style names only. Do NOT use this for
+    # canonical geo fields because short aliases like Muni/City/SD can grab wrong columns.
+    for cand in candidates:
+        n = _norm_col_name(cand)
+        if len(n) < 6:
+            continue
+        for col in columns:
+            cn = _norm_col_name(col)
+            if n == cn or n in cn or cn in n:
+                return col
+    return None
+
+
+def first_existing_precise(columns, candidates):
+    """Exact + normalized match only. Used for canonical app fields to avoid bad fuzzy aliases."""
+    hit = first_existing(columns, candidates)
+    if hit is not None:
+        return hit
+    norm_map = {_norm_col_name(c): c for c in columns}
+    for cand in candidates:
+        n = _norm_col_name(cand)
+        if n and n in norm_map:
+            return norm_map[n]
     return None
 
 def ensure_parent(path: Path):
@@ -302,6 +833,10 @@ def load_manifest():
 
 @st.cache_data(show_spinner=True)
 def ensure_index_shards():
+    local_paths, source_label = find_local_dataset_paths("index")
+    if local_paths:
+        return local_paths, {"source": source_label, "count": len(local_paths)}
+
     manifest = load_manifest()
     local_paths = []
     for shard in manifest["index"]["shards"]:
@@ -314,8 +849,7 @@ def ensure_index_shards():
 @st.cache_data(show_spinner=False)
 def get_schema(local_paths):
     con = get_conn()
-    paths_sql = "[" + ", ".join(sql_string_literal(p) for p in local_paths) + "]"
-    df = con.execute(f"DESCRIBE SELECT * FROM read_parquet({paths_sql}, union_by_name=True)").df()
+    df = con.execute(f"DESCRIBE SELECT * FROM {dataset_scan_sql(local_paths)}").df()
     return df["column_name"].tolist()
 
 def build_view_sql(columns, local_paths):
@@ -332,14 +866,88 @@ def build_view_sql(columns, local_paths):
     vote_hist_col = first_existing(columns, ["V4A"])
     mib_applied_col = first_existing(columns, ["MIB_Applied"])
     mib_ballot_col = first_existing(columns, ["MIB_BALLOT"])
-    mb_score_col = first_existing(columns, ["MB_AProp_Score", "MMB_AProp_Score"])
+    mb_score_col = first_existing(columns, ["MB_Prob_Score", "mb_prob_score", "MBScore", "MB_AProp_Score", "MMB_AProp_Score"])
     mb_perm_col = first_existing(columns, ["MB_PERM", "MB_Perm", "MB_Pern"])
+    source_file_col = first_existing(columns, ["Source_File", "Source File", "source_file"])
+    mb_new_reg_col = first_existing(columns, ["MailBallotNewRegistrant", "Mail Ballot New Registrant", "mail_ballot_new_registrant"])
+    applicant_phone_col = first_existing(columns, ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"])
+    applicant_phone_type_col = first_existing(columns, ["ApplicantPhone_Type", "Applicant Phone Type"])
+    applicant_phone_compliance_col = first_existing(columns, ["ApplicantPhone_Compliance", "Applicant Phone Compliance"])
+    current_app_return_col = first_existing(columns, ["Current_App_Return_Date", "AppReturnDate", "App Return Date"])
+    current_ballot_sent_col = first_existing(columns, ["Current_Ballot_Sent_Date", "BallotSentDate", "Ballot Sent Date"])
+    current_ballot_returned_col = first_existing(columns, ["Current_Ballot_Returned_Date", "BallotReturnedDate", "Ballot Returned Date"])
     age_col = first_existing(columns, ["Age"])
     house_col = first_existing(columns, ["House Number"])
     street_col = first_existing(columns, ["Street Name"])
     apt_col = first_existing(columns, ["Apartment Number"])
 
-    exprs = ["*"]
+    # --- Athenix/local CSV compatibility aliases ---
+    # Rebuild canonical filter columns from all likely source columns.
+    # This fixes cases where the CSV has a blank/old raw column plus the real
+    # Athenix value under a different name.
+    CANONICAL_ALIASES = {
+        # Stability-first rule: for geography, trust the clean Step 8 canonical fields only.
+        # Do NOT fuzzy-pull raw SURE zone fields here; that caused municipalities, districts,
+        # precinct codes, and school regions to leak into the wrong filters.
+        "County": ["County"],
+        "Municipality": ["Municipality"],
+        "Precinct": ["Precinct"],
+        "USC": ["USC"],
+        "STS": ["STS"],
+        "STH": ["STH"],
+        "School District": ["School District"],
+        "School Region": ["School Region"],
+        "Party": ["Party"],
+        "CalculatedParty": ["CalculatedParty", "Calculated Party", "calculated_party", "Calculated_Party", "ModeledParty", "Modeled Party", "PartisanScore", "Partisan Score"],
+        "HH-Party": ["HH-Party", "HH Party", "Household Party", "Household_Party", "HouseholdParty", "household_party"],
+        "Tags": ["Tags", "tags", "TAGS"],
+        "MB_Target": ["MB_Target", "MB Target", "MBTarget", "Mail Ballot Target", "Mail_Ballot_Target"],
+        "MailBallotNewRegistrant": ["MailBallotNewRegistrant", "Mail Ballot New Registrant", "mail_ballot_new_registrant"],
+        "Current_App_Return_Date": ["Current_App_Return_Date", "AppReturnDate", "App Return Date"],
+        "Current_Ballot_Sent_Date": ["Current_Ballot_Sent_Date", "BallotSentDate", "Ballot Sent Date"],
+        "Current_Ballot_Returned_Date": ["Current_Ballot_Returned_Date", "BallotReturnedDate", "Ballot Returned Date"],
+        "Current_ApplicantPhone": ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"],
+    }
+
+    # Exclude every raw source column used by a canonical alias, not just columns that
+    # already match the canonical title. This prevents raw lowercase fields like
+    # precinct/school_region from confusing the UI while preserving one clean title-case field.
+    canonical_raw_present = []
+    for _canonical_name, _candidates in CANONICAL_ALIASES.items():
+        for _cand in _candidates:
+            _src = first_existing_precise(columns, [_cand])
+            if _src and _src not in canonical_raw_present:
+                canonical_raw_present.append(_src)
+
+    if canonical_raw_present:
+        exprs = ["* EXCLUDE (" + ", ".join(q(c) for c in canonical_raw_present) + ")"]
+    else:
+        exprs = ["*"]
+
+    def canonical_expr(canonical_name, candidates):
+        sources = []
+        seen_src = set()
+        for cand in candidates:
+            src = first_existing_precise(columns, [cand])
+            if src and src not in seen_src:
+                seen_src.add(src)
+                raw = f"nullif(trim(coalesce(cast({q(src)} as varchar), '')), '')"
+                if canonical_name in {"USC", "STS", "STH"}:
+                    # Numeric district filters only. This removes duplicate options like
+                    # '3RD CONGRESSIONAL DISTRICT' while preserving the district number.
+                    sources.append(f"nullif(regexp_extract({raw}, '([0-9]{{1,3}})', 1), '')")
+                elif canonical_name in {"County", "Municipality", "Precinct", "School District", "School Region"}:
+                    sources.append(f"nullif(geo_display_case({raw}), '')")
+                else:
+                    sources.append(raw)
+        if not sources:
+            return None
+        return "coalesce(" + ", ".join(sources) + ", '') as " + q(canonical_name)
+
+    for _canonical_name, _candidates in CANONICAL_ALIASES.items():
+        _expr = canonical_expr(_canonical_name, _candidates)
+        if _expr:
+            exprs.append(_expr)
 
     if status_col:
         exprs.append(f"upper(trim(coalesce(cast({q(status_col)} as varchar), ''))) as _Status")
@@ -405,9 +1013,9 @@ def build_view_sql(columns, local_paths):
         exprs.append("'' as _VoteHistory")
 
     if mib_applied_col:
-        exprs.append(f"upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) as _MIBApplied")
+        exprs.append(f"case when upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) = '' then 'DNA' else upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) end as _MIBApplied")
     else:
-        exprs.append("'' as _MIBApplied")
+        exprs.append("'DNA' as _MIBApplied")
 
     if mib_ballot_col:
         exprs.append(f"upper(trim(coalesce(cast({q(mib_ballot_col)} as varchar), ''))) as _MIBBallot")
@@ -423,10 +1031,71 @@ def build_view_sql(columns, local_paths):
         exprs.append(f"""case
             when upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), ''))) in ('TRUE', 'T', 'YES', 'Y', '1') then 'Y'
             when upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), ''))) in ('FALSE', 'F', 'NO', 'N', '0') then 'N'
-            else ''
+            else upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), '')))
         end as _MBPerm""")
     else:
         exprs.append("'' as _MBPerm")
+
+    if source_file_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(source_file_col)} as varchar), ''))) as _SourceFile")
+    else:
+        exprs.append("'' as _SourceFile")
+
+    if mb_new_reg_col:
+        exprs.append(f"""case
+            when upper(trim(coalesce(cast({q(mb_new_reg_col)} as varchar), ''))) in ('Y', 'YES', 'TRUE', '1') then 'Y'
+            else ''
+        end as _MailBallotNewRegistrant""")
+    else:
+        exprs.append("'' as _MailBallotNewRegistrant")
+
+    if applicant_phone_col:
+        exprs.append(f"""case
+            when trim(coalesce(cast({q(applicant_phone_col)} as varchar), '')) in ('', 'None', 'NONE', 'nan', 'NAN') then false
+            else true
+        end as _HasApplicantPhone""")
+    else:
+        exprs.append("false as _HasApplicantPhone")
+
+    if applicant_phone_type_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(applicant_phone_type_col)} as varchar), ''))) as _ApplicantPhoneType")
+    else:
+        exprs.append("'' as _ApplicantPhoneType")
+
+    if applicant_phone_compliance_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(applicant_phone_compliance_col)} as varchar), ''))) as _ApplicantPhoneCompliance")
+    else:
+        exprs.append("'' as _ApplicantPhoneCompliance")
+
+    if current_app_return_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_app_return_col)} as timestamp)
+        ) as _CurrentAppReturnDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentAppReturnDate")
+
+    if current_ballot_sent_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_ballot_sent_col)} as timestamp)
+        ) as _CurrentBallotSentDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentBallotSentDate")
+
+    if current_ballot_returned_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_ballot_returned_col)} as timestamp)
+        ) as _CurrentBallotReturnedDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentBallotReturnedDate")
 
     if hh_col:
         exprs.append(f"nullif(trim(coalesce(cast({q(hh_col)} as varchar), '')), '') as _HouseholdKey")
@@ -443,17 +1112,210 @@ def build_view_sql(columns, local_paths):
         else:
             exprs.append("NULL::VARCHAR as _HouseholdKey")
 
-    paths_sql = "[" + ", ".join(sql_string_literal(p) for p in local_paths) + "]"
-    return "CREATE OR REPLACE VIEW voters AS SELECT\n    " + ",\n    ".join(exprs) + f"\nFROM read_parquet({paths_sql}, union_by_name=True)"
+    return "CREATE OR REPLACE VIEW voters AS SELECT\n    " + ",\n    ".join(exprs) + f"\nFROM {dataset_scan_sql(local_paths)}"
 
 def prepare_db(local_paths):
     con = get_conn()
-    cols = get_schema(local_paths)
-    con.execute(build_view_sql(cols, local_paths))
-    return cols
+    raw_cols = get_schema(local_paths)
+    con.execute(build_view_sql(raw_cols, local_paths))
+    view_cols = con.execute("DESCRIBE SELECT * FROM voters").df()["column_name"].tolist()
+    return view_cols
 
 def sql_literal_list(values):
     return ", ".join(["?"] * len(values))
+
+def _paths_sql(paths):
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"
+
+def dataset_scan_sql(paths):
+    """Return a DuckDB scan expression for local CSV/parquet or R2-downloaded parquet files."""
+    if not paths:
+        raise ValueError("No voter data files were found.")
+    suffixes = {Path(str(p)).suffix.lower() for p in paths}
+    paths_sql = _paths_sql(paths)
+    if suffixes <= {".csv", ".txt"}:
+        return f"read_csv_auto({paths_sql}, union_by_name=True, all_varchar=True, ignore_errors=True)"
+    return f"read_parquet({paths_sql}, union_by_name=True)"
+
+def _sorted_file_paths(folder: Path, patterns):
+    if not folder.exists():
+        return []
+    found = []
+    for pattern in patterns:
+        found.extend(folder.glob(pattern))
+    return [str(p) for p in sorted(set(found)) if p.is_file() and not p.name.startswith("._")]
+
+def find_local_dataset_paths(kind: str):
+    """Find local DEV data. Prefer optimized index/detail shards, then legacy shards, then CSV/R2."""
+    if not USE_LOCAL_DATA:
+        return [], "R2"
+
+    # New optimized Step 8 layout:
+    #   data/shards/index  = fast filter/count/chart fields
+    #   data/shards/detail = full voter detail for lookup/exports
+    if kind == "index":
+        index_paths = _sorted_file_paths(LOCAL_DEV_INDEX_SHARDS_DIR, ["*.parquet"])
+        if index_paths:
+            return index_paths, "LOCAL INDEX SHARDS"
+
+    if kind == "detail":
+        detail_paths = _sorted_file_paths(LOCAL_DEV_DETAIL_SHARDS_DIR, ["*.parquet"])
+        if detail_paths:
+            return detail_paths, "LOCAL DETAIL SHARDS"
+
+    # Legacy fallback: old single-folder shard layout.
+    shard_paths = _sorted_file_paths(LOCAL_DEV_SHARDS_DIR, ["*.parquet"])
+    if shard_paths:
+        return shard_paths, "LOCAL LEGACY SHARDS"
+
+    # Slow fallback only.
+    if LOCAL_DEV_VOTERS_CSV.exists():
+        return [str(LOCAL_DEV_VOTERS_CSV)], "LOCAL DEV CSV"
+
+    if LOCAL_CANDIDATE_CONNECT_CSV.exists():
+        return [str(LOCAL_CANDIDATE_CONNECT_CSV)], "LOCAL CSV"
+
+    if LOCAL_ATHENIX_FEATURED_CSV.exists():
+        return [str(LOCAL_ATHENIX_FEATURED_CSV)], "LOCAL ATHENIX FEATURED CSV"
+
+    return [], "R2"
+
+def local_speed_path(filename: str) -> Path:
+    return LOCAL_DEV_SPEED_DIR / filename
+
+
+def speed_tables_available() -> bool:
+    return USE_LOCAL_DATA and local_speed_path("filter_options.parquet").exists() and local_speed_path("count_cube.parquet").exists()
+
+
+@st.cache_data(show_spinner=False)
+def load_speed_filter_options() -> pd.DataFrame:
+    path = local_speed_path("filter_options.parquet")
+    if not path.exists():
+        return pd.DataFrame(columns=["field", "value", "sort_order"])
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        return pd.DataFrame(columns=["field", "value", "sort_order"])
+
+
+@st.cache_data(show_spinner=False)
+def load_speed_count_cube() -> pd.DataFrame:
+    path = local_speed_path("count_cube.parquet")
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def load_speed_ranges() -> dict:
+    path = local_speed_path("filter_ranges.json")
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def speed_option_values(field: str) -> list[str]:
+    opts = load_speed_filter_options()
+    if opts.empty or "field" not in opts.columns or "value" not in opts.columns:
+        return []
+    sub = opts[opts["field"].astype(str).eq(field)].copy()
+    if sub.empty:
+        return []
+    if "sort_order" in sub.columns:
+        sub = sub.sort_values("sort_order")
+    return [str(v) for v in sub["value"].tolist() if str(v).strip() and str(v).strip() != "(Blank)"]
+
+
+def _speed_active_has_unsupported_filters(active: dict) -> bool:
+    unsupported_keys = [
+        "hh_party_pick", "calc_party_pick", "tag_pick",
+        "age_slider", "new_reg_months",
+        "election_years_pick", "election_types_pick", "vote_methods_pick",
+    ]
+    return any(bool(active.get(k)) for k in unsupported_keys)
+
+
+def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
+    if not speed_tables_available() or _speed_active_has_unsupported_filters(active):
+        return None
+    cube = load_speed_count_cube()
+    if cube.empty:
+        return None
+    df = cube
+
+    def apply_in(field, values):
+        nonlocal df
+        if values and field in df.columns:
+            vals = [str(v) for v in values]
+            df = df[df[field].astype(str).isin(vals)]
+
+    for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
+        apply_in(col, active.get(col, []))
+    apply_in("Party", active.get("party_pick", []))
+    apply_in("Gender", active.get("gender_pick", []))
+    apply_in("Age_Range", active.get("age_range_pick", []))
+    apply_in("MIB_Applied", active.get("mib_applied_pick", []))
+    apply_in("MIB_BALLOT", active.get("mib_ballot_pick", []))
+    apply_in("MB_PERM", active.get("mb_perm_pick", []))
+
+    vh_range = active.get("vote_history_range")
+    if vh_range is not None:
+        vh_type = active.get("vote_history_type", "All")
+        vh_field = "V4G" if vh_type == "General" else "V4P" if vh_type == "Primary" else "V4A"
+        if vh_field in df.columns:
+            vals = pd.to_numeric(df[vh_field].replace("(Blank)", "0"), errors="coerce").fillna(0)
+            df = df[(vals >= int(vh_range[0])) & (vals <= int(vh_range[1]))]
+        else:
+            return None
+
+    if active.get("current_ballot_sent_status") in {"Sent", "Not Sent/Unknown"}:
+        apply_in("BallotSentStatus", [active.get("current_ballot_sent_status")])
+    if active.get("current_ballot_returned_status") in {"Returned", "Not Returned/Unknown"}:
+        apply_in("BallotReturnedStatus", [active.get("current_ballot_returned_status")])
+
+    if active.get("has_email") in {"Has Email", "No Email"}:
+        apply_in("HasEmail", [active.get("has_email")])
+    if active.get("has_landline") in {"Has Landline", "No Landline"}:
+        apply_in("HasLandline", [active.get("has_landline")])
+    if active.get("has_mobile") in {"Has Mobile", "No Mobile"}:
+        apply_in("HasMobile", [active.get("has_mobile")])
+    if active.get("has_applicant_phone") in {"Has Applicant Phone", "No Applicant Phone"}:
+        apply_in("HasApplicantPhone", [active.get("has_applicant_phone")])
+
+    mb_score = active.get("mb_score_slider")
+    if mb_score is not None and "MB_Prob_Score" in df.columns:
+        vals = pd.to_numeric(df["MB_Prob_Score"].replace("(Blank)", "0"), errors="coerce").fillna(0)
+        df = df[(vals >= float(mb_score[0])) & (vals <= float(mb_score[1]))]
+
+    return df
+
+
+def _speed_group_field_from_chart_expr(group_expr: str) -> str | None:
+    expr = str(group_expr).strip()
+    mapping = {
+        "_PartyNorm": "Party",
+        "_Gender": "Gender",
+        "_AgeRange": "Age_Range",
+        '"County"': "County",
+        '"Municipality"': "Municipality",
+        '"Precinct"': "Precinct",
+        '"USC"': "USC",
+        '"STS"': "STS",
+        '"STH"': "STH",
+        '"School District"': "School District",
+        '"School Region"': "School Region",
+    }
+    if expr in mapping:
+        return mapping[expr]
+    unquoted = expr.strip('"')
+    return unquoted if unquoted in {"County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"} else None
 
 def clean_district_display_value(value) -> str:
     """Display USC/STS/STH without trailing .0 while preserving real text values."""
@@ -466,7 +1328,7 @@ def clean_district_display_value(value) -> str:
             return str(int(f))
     except Exception:
         pass
-    return re.sub(r"\.0+$", "", raw)
+    return re.sub(r"\\.0+$", "", raw)
 
 
 def district_sort_key(value):
@@ -477,10 +1339,142 @@ def district_sort_key(value):
         return (1, s)
 
 
+
+
+def detect_election_vote_method_columns(columns):
+    """Detect election-history vote-method columns from many naming styles.
+
+    Supported examples:
+    - G20, P20, G2020, P2020
+    - G20_11, P22_05, G24_11
+    - General_2020, Primary_2022
+    - 2020_General, 2022_Primary
+    - GEN20, PRI22
+    - VoteMethod_G_2020, VoteMethod_Primary_2022
+    """
+    found = []
+    seen = set()
+
+    for col in columns:
+        s = str(col).strip()
+        u = re.sub(r"[^A-Z0-9]+", "_", s.upper()).strip("_")
+
+        year = None
+        etype = None
+
+        patterns = [
+            r"^([GP])_?((?:20)?\d{2})(?:_|$)",                 # G20, G20_11, P2020
+            r"^(GENERAL|PRIMARY|GEN|PRI|PRIM)_?((?:20)?\d{2})(?:_|$)",
+            r"^((?:20)?\d{2})_?(GENERAL|PRIMARY|GEN|PRI|PRIM)(?:_|$)",
+            r"(?:^|_)([GP])_?((?:20)?\d{2})(?:_|$)",
+            r"(?:^|_)(GENERAL|PRIMARY|GEN|PRI|PRIM)_?((?:20)?\d{2})(?:_|$)",
+            r"(?:^|_)((?:20)?\d{2})_?(GENERAL|PRIMARY|GEN|PRI|PRIM)(?:_|$)",
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, u)
+            if not m:
+                continue
+
+            a, b = m.group(1), m.group(2)
+            if a in {"G", "P", "GENERAL", "PRIMARY", "GEN", "PRI", "PRIM"}:
+                type_token = a
+                yy = b
+            else:
+                yy = a
+                type_token = b
+
+            if type_token in {"G", "GENERAL", "GEN"}:
+                etype = "General"
+            elif type_token in {"P", "PRIMARY", "PRI", "PRIM"}:
+                etype = "Primary"
+            else:
+                etype = None
+
+            year = int(yy) if len(str(yy)) == 4 else 2000 + int(yy)
+            break
+
+        if year is None or etype is None:
+            continue
+
+        # Keep reasonable PA voter-file years.
+        if year < 2000 or year > 2030:
+            continue
+
+        key = (s, year, etype)
+        if key not in seen:
+            seen.add(key)
+            found.append({"column": s, "year": year, "type": etype})
+
+    return sorted(found, key=lambda x: (x["year"], x["type"], x["column"]))
+
+
+def election_filter_options(columns):
+    elections = detect_election_vote_method_columns(columns)
+    years = sorted({e["year"] for e in elections})
+    types = sorted({e["type"] for e in elections}, key=lambda x: 0 if x == "General" else 1)
+
+    # UI fallback: show standard PA cycle years even if raw method fields are not in the current index.
+    # Filtering still only applies when matching columns are present.
+    if not years:
+        years = list(range(2000, 2027))
+    if not types:
+        types = ["General", "Primary"]
+
+    return elections, years, types
+
+
+def build_election_vote_method_filter_sql(active, columns):
+    years = active.get("election_years_pick", []) or []
+    types = active.get("election_types_pick", []) or []
+    methods = active.get("vote_methods_pick", []) or []
+
+    years = [int(y) for y in years if str(y).strip().isdigit()]
+    types = [t for t in types if t and t != "All"]
+    methods = [m for m in methods if m and m != "All"]
+
+    if not years and not types and not methods:
+        return "", []
+
+    elections = detect_election_vote_method_columns(columns)
+    if years:
+        elections = [e for e in elections if e["year"] in years]
+    if types:
+        elections = [e for e in elections if e["type"] in types]
+
+    # If the current loaded voter index does not contain election method columns yet,
+    # do not crash or block the rest of the filters.
+    if not elections:
+        return "", []
+
+    method_values = methods or ["AP", "MB", "P", "DNV"]
+    clauses = []
+    params = []
+
+    for e in elections:
+        raw = f"upper(regexp_replace(regexp_replace(trim(coalesce(cast({quote_ident(e['column'])} as varchar), '')), '[ _-]', '', 'g'), '[.]0$', ''))"
+        norm = f"""case
+            when {raw} in ('', 'NAN', 'NONE', 'NULL', '0', 'NO', 'N', 'DIDNOTVOTE', 'DNV') then 'DNV'
+            when {raw} in ('AP', 'POLL', 'ATPOLL', 'ATPOLLS', 'INPERSON', 'ELECTIONDAY', 'ED') then 'AP'
+            when {raw} in ('MB', 'MAIL', 'MAILBALLOT', 'MAILIN', 'MIB', 'ABS', 'ABSENTEE') then 'MB'
+            when {raw} in ('P', 'PROV', 'PROVISIONAL') then 'P'
+            when {raw} like '%MAIL%' or {raw} like '%ABSENTEE%' then 'MB'
+            when {raw} like '%PROV%' then 'P'
+            when {raw} like '%POLL%' or {raw} like '%PERSON%' then 'AP'
+            when {raw} like '%DIDNOT%' or {raw} like '%NOTVOTE%' then 'DNV'
+            else {raw}
+        end"""
+        clauses.append(f"{norm} IN ({sql_literal_list(method_values)})")
+        params.extend(method_values)
+
+    return " AND (" + " OR ".join(clauses) + ")", params
+
+
+
 def current_filter_clause(active, columns):
     where = ["_Status = 'A'"]
     params = []
-    geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in columns]
+    geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"] if c in columns]
     for col in geo_cols:
         picked = active.get(col, [])
         if picked:
@@ -501,6 +1495,13 @@ def current_filter_clause(active, columns):
         picked = active["calc_party_pick"]
         where.append(f'{quote_ident("CalculatedParty")} IN ({sql_literal_list(picked)})')
         params.extend(picked)
+    if active.get("tag_pick") and "Tags" in columns:
+        tag_conditions = []
+        for tag in active["tag_pick"]:
+            tag_conditions.append("regexp_matches(coalesce(cast(" + quote_ident("Tags") + " as varchar), ''), ?)")
+            params.append("(^|[,;|]\\s*)" + re.escape(str(tag).strip()) + "(\\s*[,;|]|$)")
+        if tag_conditions:
+            where.append("(" + " OR ".join(tag_conditions) + ")")
     if active.get("gender_pick"):
         picked = active["gender_pick"]
         where.append(f"_Gender IN ({sql_literal_list(picked)})")
@@ -554,6 +1555,21 @@ def current_filter_clause(active, columns):
         picked = active["mb_perm_pick"]
         where.append(f"_MBPerm IN ({sql_literal_list(picked)})")
         params.extend(picked)
+    # MailBallotNewRegistrant is intentionally not applied in the main Universe builder.
+    # It belongs in the dedicated Mail Ballot Center once the mail ballot is verified.
+    # Applicant phone type/compliance are stored as audit fields, not user-facing filters yet.
+    if active.get("has_applicant_phone") == "Has Applicant Phone":
+        where.append("_HasApplicantPhone = true")
+    elif active.get("has_applicant_phone") == "No Applicant Phone":
+        where.append("_HasApplicantPhone = false")
+    if active.get("current_ballot_sent_status") == "Sent":
+        where.append("_CurrentBallotSentDate IS NOT NULL")
+    elif active.get("current_ballot_sent_status") == "Not Sent/Unknown":
+        where.append("_CurrentBallotSentDate IS NULL")
+    if active.get("current_ballot_returned_status") == "Returned":
+        where.append("_CurrentBallotReturnedDate IS NOT NULL")
+    elif active.get("current_ballot_returned_status") == "Not Returned/Unknown":
+        where.append("_CurrentBallotReturnedDate IS NULL")
     if active.get("mb_score_slider") is not None:
         where.append("_MBScore >= ? AND _MBScore <= ?")
         params.extend([active["mb_score_slider"][0], active["mb_score_slider"][1]])
@@ -580,6 +1596,12 @@ def current_filter_clause(active, columns):
         where.append("_HasMobile = true")
     elif active.get("has_mobile") == "No Mobile":
         where.append("_HasMobile = false")
+
+    election_sql, election_params = build_election_vote_method_filter_sql(active, columns)
+    if election_sql:
+        where.append(election_sql.replace(" AND ", "", 1))
+        params.extend(election_params)
+
     return " WHERE " + " AND ".join(where), params
 
 def get_distinct_options(column: str, label_expr: str | None = None):
@@ -596,25 +1618,219 @@ def get_distinct_options(column: str, label_expr: str | None = None):
     ).df()
     return [str(v) for v in df["value"].tolist() if str(v).strip() != ""]
 
+
+def get_dependent_geo_options(target_col: str, selected_geo: dict, columns):
+    """Return narrowed geography options from already-selected geography values.
+
+    This helper is safe: it only narrows option lists and does not mutate
+    Streamlit widget/session state. Apply Filters and Clear Filters remain
+    controlled by the original form submit logic.
+    """
+    con = get_conn()
+    where = ["_Status = 'A'"]
+    params = []
+
+    for col, picked in selected_geo.items():
+        if col == target_col or not picked or col not in columns:
+            continue
+        if col in ["USC", "STS", "STH"]:
+            where.append(f"regexp_replace(trim(cast({quote_ident(col)} as varchar)), '\\.0+$', '') IN ({sql_literal_list(picked)})")
+        else:
+            where.append(f"{quote_ident(col)} IN ({sql_literal_list(picked)})")
+        params.extend(picked)
+
+    if target_col in ["USC", "STS", "STH"]:
+        expr = f"regexp_replace(trim(cast({quote_ident(target_col)} as varchar)), '\\.0+$', '')"
+    else:
+        expr = quote_ident(target_col)
+
+    try:
+        df = con.execute(
+            f"""
+            SELECT {expr} AS value
+            FROM voters
+            WHERE {" AND ".join(where)}
+              AND nullif(trim(cast({quote_ident(target_col)} as varchar)), '') IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            params,
+        ).df()
+        vals = [str(v).strip() for v in df["value"].tolist() if str(v).strip()]
+        if target_col in ["USC", "STS", "STH"]:
+            vals = sorted(set(clean_district_display_value(v) for v in vals if clean_district_display_value(v)), key=district_sort_key)
+        else:
+            vals = sorted(set(vals))
+        return vals
+    except Exception:
+        return []
+
+
+def clean_geo_option_list(col: str, values):
+    cleaned = []
+    for v in values:
+        s = normalize_export_text(v).strip() if "normalize_export_text" in globals() else str(v).strip()
+        if not s or s.lower() in {"nan", "none", "null", "blank", "(blank)"}:
+            continue
+
+        # Keep school district filter locked to the official PA lookup list only.
+        if col == "School District":
+            sd = normalize_school_district_option(s)
+            if sd:
+                cleaned.append(sd)
+            continue
+
+        # Do not let region-like labels appear as School Region unless they are real text.
+        if col == "School Region":
+            if re.fullmatch(r"\d+(?:\.0+)?", s):
+                continue
+            s = geo_display_case_py(s)
+            if s:
+                cleaned.append(s)
+            continue
+
+        if col == "Municipality" and re.fullmatch(r"\d+(?:\.0+)?", s):
+            continue
+
+        # Candidate Connect UI should show readable precinct names only.
+        # Hide raw precinct codes like 001, 001A, 001B, etc.
+        if col == "Precinct" and re.fullmatch(r"[0-9A-Z]{1,6}", s.upper()):
+            continue
+
+        if col in {"USC", "STS", "STH"}:
+            s = clean_district_display_value(s)
+            if not re.fullmatch(r"\d{1,3}", s):
+                continue
+
+        if col in {"County", "Municipality", "Precinct"}:
+            s = geo_display_case_py(s)
+
+        if s:
+            cleaned.append(s)
+
+    if col in {"USC", "STS", "STH"}:
+        return sorted(set(cleaned), key=district_sort_key)
+    return sorted(set(cleaned), key=lambda x: str(x).lower())
+
+
+
+def _mb_clean_options(values, field=None):
+    """Clean Mail Ballot Center dropdown values so raw/current-file junk does not leak into UI."""
+    field_key = str(field or "").strip().upper()
+    bad_common = {"", "(BLANK)", "NAN", "NONE", "NULL", "<NA>"}
+    bad_ballot_detail = {"1", "0", "TRUE", "FALSE", "VOTE RECORDED", "VOTED", "V", "PENDING", "CANCELLED", "CANCELED"}
+    bad_application = {"1", "0", "TRUE", "FALSE", "VOTE RECORDED"}
+    cleaned = []
+    seen = set()
+    for v in values or []:
+        s = str(v).strip()
+        u = s.upper().strip()
+        if u in bad_common:
+            continue
+        if field_key in {"MIB_BALLOT", "BALLOT"} and u in bad_ballot_detail:
+            continue
+        if field_key in {"MIB_APPLIED", "APPLICATION"} and u in bad_application:
+            continue
+        if field_key in {"MB_PERM", "PERMANENT", "PERMANENT_MB"}:
+            if u in {"TRUE", "T", "YES", "Y", "1"}:
+                s, u = "Y", "Y"
+            elif u in {"FALSE", "F", "NO", "N", "0"}:
+                s, u = "N", "N"
+            else:
+                # Guardrail: the raw/speed option table can sometimes carry unrelated
+                # geo labels here. Permanent MB must only ever be Y/N.
+                continue
+        if u not in seen:
+            cleaned.append(s)
+            seen.add(u)
+    return cleaned
+
+
+MB_CONTROLLED_FILTER_KEYS = {
+    "mib_applied_pick", "mib_ballot_pick", "mb_perm_pick",
+    "has_applicant_phone", "current_ballot_sent_status", "current_ballot_returned_status",
+    "mb_score_slider", "has_email", "has_mobile", "has_landline",
+}
+
+def _mb_strip_filters(filters):
+    """Remove only Mail Ballot Center filters, leaving geography/party/voter universe filters intact."""
+    cleaned = dict(filters or {})
+    for key in MB_CONTROLLED_FILTER_KEYS:
+        cleaned.pop(key, None)
+    return cleaned
+
+def _mb_clear_center_state(clear_main=False):
+    """Clear MB Center controls and optional MB filters previously pushed into main Universe."""
+    st.session_state.mail_ballot_center_filters = {}
+    st.session_state.mail_ballot_center_use_main_universe = True
+    for export_key in [
+        "mb_filtered_csv_df", "mb_filtered_excel_bytes", "mb_texting_csv_df",
+        "mb_mail_csv_df", "mb_labels_pdf_bytes",
+    ]:
+        st.session_state.pop(export_key, None)
+    if clear_main:
+        st.session_state.active_filters = _mb_strip_filters(st.session_state.get("active_filters", {}))
+        st.session_state.filters_applied = bool(st.session_state.get("active_filters"))
+
+
+def _mb_clean_application_options(values):
+    opts = _mb_clean_options(values, field="MIB_Applied")
+    for required in ["APP", "DNA"]:
+        if required not in {str(x).upper() for x in opts}:
+            opts.append(required)
+    return sorted(opts, key=lambda x: (0 if str(x).upper() in {"APP", "DNA"} else 1, str(x).upper()))
+
+
+def _mb_clean_ballot_detail_options(values):
+    return _mb_clean_options(values, field="MIB_BALLOT")
+
 def get_basic_options(columns):
     options = {}
-    geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in columns]
+    geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"] if c in columns]
+
+    if speed_tables_available():
+        for col in geo_cols:
+            options[col] = clean_geo_option_list(col, speed_option_values(col))
+        options["party_vals"] = speed_option_values("Party") or ["D", "R", "O"]
+        options["gender_vals"] = speed_option_values("Gender")
+        options["age_range_vals"] = speed_option_values("Age_Range")
+        options["hh_party_vals"] = speed_option_values("HH-Party") if "HH-Party" in columns else []
+        options["calc_party_vals"] = speed_option_values("CalculatedParty") if "CalculatedParty" in columns else []
+        options["tag_vals"] = ordered_tag_values(speed_option_values("Tags")) if "Tags" in columns else []
+        options["vote_history_vals"] = ordered_vote_history_values(speed_option_values("V4A"))
+        options["mib_applied_vals"] = _mb_clean_application_options(speed_option_values("MIB_Applied") or [])
+        options["mib_ballot_vals"] = _mb_clean_ballot_detail_options(speed_option_values("MIB_BALLOT"))
+        options["mb_perm_vals"] = _mb_clean_options(speed_option_values("MB_PERM"), field="MB_PERM")
+        options["mb_new_reg_vals"] = []
+
+        ranges = load_speed_ranges()
+        age_range = ranges.get("Age") or ranges.get("Age_Calc") or {}
+        score_range = ranges.get("MB_Prob_Score") or {}
+        options["age_min"] = int(age_range.get("min")) if age_range.get("min") is not None else None
+        options["age_max"] = int(age_range.get("max")) if age_range.get("max") is not None else None
+        options["mb_score_min"] = float(score_range.get("min")) if score_range.get("min") is not None else None
+        options["mb_score_max"] = float(score_range.get("max")) if score_range.get("max") is not None else None
+        return options
+
     for col in geo_cols:
         if col in ["USC", "STS", "STH"]:
             vals = get_distinct_options(col, f"regexp_replace(trim(cast({quote_ident(col)} as varchar)), '\\.0+$', '')")
-            vals = [clean_district_display_value(v) for v in vals if clean_district_display_value(v)]
-            options[col] = sorted(set(vals), key=district_sort_key)
         else:
-            options[col] = get_distinct_options(col)
-    options["party_vals"] = get_distinct_options("_PartyNorm", "_PartyNorm") if "Party" in columns else []
+            vals = get_distinct_options(col)
+        options[col] = clean_geo_option_list(col, vals)
+    # Party filter should always use the normalized D/R/O field.
+    # _PartyNorm exists even when the raw Party column is missing or aliased.
+    options["party_vals"] = get_distinct_options("_PartyNorm", "_PartyNorm") if "_PartyNorm" in columns else []
     options["gender_vals"] = get_distinct_options("_Gender", "_Gender")
     options["age_range_vals"] = get_distinct_options("_AgeRange", "_AgeRange")
     options["hh_party_vals"] = get_distinct_options("HH-Party") if "HH-Party" in columns else []
     options["calc_party_vals"] = get_distinct_options("CalculatedParty") if "CalculatedParty" in columns else []
+    options["tag_vals"] = ordered_tag_values(get_distinct_options("Tags")) if "Tags" in columns else []
     options["vote_history_vals"] = ordered_vote_history_values(get_distinct_options("_VoteHistory", "_VoteHistory")) if "V4A" in columns else []
-    options["mib_applied_vals"] = get_distinct_options("_MIBApplied", "_MIBApplied")
-    options["mib_ballot_vals"] = get_distinct_options("_MIBBallot", "_MIBBallot")
-    options["mb_perm_vals"] = get_distinct_options("_MBPerm", "_MBPerm")
+    options["mib_applied_vals"] = _mb_clean_application_options(get_distinct_options("_MIBApplied", "_MIBApplied") or [])
+    options["mib_ballot_vals"] = _mb_clean_ballot_detail_options(get_distinct_options("_MIBBallot", "_MIBBallot"))
+    options["mb_perm_vals"] = _mb_clean_options(get_distinct_options("_MBPerm", "_MBPerm"), field="MB_PERM")
+    options["mb_new_reg_vals"] = get_distinct_options("_MailBallotNewRegistrant", "_MailBallotNewRegistrant") if "_MailBallotNewRegistrant" in columns else []
 
     con = get_conn()
     age_min, age_max = con.execute(
@@ -632,6 +1848,36 @@ def get_basic_options(columns):
 def query_metrics(active, columns):
     if has_global_followup_filters(active):
         return _query_metrics_from_detail(active, columns)
+
+    try:
+        speed_df = _speed_filter_cube(active)
+        if speed_df is not None and "Voters" in speed_df.columns:
+            voters = safe_int(speed_df["Voters"].sum())
+            emails = safe_int(speed_df["Emails"].sum()) if "Emails" in speed_df.columns else 0
+            landlines = safe_int(speed_df["Landlines"].sum()) if "Landlines" in speed_df.columns else 0
+            mobiles = safe_int(speed_df["Mobiles"].sum()) if "Mobiles" in speed_df.columns else 0
+            if "County" in speed_df.columns:
+                county_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "County"].replace("(Blank)", "").astype(str).str.strip()
+                unique_counties = int(county_vals[county_vals.ne("")].nunique())
+            else:
+                unique_counties = 0
+            if "Precinct" in speed_df.columns:
+                precinct_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "Precinct"].replace("(Blank)", "").astype(str).str.strip()
+                unique_precincts = int(precinct_vals[precinct_vals.ne("")].nunique())
+            else:
+                unique_precincts = 0
+            return {
+                "voters": voters,
+                "households": None,
+                "emails": emails,
+                "landlines": landlines,
+                "mobiles": mobiles,
+                "unique_counties": unique_counties,
+                "unique_precincts": unique_precincts,
+                "speed_mode": True,
+            }
+    except Exception:
+        pass
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
@@ -658,6 +1904,19 @@ def query_chart(active, columns, group_expr, label, not_blank=True):
     if has_global_followup_filters(active):
         return _query_chart_from_detail(active, group_expr, label, not_blank=not_blank)
 
+    try:
+        group_field = _speed_group_field_from_chart_expr(group_expr)
+        speed_df = _speed_filter_cube(active)
+        if speed_df is not None and group_field and group_field in speed_df.columns and "Voters" in speed_df.columns:
+            temp = speed_df.copy()
+            if not_blank:
+                temp = temp[temp[group_field].fillna("").astype(str).str.strip().ne("") & temp[group_field].astype(str).ne("(Blank)")]
+            out = temp.groupby(group_field, dropna=False, as_index=False)["Voters"].sum()
+            out = out.rename(columns={group_field: label, "Voters": "Count"})
+            return out.sort_values(["Count", label], ascending=[False, True]).reset_index(drop=True)
+    except Exception:
+        pass
+
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
     extra = f" AND {group_expr} IS NOT NULL AND cast({group_expr} as varchar) <> ''" if not_blank else ""
@@ -676,6 +1935,18 @@ def query_chart(active, columns, group_expr, label, not_blank=True):
 def query_area_summary(active, columns, area_col):
     if has_global_followup_filters(active):
         return _query_area_summary_from_detail(active, area_col)
+
+    try:
+        speed_df = _speed_filter_cube(active)
+        if speed_df is not None and area_col in speed_df.columns and "Voters" in speed_df.columns:
+            temp = speed_df.copy()
+            temp[area_col] = temp[area_col].fillna("(Blank)").astype(str).replace("", "(Blank)")
+            out = temp.groupby(area_col, dropna=False, as_index=False)["Voters"].sum()
+            out = out.rename(columns={area_col: area_col, "Voters": "Individuals"})
+            out["Households"] = "—"
+            return out.sort_values(["Individuals", area_col], ascending=[False, True]).reset_index(drop=True)
+    except Exception:
+        pass
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
@@ -775,7 +2046,7 @@ def build_statewide_summary_report_bytes(active_filters, columns):
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         overview.to_excel(writer, sheet_name="Overview", index=False)
         filter_df.to_excel(writer, sheet_name="Filters", index=False)
-        for group_col, label in [("County", "County"), ("USC", "USC"), ("STS", "STS"), ("STH", "STH")]:
+        for group_col, label in [("County", "County"), ("USC", "Congressional"), ("STS", "State Senate"), ("STH", "State House")]:
             grouped_summary(group_col, label).to_excel(writer, sheet_name=label[:31], index=False)
     return output.getvalue()
 
@@ -790,7 +2061,7 @@ def make_summary_table(df_chart: pd.DataFrame, label_col: str, value_col: str, c
     for i, (_, row) in enumerate(df_chart.iterrows()):
         val = float(pd.to_numeric(row[value_col], errors="coerce"))
         pct = 0 if total == 0 else (val / total) * 100
-        color = colors[i] if i < len(colors) else "#999999"
+        color = colors[i] if i < len(colors) else CC_THEME["text_muted"]
         rows.append(
             f"<tr><td class='num-cell'><span class='cc-swatch' style='background:{color};'></span></td>"
             f"<td class='label-cell'>{row[label_col]}</td><td class='num-cell'>{val:,.0f}</td><td class='num-cell'>{fmt_pct(pct)}</td></tr>"
@@ -810,17 +2081,17 @@ def pie_chart_with_table(df_chart: pd.DataFrame, label_col: str, value_col: str,
     chart_df["Percent"] = 0 if total == 0 else (chart_df[value_col] / total) * 100
     domain = chart_df[label_col].astype(str).tolist()
     if color_mode == "party":
-        colors = [PARTY_COLOR_MAP.get(v, "#757575") for v in domain]
+        colors = [PARTY_COLOR_MAP.get(v, CC_THEME["text_muted"]) for v in domain]
     elif color_mode == "age":
         colors = AGE_COLOR_RANGE[:len(domain)]
     else:
         colors = GENDER_COLOR_RANGE[:len(domain)]
-    chart = alt.Chart(chart_df).mark_arc(innerRadius=18, outerRadius=60).encode(
+    chart = alt.Chart(chart_df).mark_arc(innerRadius=34, outerRadius=92).encode(
         theta=alt.Theta(field=value_col, type="quantitative"),
         color=alt.Color(field=label_col, type="nominal", scale=alt.Scale(domain=domain, range=colors), legend=None),
         tooltip=[alt.Tooltip(f"{label_col}:N"), alt.Tooltip(f"{value_col}:Q", format=","), alt.Tooltip("Percent:Q", format=".1f")]
-    ).properties(height=220)
-    st.altair_chart(chart, use_container_width=True)
+    ).properties(height=280)
+    st.altair_chart(chart, width="stretch")
     st.markdown(make_summary_table(chart_df, label_col, value_col, colors), unsafe_allow_html=True)
 
 
@@ -857,6 +2128,13 @@ def safe_int(val) -> int:
         return 0
 
 def get_filtered_voter_count_fast(active_filters, columns) -> int:
+    try:
+        speed_df = _speed_filter_cube(active_filters)
+        if speed_df is not None and "Voters" in speed_df.columns:
+            return safe_int(speed_df["Voters"].sum())
+    except Exception:
+        pass
+
     con = get_conn()
     where_sql, params = current_filter_clause(active_filters, columns)
     try:
@@ -867,7 +2145,7 @@ def get_filtered_voter_count_fast(active_filters, columns) -> int:
 
 def use_large_filter_mode(active_filters, columns) -> bool:
     try:
-        return get_filtered_voter_count_fast(active_filters, columns) >= 100000
+        return get_filtered_voter_count_fast(active_filters, columns) >= 50000
     except Exception:
         return False
 
@@ -964,9 +2242,9 @@ def normalize_address_value(value: str) -> str:
     if not s:
         return ""
 
-    s = re.sub(r"Apartment", "Apt", s, flags=re.IGNORECASE)
-    s = re.sub(r"Suite", "Ste", s, flags=re.IGNORECASE)
-    s = re.sub(r"Unit", "Unit", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bApartment\b", "Apt", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bSuite\b", "Ste", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bUnit\b", "Unit", s, flags=re.IGNORECASE)
 
     words = s.split(" ")
     words = [proper_case_word(w) for w in words]
@@ -977,6 +2255,13 @@ def normalize_address_value(value: str) -> str:
             words[-1] = USPS_SUFFIX_MAP[last].title()
 
     return " ".join(words)
+
+
+def title_case_report_value(value: str) -> str:
+    s = collapse_spaces(value)
+    if not s:
+        return ""
+    return " ".join(proper_case_word(part) for part in s.split(" "))
 
 def normalize_mail_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -1033,16 +2318,39 @@ def ordered_vote_history_values(values):
     cleaned = [normalize_export_text(v) for v in values if normalize_export_text(v) != ""]
     return sorted(cleaned, key=vote_history_sort_key)
 
+def split_tag_values(value):
+    s = normalize_export_text(value)
+    if not s:
+        return []
+    return [part.strip() for part in re.split(r"[,;|]", s) if part.strip()]
+
+def ordered_tag_values(values):
+    seen = {}
+    for raw in values:
+        for tag in split_tag_values(raw):
+            key = tag.lower()
+            if key not in seen:
+                seen[key] = tag
+    return sorted(seen.values(), key=lambda x: x.lower())
+
+
 def build_household_mail_name(group: pd.DataFrame) -> str:
+    """Create campaign-mail household names.
+
+    Rules:
+    - same last name, multiple people: "LastName Household"
+    - exactly two different last names: "Full Name1 & Full Name2"
+    - more than two people with different last names: "Full Name1 & Family"
+    """
     names = safe_group_series(group, "Name")
-    names = [x for x in names.tolist() if x]
+    names = [normalize_name_value(x) for x in names.tolist() if normalize_name_value(x)]
     if len(names) == 0:
-        return ""
+        return "Current Resident"
     if len(names) == 1:
         return names[0]
 
     last_names = safe_group_series(group, "LastName")
-    unique_last = sorted({x for x in last_names.tolist() if x}, key=lambda x: x.lower())
+    unique_last = sorted({normalize_name_value(x) for x in last_names.tolist() if normalize_name_value(x)}, key=lambda x: x.lower())
     if len(unique_last) == 1:
         return f"{unique_last[0]} Household"
 
@@ -1055,22 +2363,58 @@ def build_household_mail_name(group: pd.DataFrame) -> str:
             seen.add(key)
 
     if len(full_names) == 2:
-        return f"{full_names[0]} and {full_names[1]}"
-    if len(full_names) == 3:
-        return f"{full_names[0]}, {full_names[1]} and {full_names[2]}"
-    if len(full_names) > 3:
-        return f"{full_names[0]}, {full_names[1]} and Family"
+        return f"{full_names[0]} & {full_names[1]}"
+    if len(full_names) > 2:
+        return f"{full_names[0]} & Family"
 
     return "Current Resident"
 
 def full_name_from_row(row):
-    parts = [
-        normalize_export_text(row.get("FirstName", "")),
-        normalize_export_text(row.get("MiddleName", "")),
-        normalize_export_text(row.get("LastName", "")),
-        normalize_export_text(row.get("NameSuffix", "")),
-    ]
-    return " ".join([p for p in parts if p]).strip()
+    """Build voter name for street lists, walk lists, and PDF reports using robust fallbacks."""
+    def pick(candidates):
+        for col in candidates:
+            try:
+                val = normalize_export_text(row.get(col, ""))
+            except Exception:
+                val = ""
+            if val:
+                return val
+        return ""
+
+    # Prefer complete name fields if present.
+    full = pick([
+        "FullName", "Full Name", "VoterName", "Voter Name", "Name",
+        "DisplayName", "Display Name", "_LookupName",
+        "CURRENT_NAME", "Current_Name", "Current Name",
+        "voter_name", "full_name", "name"
+    ])
+    if full:
+        return normalize_name_value(full) if "normalize_name_value" in globals() else full
+
+    first = pick([
+        "FirstName", "First Name", "FIRSTNAME", "First", "FName", "FNAME",
+        "GivenName", "Given Name", "Current_FirstName", "Current First Name",
+        "first_name", "firstname"
+    ])
+    middle = pick([
+        "MiddleName", "Middle Name", "MiddleInitial", "Middle Initial",
+        "MIDDLENAME", "Middle", "MName", "MNAME",
+        "Current_MiddleName", "Current Middle Name",
+        "middle_name", "middlename"
+    ])
+    last = pick([
+        "LastName", "Last Name", "LASTNAME", "Last", "LName", "LNAME",
+        "Surname", "Current_LastName", "Current Last Name",
+        "last_name", "lastname"
+    ])
+    suffix = pick([
+        "NameSuffix", "Name Suffix", "Suffix", "SUFFIX",
+        "Current_NameSuffix", "Current Name Suffix",
+        "name_suffix"
+    ])
+
+    name = " ".join([p for p in [first, middle, last, suffix] if p]).strip()
+    return normalize_name_value(name) if "normalize_name_value" in globals() else name
 
 def build_address_line1_row(row):
     parts = [
@@ -1084,6 +2428,12 @@ def build_address_line1_row(row):
     return line1
 
 def first_existing_detail(columns, candidates):
+    """Find a detail column safely using exact, lowercase, and normalized names.
+
+    Detail shards can contain columns from different pipeline eras, for example
+    `House Number`, `House_Number`, `ResidentialHouseNumber`, or `res_house_number`.
+    Vendor exports need those address fields even when spelling/spacing changes.
+    """
     lower_map = {str(c).strip().lower(): c for c in columns}
     for col in candidates:
         if col in columns:
@@ -1091,10 +2441,220 @@ def first_existing_detail(columns, candidates):
         hit = lower_map.get(str(col).strip().lower())
         if hit is not None:
             return hit
+
+    norm_map = {_norm_col_name(c): c for c in columns}
+    for cand in candidates:
+        n = _norm_col_name(cand)
+        if n and n in norm_map:
+            return norm_map[n]
+
     return None
+
+
+# -----------------------------
+# Local Voter Record Corrections
+# -----------------------------
+def load_voter_corrections() -> dict:
+    """Persistent correction overlay keyed by PA/voter ID.
+
+    Stored under the Athenix pipeline output folder so Step 7.9 can re-apply
+    corrections after future SURE/CURRENT/contact refreshes. A local fallback is
+    read for older DEV installs and migrated on next save.
+    """
+    path = VOTER_CORRECTIONS_PATH
+    if not path.exists() and 'VOTER_CORRECTIONS_LOCAL_FALLBACK_PATH' in globals() and VOTER_CORRECTIONS_LOCAL_FALLBACK_PATH.exists():
+        path = VOTER_CORRECTIONS_LOCAL_FALLBACK_PATH
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_voter_corrections(data: dict):
+    VOTER_CORRECTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    VOTER_CORRECTIONS_PATH.write_text(json.dumps(data or {}, indent=2), encoding="utf-8")
+
+
+def _correction_voter_id_from_rowlike(rowlike) -> str:
+    candidates = [
+        "PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "State Voter ID",
+        "VoterID", "Voter ID", "voter_id", "IDNumber", "ID Number", "_LookupPAID"
+    ]
+    try:
+        for col in candidates:
+            if col in rowlike:
+                val = normalize_numeric_string(rowlike.get(col, "")) if "normalize_numeric_string" in globals() else str(rowlike.get(col, "")).strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return ""
+
+
+CORRECTION_FIELD_ALIASES = {
+    "FirstName": ["FirstName", "First Name", "first_name"],
+    "MiddleName": ["MiddleName", "Middle Name", "middle_name"],
+    "LastName": ["LastName", "Last Name", "last_name"],
+    "NameSuffix": ["NameSuffix", "Name Suffix", "Suffix", "suffix"],
+    "Gender": ["Gender", "Sex", "gender"],
+    "Party": ["Party", "party", "Party Code", "party_raw"],
+    "DOB": ["DOB", "Date of Birth", "DateOfBirth", "dob"],
+    "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
+    "House Number": ["House Number", "HouseNumber", "house_number"],
+    "House Number Suffix": ["House Number Suffix", "HouseNumberSuffix", "house_number_suffix"],
+    "Street Name": ["Street Name", "StreetName", "street_name"],
+    "Apartment Number": ["Apartment Number", "ApartmentNumber", "Unit", "Apt", "apartment_number"],
+    "Address Line 2": ["Address Line 2", "AddressLine2", "Address2", "address_line_2"],
+    "City": ["City", "res_city", "MailingCity", "Mail City"],
+    "State": ["State", "res_state", "MailingState", "Mail State"],
+    "Zip": ["Zip", "ZIP", "res_zip", "ZipCode", "MailingZip", "Mail Zip"],
+    "County": ["County", "county"],
+    "Municipality": ["Municipality", "municipality"],
+    "Precinct": ["Precinct", "precinct"],
+    "School District": ["School District", "school_district"],
+    "School Region": ["School Region", "school_region"],
+    "Mobile": ["Mobile", "Cell", "CellPhone", "Cell Phone"],
+    "Landline": ["Landline", "Phone", "HomePhone", "Home Phone"],
+    "Email": ["Email", "EmailAddress", "Email Address"],
+    "Tags": ["Tags", "tags", "TAGS"],
+    "MIB_Applied": ["MIB_Applied", "Mail Ballot Applied", "Ballot Application Status"],
+    "MIB_BALLOT": ["MIB_BALLOT", "Mail Ballot Status", "Ballot Status"],
+    "MB_PERM": ["MB_PERM", "MB_Perm", "Permanent Mail", "Permanent Mail Ballot"],
+    "Correction Notes": ["Correction Notes"],
+}
+
+
+def _first_matching_col_from_aliases(columns, aliases):
+    norm = {_norm_col_name(c): c for c in columns}
+    for alias in aliases:
+        hit = norm.get(_norm_col_name(alias))
+        if hit:
+            return hit
+    return aliases[0] if aliases else None
+
+
+def apply_voter_corrections_to_df(df: pd.DataFrame) -> pd.DataFrame:
+    corrections = load_voter_corrections()
+    if df is None or df.empty or not corrections:
+        return df
+    out = df.copy()
+    id_cols = [c for c in ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "State Voter ID", "VoterID", "Voter ID", "voter_id", "IDNumber", "ID Number", "_LookupPAID"] if c in out.columns]
+    if not id_cols:
+        return out
+    ids = out[id_cols[0]].astype(str).map(lambda v: normalize_numeric_string(v) if "normalize_numeric_string" in globals() else str(v).strip())
+    for voter_id, corr in corrections.items():
+        if not isinstance(corr, dict):
+            continue
+        mask = ids.eq(str(voter_id))
+        if not bool(mask.any()):
+            continue
+        for canonical, value in corr.get("fields", {}).items():
+            if canonical == "Correction Notes":
+                continue
+            aliases = CORRECTION_FIELD_ALIASES.get(canonical, [canonical])
+            target = _first_matching_col_from_aliases(out.columns.tolist(), aliases)
+            if target and target not in out.columns:
+                out[target] = ""
+            if target:
+                out.loc[mask, target] = value
+        # Rebuild common display columns after name/address edits.
+        first_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["FirstName"])
+        middle_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["MiddleName"])
+        last_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["LastName"])
+        suffix_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["NameSuffix"])
+        if first_col and last_col:
+            name_series = (out.loc[mask, first_col].fillna('').astype(str) + ' ' +
+                           (out.loc[mask, middle_col].fillna('').astype(str) if middle_col in out.columns else '') + ' ' +
+                           out.loc[mask, last_col].fillna('').astype(str) + ' ' +
+                           (out.loc[mask, suffix_col].fillna('').astype(str) if suffix_col in out.columns else '')).map(lambda x: re.sub(r'\s+', ' ', x).strip())
+            for full_col in ["Name", "FullName", "Full Name", "_LookupName"]:
+                if full_col in out.columns:
+                    out.loc[mask, full_col] = name_series.values
+
+        house_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["House Number"])
+        street_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["Street Name"])
+        apt_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["Apartment Number"])
+        if "_LookupAddress" in out.columns and house_col and street_col:
+            apt_part = out.loc[mask, apt_col].fillna('').astype(str).map(lambda x: ("Apt " + x.strip()) if x.strip() else "") if apt_col in out.columns else ""
+            addr_series = (out.loc[mask, house_col].fillna('').astype(str) + ' ' + out.loc[mask, street_col].fillna('').astype(str) + ' ' + apt_part).map(lambda x: re.sub(r'\s+', ' ', x).strip())
+            out.loc[mask, "_LookupAddress"] = addr_series.values
+
+        city_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["City"])
+        state_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["State"])
+        zip_col = _first_matching_col_from_aliases(out.columns.tolist(), CORRECTION_FIELD_ALIASES["Zip"])
+        if "_LookupCityStateZip" in out.columns and city_col:
+            city = out.loc[mask, city_col].fillna('').astype(str)
+            state_zip = ((out.loc[mask, state_col].fillna('').astype(str) if state_col in out.columns else '') + ' ' + (out.loc[mask, zip_col].fillna('').astype(str) if zip_col in out.columns else '')).map(lambda x: re.sub(r'\s+', ' ', x).strip())
+            csz = (city + ', ' + state_zip).map(lambda x: re.sub(r',\s*$', '', re.sub(r'\s+', ' ', x)).strip())
+            out.loc[mask, "_LookupCityStateZip"] = csz.values
+    return out
+
+
+def apply_voter_corrections_to_row(row):
+    if row is None:
+        return row
+    df = pd.DataFrame([row.to_dict() if hasattr(row, 'to_dict') else dict(row)])
+    fixed = apply_voter_corrections_to_df(df)
+    return fixed.iloc[0] if not fixed.empty else row
+
+
+def render_voter_correction_editor(selected_row):
+    voter_id = _correction_voter_id_from_rowlike(selected_row)
+    if not voter_id:
+        st.warning("This voter record has no PA/voter ID available, so corrections cannot be saved safely.")
+        return
+    corrections = load_voter_corrections()
+    saved = corrections.get(voter_id, {}).get("fields", {}) if isinstance(corrections.get(voter_id, {}), dict) else {}
+    st.markdown("#### Edit Voter Record")
+    st.caption("Saved corrections are stored as a persistent pipeline overlay and can be re-applied after future SURE/CURRENT/contact refreshes.")
+    if saved:
+        st.info("This voter currently has a saved local correction overlay.")
+
+    field_groups = [
+        ("Name", [("FirstName", "First Name"), ("MiddleName", "Middle Name"), ("LastName", "Last Name"), ("NameSuffix", "Name Suffix")]),
+        ("Voter Details", [("Gender", "Gender"), ("Party", "Party"), ("DOB", "DOB"), ("RegistrationDate", "Registration Date")]),
+        ("Address", [("House Number", "House Number"), ("House Number Suffix", "House Number Suffix"), ("Street Name", "Street Name"), ("Apartment Number", "Apartment Number"), ("Address Line 2", "Address Line 2"), ("City", "City"), ("State", "State"), ("Zip", "Zip")]),
+        ("Geography", [("County", "County"), ("Municipality", "Municipality"), ("Precinct", "Precinct"), ("School District", "School District"), ("School Region", "School Region")]),
+        ("Contact + Mail Ballot", [("Mobile", "Mobile"), ("Landline", "Landline"), ("Email", "Email"), ("MIB_Applied", "MB Application"), ("MIB_BALLOT", "MB Ballot"), ("MB_PERM", "Permanent MB"), ("Tags", "Tags")]),
+    ]
+    with st.form(f"voter_correction_form_{voter_id}", clear_on_submit=False):
+        values = {}
+        for group_title, edit_fields in field_groups:
+            st.markdown(f"**{group_title}**")
+            rows = [edit_fields[i:i+4] for i in range(0, len(edit_fields), 4)]
+            for row_fields in rows:
+                cols = st.columns(len(row_fields), gap="small")
+                for col_obj, (canonical, label) in zip(cols, row_fields):
+                    aliases = CORRECTION_FIELD_ALIASES.get(canonical, [canonical])
+                    current_val = saved.get(canonical, get_lookup_value(selected_row, aliases) if 'get_lookup_value' in globals() else '')
+                    with col_obj:
+                        values[canonical] = st.text_input(label, value=str(current_val or ""), key=f"corr_{voter_id}_{canonical}")
+        notes_val = saved.get("Correction Notes", "")
+        values["Correction Notes"] = st.text_area("Correction Notes", value=str(notes_val or ""), key=f"corr_{voter_id}_notes", height=90)
+        c1, c2 = st.columns(2, gap="small")
+        save_clicked = c1.form_submit_button("Save Voter Correction", width="stretch", type="primary")
+        clear_clicked = c2.form_submit_button("Remove Saved Correction", width="stretch")
+    if save_clicked:
+        corrections[voter_id] = {"updated_at": datetime.now().isoformat(timespec="seconds"), "fields": values}
+        save_voter_corrections(corrections)
+        st.success("Voter correction saved.")
+        st.rerun()
+    if clear_clicked:
+        if voter_id in corrections:
+            corrections.pop(voter_id, None)
+            save_voter_corrections(corrections)
+        st.success("Saved correction removed.")
+        st.rerun()
 
 @st.cache_data(show_spinner=True)
 def ensure_detail_shards():
+    local_paths, source_label = find_local_dataset_paths("detail")
+    if local_paths:
+        return local_paths, {"source": source_label, "count": len(local_paths)}
+
     manifest = load_manifest()
     local_paths = []
     for shard in manifest["detail"]["shards"]:
@@ -1104,13 +2664,12 @@ def ensure_detail_shards():
         local_paths.append(str(local_path))
     return local_paths, manifest
 
-def build_detail_export_sql(detail_paths, active_filters):
-    paths_sql = "[" + ", ".join(sql_string_literal(p) for p in detail_paths) + "]"
-    columns = get_conn().execute(f"DESCRIBE SELECT * FROM read_parquet({paths_sql}, union_by_name=True)").df()["column_name"].tolist()
+def build_detail_export_sql(detail_paths, active_filters, include_all=True, selected_raw_cols=None):
+    columns = get_conn().execute(f"DESCRIBE SELECT * FROM {dataset_scan_sql(detail_paths)}").df()["column_name"].tolist()
 
     q = quote_ident
     status_col = first_existing_detail(columns, ["VoterStatus", "voterstatus"])
-    party_col = first_existing_detail(columns, ["Party"])
+    party_col = first_existing_detail(columns, ["Party", "party", "PARTY", "PoliticalParty", "Political Party"])
     gender_col = first_existing_detail(columns, ["Gender", "Sex"])
     age_col = first_existing_detail(columns, ["Age"])
     hh_col = first_existing_detail(columns, ["HH_ID"])
@@ -1120,10 +2679,31 @@ def build_detail_export_sql(detail_paths, active_filters):
     vote_hist_col = first_existing_detail(columns, ["V4A"])
     mib_applied_col = first_existing_detail(columns, ["MIB_Applied"])
     mib_ballot_col = first_existing_detail(columns, ["MIB_BALLOT"])
-    mb_score_col = first_existing_detail(columns, ["MB_AProp_Score", "MMB_AProp_Score"])
+    mb_score_col = first_existing_detail(columns, ["MB_AProp_Score", "MMB_AProp_Score", "MB_Prob_Score"])
     mb_perm_col = first_existing_detail(columns, ["MB_PERM", "MB_Perm", "MB_Pern"])
+    source_file_col = first_existing_detail(columns, ["Source_File", "Source File", "source_file"])
+    mb_new_reg_col = first_existing_detail(columns, ["MailBallotNewRegistrant", "Mail Ballot New Registrant", "mail_ballot_new_registrant"])
+    applicant_phone_col = first_existing_detail(columns, ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"])
+    applicant_phone_type_col = first_existing_detail(columns, ["ApplicantPhone_Type", "Applicant Phone Type"])
+    applicant_phone_compliance_col = first_existing_detail(columns, ["ApplicantPhone_Compliance", "Applicant Phone Compliance"])
+    current_app_return_col = first_existing_detail(columns, ["Current_App_Return_Date", "AppReturnDate", "App Return Date"])
+    current_ballot_sent_col = first_existing_detail(columns, ["Current_Ballot_Sent_Date", "BallotSentDate", "Ballot Sent Date"])
+    current_ballot_returned_col = first_existing_detail(columns, ["Current_Ballot_Returned_Date", "BallotReturnedDate", "Ballot Returned Date"])
 
-    exprs = ["*"]
+    # For heavy outputs we keep the old full-detail behavior.
+    # For vendor/mail exports, include_all=False selects only needed raw columns
+    # plus the computed helper fields used by filters. This avoids pulling every
+    # detail column and keeps Prepare Mail CSV from tying up DuckDB/Streamlit.
+    if include_all:
+        exprs = ["*"]
+    else:
+        selected_raw_cols = selected_raw_cols or []
+        raw_keep = []
+        for col in selected_raw_cols:
+            if col and col in columns and col not in raw_keep:
+                raw_keep.append(col)
+        exprs = [f"{q(col)} as {q(col)}" for col in raw_keep]
+
     if status_col:
         exprs.append(f"upper(trim(coalesce(cast({q(status_col)} as varchar), ''))) as _Status")
     else:
@@ -1172,9 +2752,9 @@ def build_detail_export_sql(detail_paths, active_filters):
         exprs.append("'' as _VoteHistory")
 
     if mib_applied_col:
-        exprs.append(f"upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) as _MIBApplied")
+        exprs.append(f"case when upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) = '' then 'DNA' else upper(trim(coalesce(cast({q(mib_applied_col)} as varchar), ''))) end as _MIBApplied")
     else:
-        exprs.append("'' as _MIBApplied")
+        exprs.append("'DNA' as _MIBApplied")
 
     if mib_ballot_col:
         exprs.append(f"upper(trim(coalesce(cast({q(mib_ballot_col)} as varchar), ''))) as _MIBBallot")
@@ -1190,10 +2770,71 @@ def build_detail_export_sql(detail_paths, active_filters):
         exprs.append(f"""case
             when upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), ''))) in ('TRUE', 'T', 'YES', 'Y', '1') then 'Y'
             when upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), ''))) in ('FALSE', 'F', 'NO', 'N', '0') then 'N'
-            else ''
+            else upper(trim(coalesce(cast({q(mb_perm_col)} as varchar), '')))
         end as _MBPerm""")
     else:
         exprs.append("'' as _MBPerm")
+
+    if source_file_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(source_file_col)} as varchar), ''))) as _SourceFile")
+    else:
+        exprs.append("'' as _SourceFile")
+
+    if mb_new_reg_col:
+        exprs.append(f"""case
+            when upper(trim(coalesce(cast({q(mb_new_reg_col)} as varchar), ''))) in ('Y', 'YES', 'TRUE', '1') then 'Y'
+            else ''
+        end as _MailBallotNewRegistrant""")
+    else:
+        exprs.append("'' as _MailBallotNewRegistrant")
+
+    if applicant_phone_col:
+        exprs.append(f"""case
+            when trim(coalesce(cast({q(applicant_phone_col)} as varchar), '')) in ('', 'None', 'NONE', 'nan', 'NAN') then false
+            else true
+        end as _HasApplicantPhone""")
+    else:
+        exprs.append("false as _HasApplicantPhone")
+
+    if applicant_phone_type_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(applicant_phone_type_col)} as varchar), ''))) as _ApplicantPhoneType")
+    else:
+        exprs.append("'' as _ApplicantPhoneType")
+
+    if applicant_phone_compliance_col:
+        exprs.append(f"upper(trim(coalesce(cast({q(applicant_phone_compliance_col)} as varchar), ''))) as _ApplicantPhoneCompliance")
+    else:
+        exprs.append("'' as _ApplicantPhoneCompliance")
+
+    if current_app_return_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_app_return_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_app_return_col)} as timestamp)
+        ) as _CurrentAppReturnDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentAppReturnDate")
+
+    if current_ballot_sent_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_ballot_sent_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_ballot_sent_col)} as timestamp)
+        ) as _CurrentBallotSentDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentBallotSentDate")
+
+    if current_ballot_returned_col:
+        exprs.append(f"""coalesce(
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%Y-%m-%d'),
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%m/%d/%Y'),
+            try_strptime(cast({q(current_ballot_returned_col)} as varchar), '%m/%d/%y'),
+            try_cast({q(current_ballot_returned_col)} as timestamp)
+        ) as _CurrentBallotReturnedDate""")
+    else:
+        exprs.append("NULL::TIMESTAMP as _CurrentBallotReturnedDate")
 
     if hh_col:
         exprs.append(f"nullif(trim(coalesce(cast({q(hh_col)} as varchar), '')), '') as _HouseholdKey")
@@ -1201,13 +2842,47 @@ def build_detail_export_sql(detail_paths, active_filters):
         exprs.append("NULL::VARCHAR as _HouseholdKey")
 
     where_sql, params = current_filter_clause(active_filters, columns)
-    sql = "SELECT\n    " + ",\n    ".join(exprs) + f"\nFROM read_parquet({paths_sql}, union_by_name=True)\n{where_sql}"
+    sql = "SELECT\n    " + ",\n    ".join(exprs) + f"\nFROM {dataset_scan_sql(detail_paths)}\n{where_sql}"
     return sql, params
 
 def fetch_filtered_detail(active_filters):
+    """Fetch detail rows for the APPLIED universe.
+
+    The safe path applies filters to the canonical index view first, then
+    semi-joins detail shards by voter id. This prevents raw detail geography
+    fields from accidentally returning statewide rows for Filtered/Texting CSVs.
+    """
     detail_paths, _ = ensure_detail_shards()
-    sql, params = build_detail_export_sql(detail_paths, active_filters)
-    df = get_conn().execute(sql, params).df()
+    con = get_conn()
+    detail_columns = con.execute(f"DESCRIBE SELECT * FROM {dataset_scan_sql(detail_paths)}").df()["column_name"].tolist()
+    index_columns = st.session_state.get("columns", []) or []
+
+    detail_id_col = first_existing_detail(detail_columns, ["voter_id", "VoterID", "Voter_ID", "PAID", "PA ID Number", "PA_ID"])
+    index_id_col = first_existing_precise(index_columns, ["voter_id", "VoterID", "Voter_ID", "PAID", "PA ID Number", "PA_ID"])
+
+    if detail_id_col and index_id_col:
+        q = quote_ident
+        where_sql, params = current_filter_clause(active_filters, index_columns)
+        sql = f"""
+        WITH filtered_ids AS (
+            SELECT DISTINCT {q(index_id_col)} AS _cc_join_id
+            FROM voters
+            {where_sql}
+        ),
+        detail_src AS (
+            SELECT * FROM {dataset_scan_sql(detail_paths)}
+        )
+        SELECT d.*
+        FROM detail_src d
+        SEMI JOIN filtered_ids f
+          ON cast(d.{q(detail_id_col)} as varchar) = cast(f._cc_join_id as varchar)
+        """
+        df = con.execute(sql, params).df()
+    else:
+        sql, params = build_detail_export_sql(detail_paths, active_filters)
+        df = con.execute(sql, params).df()
+
+    df = apply_voter_corrections_to_df(df)
     if has_global_followup_filters(active_filters):
         df = apply_global_followup_filters_df(df, active_filters)
     return df
@@ -1216,15 +2891,30 @@ def build_filtered_csv_export(active_filters):
     df = fetch_filtered_detail(active_filters).copy()
     return normalize_filtered_export_dataframe(df)
 
+def _name_series_for_export(df: pd.DataFrame) -> pd.Series:
+    if df.empty:
+        return pd.Series([], dtype="object")
+    cols = df.columns.tolist()
+    first = _first_output_series(df, ["FirstName", "First Name", "first_name", "FNAME", "Current_FirstName"])
+    middle = _first_output_series(df, ["MiddleName", "Middle Name", "MiddleInitial", "Middle Initial", "middle_name", "MNAME", "Current_MiddleName"])
+    last = _first_output_series(df, ["LastName", "Last Name", "last_name", "LNAME", "Current_LastName"])
+    suffix = _first_output_series(df, ["NameSuffix", "Name Suffix", "Suffix", "name_suffix", "Current_NameSuffix"])
+    built = (first + " " + middle + " " + last + " " + suffix).fillna("").astype(str).map(lambda x: normalize_name_value(re.sub(r"\s+", " ", x).strip()))
+    full_col = first_existing_detail(cols, ["Name", "FullName", "Full Name", "VoterName", "Voter Name"])
+    if full_col:
+        fallback = df[full_col].fillna("").astype(str).map(normalize_name_value)
+        built = built.where(built.astype(str).str.strip().ne(""), fallback)
+    return built
+
 def build_texting_export(active_filters):
     df = fetch_filtered_detail(active_filters).copy()
     empty_cols = ["Name", "PA ID Number", "Mobile", "Party", "Age", "County", "Precinct"]
     if df.empty:
         return pd.DataFrame(columns=empty_cols)
 
-    df["Name"] = df.apply(full_name_from_row, axis=1)
+    df["Name"] = _name_series_for_export(df)
 
-    mobile_col = first_existing_detail(df.columns.tolist(), ["Mobile", "Cell", "CellPhone", "Cell Phone"])
+    mobile_col = first_existing_detail(df.columns.tolist(), ["Mobile", "Cell", "CellPhone", "Cell Phone", "Phone", "PhoneNumber"])
     if mobile_col is None:
         df["MobileClean"] = ""
     else:
@@ -1232,96 +2922,673 @@ def build_texting_export(active_filters):
 
     pa_id_col = first_existing_detail(
         df.columns.tolist(),
-        ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "State Voter ID", "Voter ID", "VoterID"]
+        ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "State Voter ID", "Voter ID", "VoterID", "voter_id"]
     )
     if pa_id_col is not None:
         df["PA ID Number"] = df[pa_id_col].apply(normalize_numeric_string)
     else:
         df["PA ID Number"] = ""
 
-    cols = [c for c in ["Name", "PA ID Number", "Party", "Age", "County", "Precinct"] if c in df.columns]
-    out = df[cols].copy()
-    out.insert(2, "Mobile", df["MobileClean"])
+    party_col = first_existing_detail(df.columns.tolist(), ["Party", "party", "PARTY"])
+    age_col = first_existing_detail(df.columns.tolist(), ["Age", "Age_Calc"])
+    county_col = first_existing_detail(df.columns.tolist(), ["County"])
+    precinct_col = first_existing_detail(df.columns.tolist(), ["Precinct"])
+
+    out = pd.DataFrame({
+        "Name": df["Name"],
+        "PA ID Number": df["PA ID Number"],
+        "Mobile": df["MobileClean"],
+        "Party": df[party_col] if party_col else "",
+        "Age": df[age_col] if age_col else "",
+        "County": df[county_col] if county_col else "",
+        "Precinct": df[precinct_col] if precinct_col else "",
+    })
     out = out[out["Mobile"].astype(str).str.strip() != ""]
     return out.reset_index(drop=True)
 
-def build_mail_export(active_filters, householded=False):
-    df = fetch_filtered_detail(active_filters).copy()
-    if df.empty:
-        return pd.DataFrame(columns=["Name", "Address1", "City", "State", "Zip", "Party", "Age"])
 
-    df["Name"] = df.apply(full_name_from_row, axis=1)
-    df["Address1"] = df.apply(build_address_line1_row, axis=1)
+def _first_output_series(df: pd.DataFrame, candidates, default="") -> pd.Series:
+    """Return first matching column as a cleaned text series, or a default blank series."""
+    col = first_existing_detail(df.columns.tolist(), candidates)
+    if col is None:
+        return pd.Series([default] * len(df), index=df.index, dtype="object")
+    data = df[col]
+    if isinstance(data, pd.DataFrame):
+        data = data.iloc[:, 0]
+    return data.fillna("").astype(str).map(normalize_export_text)
 
-    city_col = first_existing_detail(df.columns.tolist(), ["MailingCity", "Mailing City", "City", "MailCity"])
-    state_col = first_existing_detail(df.columns.tolist(), ["MailingState", "Mailing State", "State", "MailState"])
-    zip_col = first_existing_detail(df.columns.tolist(), ["MailingZip", "Mailing Zip", "ZIP", "Zip", "ZipCode", "ZIPCODE", "MailZip"])
 
-    df["CityOut"] = df[city_col].apply(normalize_export_text) if city_col else ""
-    df["StateOut"] = df[state_col].apply(normalize_export_text) if state_col else ""
-    df["ZipOut"] = df[zip_col].apply(clean_zip_value) if zip_col else ""
 
-    export_df = pd.DataFrame({
-        "MailName": df["Name"].apply(normalize_export_text),
-        "Address1": df["Address1"].apply(normalize_export_text),
-        "City": df["CityOut"].apply(normalize_export_text),
-        "State": df["StateOut"].apply(normalize_export_text),
-        "Zip": df["ZipOut"].apply(clean_zip_value),
+USPS_POST_DIRS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW"}
+USPS_PRE_DIR_WORD_MAP = {"NORTH": "N", "SOUTH": "S", "EAST": "E", "WEST": "W"}
+USPS_UNIT_LABELS = {"APT", "APARTMENT", "UNIT", "STE", "SUITE", "#", "LOT", "FL", "FLOOR", "BLDG", "BUILDING"}
+
+def normalize_street_type_token(value: str) -> str:
+    s = normalize_export_text(value)
+    if not s:
+        return ""
+    key = re.sub(r"[^A-Za-z]", "", s).upper()
+    return USPS_SUFFIX_MAP.get(key, s).title()
+
+def normalize_direction_token(value: str) -> str:
+    s = normalize_export_text(value).upper().replace(".", "")
+    if not s:
+        return ""
+    return USPS_PRE_DIR_WORD_MAP.get(s, s if s in USPS_POST_DIRS else s)
+
+def normalize_unit_value(value: str) -> str:
+    s = normalize_export_text(value)
+    if not s:
+        return ""
+    s = re.sub(r"\b(APARTMENT)\b", "APT", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(SUITE)\b", "STE", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    # If the value is only a unit number/letter, make it explicit for mail vendors.
+    if re.fullmatch(r"[A-Za-z0-9\-]+", s) and not re.fullmatch(r"\d{5}(?:-\d{4})?", s):
+        return f"Apt {s.upper()}"
+    parts = s.split(" ", 1)
+    if parts:
+        label = parts[0].upper().replace("APARTMENT", "APT").replace("SUITE", "STE")
+        if label in USPS_UNIT_LABELS:
+            rest = parts[1].upper() if len(parts) > 1 else ""
+            return ("# " + rest).strip() if label == "#" else (label.title() + (" " + rest if rest else ""))
+    return normalize_address_value(s)
+
+def _split_street_name_type_postdir(street_series: pd.Series):
+    """Return street name WITH street type kept in Street Name, and postdirection in Street Suffix."""
+    names = []
+    post_dirs = []
+    for raw in street_series.fillna("").astype(str):
+        s = normalize_export_text(raw)
+        if not s:
+            names.append(""); post_dirs.append(""); continue
+        parts = s.split()
+        post = ""
+        if parts:
+            last = re.sub(r"[^A-Za-z]", "", parts[-1]).upper()
+            if last in USPS_POST_DIRS:
+                post = last
+                parts = parts[:-1]
+        # Standardize the street type token but KEEP it in Street Name.
+        if parts:
+            last_type_key = re.sub(r"[^A-Za-z]", "", parts[-1]).upper()
+            if last_type_key in USPS_SUFFIX_MAP:
+                parts[-1] = USPS_SUFFIX_MAP[last_type_key].title()
+        names.append(" ".join(parts).strip())
+        post_dirs.append(post)
+    return pd.Series(names, index=street_series.index), pd.Series(post_dirs, index=street_series.index)
+
+def _extract_unit_from_street_name(street_series: pd.Series):
+    """Move trailing apartment/unit numbers accidentally embedded in Street Name to Address 2."""
+    clean_names = []
+    units = []
+    for raw in street_series.fillna("").astype(str):
+        s = normalize_export_text(raw)
+        if not s:
+            clean_names.append(""); units.append(""); continue
+        parts = s.split()
+        unit = ""
+        # Explicit Apt/Unit/Suite inside the field.
+        m = re.search(r"\b(APT|APARTMENT|UNIT|STE|SUITE|#)\s*([A-Z0-9\-]+)\b", s, flags=re.IGNORECASE)
+        if m:
+            unit = normalize_unit_value(m.group(0))
+            s = (s[:m.start()] + " " + s[m.end():]).strip()
+            parts = s.split()
+        # Common pipeline issue: StreetName has trailing unit like "Freedom Way 108".
+        if not unit and len(parts) >= 3 and re.fullmatch(r"\d+[A-Z]?", parts[-1]):
+            unit_num = parts[-1]
+            parts = parts[:-1]
+            # If duplicated, e.g. "Freedom Way 203 203", remove both but keep one unit.
+            if parts and parts[-1] == unit_num:
+                parts = parts[:-1]
+            unit = normalize_unit_value(unit_num)
+        clean_names.append(" ".join(parts).strip())
+        units.append(unit)
+    return pd.Series(clean_names, index=street_series.index), pd.Series(units, index=street_series.index)
+
+def _split_full_address_components(full_address_series: pd.Series):
+    """Best-effort USPS-style parser: house, predir, street name+type, postdir, address2."""
+    houses, pre_dirs, names, post_dirs, suites = [], [], [], [], []
+    for raw in full_address_series.fillna("").astype(str):
+        s = normalize_export_text(raw)
+        if not s:
+            houses.append(""); pre_dirs.append(""); names.append(""); post_dirs.append(""); suites.append("")
+            continue
+        suite = ""
+        m_suite = re.search(r"\b(APT|APARTMENT|UNIT|STE|SUITE|#|LOT|FL|FLOOR|BLDG|BUILDING)\s*([A-Z0-9\-]+)\b", s, flags=re.IGNORECASE)
+        if m_suite:
+            suite = normalize_unit_value(m_suite.group(0))
+            s = (s[:m_suite.start()] + " " + s[m_suite.end():]).strip()
+        parts = s.split()
+        house = ""
+        if parts and re.match(r"^\d+[A-Za-z]?(?:-\d+)?$", parts[0]):
+            house = parts.pop(0)
+        pre_dir = ""
+        if parts:
+            d = re.sub(r"[^A-Za-z]", "", parts[0]).upper()
+            if d in USPS_POST_DIRS or d in USPS_PRE_DIR_WORD_MAP:
+                pre_dir = normalize_direction_token(d)
+                parts.pop(0)
+        post_dir = ""
+        if parts:
+            d = re.sub(r"[^A-Za-z]", "", parts[-1]).upper()
+            if d in USPS_POST_DIRS:
+                post_dir = d
+                parts = parts[:-1]
+        if parts:
+            last_type_key = re.sub(r"[^A-Za-z]", "", parts[-1]).upper()
+            if last_type_key in USPS_SUFFIX_MAP:
+                parts[-1] = USPS_SUFFIX_MAP[last_type_key].title()
+        name = " ".join(parts).strip()
+        name_series, embedded_unit = _extract_unit_from_street_name(pd.Series([name]))
+        name = name_series.iloc[0]
+        if not suite:
+            suite = embedded_unit.iloc[0]
+        houses.append(house)
+        pre_dirs.append(pre_dir)
+        names.append(name)
+        post_dirs.append(post_dir)
+        suites.append(suite)
+    return (
+        pd.Series(houses, index=full_address_series.index),
+        pd.Series(pre_dirs, index=full_address_series.index),
+        pd.Series(names, index=full_address_series.index),
+        pd.Series(post_dirs, index=full_address_series.index),
+        pd.Series(suites, index=full_address_series.index),
+    )
+
+
+def _build_vendor_mail_export_rows(df: pd.DataFrame, name_override: pd.Series | None = None) -> pd.DataFrame:
+    """Vendor-friendly USPS-style mail file.
+
+    Column rule:
+    - Street Direction = pre-direction (N/S/E/W/etc.)
+    - Street Name = street name WITH street type, e.g. "David Dr"
+    - Street Suffix = post-direction only, e.g. "NW"
+    - Suite/Apt = Address 2 / unit / apartment / PO box when available
+    """
+    house = _first_output_series(df, [
+        "House Number", "HouseNumber", "House_Number", "ResHouseNumber", "ResidenceHouseNumber",
+        "ResidentialHouseNumber", "MailingHouseNumber", "Mail House Number"
+    ]).map(normalize_numeric_string)
+
+    street_dir = _first_output_series(df, [
+        "Street Direction", "StreetDirection", "Street_Direction", "Street Dir", "StreetDir",
+        "PreDirection", "PreDir", "Street Pre Direction", "MailingStreetDirection"
+    ]).map(normalize_direction_token)
+
+    street_name = _first_output_series(df, [
+        "Street Name", "StreetName", "Street_Name", "ResidentialStreetName", "ResidenceStreetName",
+        "MailingStreetName", "Mail Street Name"
+    ])
+
+    full_address = _first_output_series(df, [
+        "res_address", "ResidenceAddress", "ResidentialAddress", "Address", "Address1",
+        "Mailing Address", "MailAddress", "MailingAddress", "Residential Address"
+    ])
+
+    parsed_house, parsed_dir, parsed_street, parsed_postdir, parsed_suite = _split_full_address_components(full_address)
+    house = house.where(house.astype(str).str.strip().ne(""), parsed_house.map(normalize_numeric_string))
+    street_dir = street_dir.where(street_dir.astype(str).str.strip().ne(""), parsed_dir)
+    street_name = street_name.where(street_name.astype(str).str.strip().ne(""), parsed_street)
+
+    street_suffix = _first_output_series(df, [
+        "Street Suffix", "StreetSuffix", "Street_Suffix", "PostDirection", "PostDir", "Street Post Direction",
+        "Street_Post_Direction", "MailingStreetPostDirection", "Mail Street Post Direction"
+    ]).map(normalize_direction_token)
+    street_suffix = street_suffix.where(street_suffix.astype(str).str.strip().ne(""), parsed_postdir)
+
+    # Keep the street type in Street Name; only split postdirection to Street Suffix.
+    street_name, embedded_postdir = _split_street_name_type_postdir(street_name)
+    street_suffix = street_suffix.where(street_suffix.astype(str).str.strip().ne(""), embedded_postdir)
+
+    suite = _first_output_series(df, [
+        "Suite/Apt", "Suite Apt", "Apartment Number", "ApartmentNumber", "Apartment_Number",
+        "Apt", "Apt Number", "Unit", "Unit Number", "MailingApartmentNumber"
+    ]).map(normalize_unit_or_address2_value)
+    suite = suite.where(suite.astype(str).str.strip().ne(""), parsed_suite)
+
+    # Fix bad source columns where unit numbers were glued onto Street Name.
+    street_name, embedded_suite = _extract_unit_from_street_name(street_name)
+    suite = suite.where(suite.astype(str).str.strip().ne(""), embedded_suite)
+
+    # Final defensive cleanup after all suite fallbacks. Parsed/full-address fallback
+    # values can reintroduce junk like "Apt STEEPLE", "Apt APTS", or "Apt Rd".
+    suite = suite.map(normalize_unit_or_address2_value)
+
+    city = _first_output_series(df, [
+        "MailingCity", "Mailing City", "MailCity", "City", "res_city", "ResidenceCity",
+        "ResidentialCity", "Residential City", "Current_City", "CurrentCity"
+    ]).map(normalize_city_value)
+    state = _first_output_series(df, [
+        "MailingState", "Mailing State", "MailState", "State", "res_state", "ResidenceState",
+        "ResidentialState", "Residential State", "Current_State", "CurrentState"
+    ]).map(normalize_state_value)
+    zip_code = _first_output_series(df, [
+        "MailingZip", "Mailing Zip", "MailZip", "ZIP", "Zip", "ZipCode", "ZIPCODE",
+        "res_zip", "ResidenceZip", "ResidentialZip", "Residential Zip", "Current_Zip", "CurrentZip"
+    ]).map(clean_zip_value)
+
+    first = _first_output_series(df, ["FirstName", "First Name", "first_name", "FNAME"]).map(normalize_name_value)
+    middle = _first_output_series(df, ["MiddleName", "Middle Name", "MiddleInitial", "Middle Initial", "middle_name", "MNAME"]).map(normalize_name_value)
+    last = _first_output_series(df, ["LastName", "Last Name", "last_name", "LNAME"]).map(normalize_name_value)
+    suffix = _first_output_series(df, ["NameSuffix", "Name Suffix", "Suffix", "name_suffix"]).map(normalize_name_value)
+
+    if name_override is None:
+        name = (first + " " + middle + " " + last + " " + suffix).fillna("").astype(str).map(lambda x: normalize_name_value(re.sub(r"\s+", " ", x).strip()))
+        fallback = _first_output_series(df, ["Name", "FullName", "Full Name", "VoterName", "Voter Name"]).map(normalize_name_value)
+        name = name.where(name.astype(str).str.strip().ne(""), fallback)
+    else:
+        name = name_override.fillna("").astype(str).map(normalize_name_value)
+
+    address_line_2 = _first_output_series(df, [
+        "Address Line 2", "AddressLine2", "Address_Line_2", "ResidentialAddressLine2",
+        "ResidenceAddressLine2", "Mail Address 2", "MailAddress2", "MailingAddress2",
+        "Current_Address2", "Current Address 2"
+    ]).map(normalize_unit_or_address2_value)
+
+    # Final defensive cleanup for Address Line 2 as well.
+    address_line_2 = address_line_2.map(normalize_unit_or_address2_value)
+
+    out = pd.DataFrame({
+        "House Number": house,
+        "Street Direction": street_dir,
+        "Street Name": street_name.map(normalize_address_value),
+        "Street Suffix": street_suffix,
+        "Suite/Apt": suite,
+        "Address Line 2": address_line_2,
+        "City": city,
+        "State": state,
+        "Zip": zip_code,
+        "First Name": first,
+        "Middle Name": middle,
+        "Last Name": last,
+        "Name Suffix": suffix,
+        "Name": name,
     })
+    return out.reset_index(drop=True)
+
+def fetch_mail_export_detail(active_filters):
+    """Fetch only vendor mail columns for the APPLIED universe.
+
+    Important: the universe filters are applied against the fast/canonical index
+    view first, then the detail shards are semi-joined by voter id. That prevents
+    mail exports from accidentally falling back to the whole statewide detail set
+    when detail-shard raw geography fields do not match the cleaned UI fields.
+    """
+    detail_paths, _ = ensure_detail_shards()
+    con = get_conn()
+    detail_columns = con.execute(f"DESCRIBE SELECT * FROM {dataset_scan_sql(detail_paths)}").df()["column_name"].tolist()
+
+    candidate_groups = [
+        ["House Number", "HouseNumber", "HouseNum", "HouseNo", "house_number", "res_house_number",
+         "ResidenceHouseNumber", "ResidentialHouseNumber", "Current_HouseNumber", "Current_House_Number"],
+        ["Street Direction", "StreetDirection", "Street Dir", "StreetDir", "PreDir", "PreDirection",
+         "StreetPreDirection", "Street Pre Direction", "res_street_direction", "ResidenceStreetDirection",
+         "ResidentialStreetDirection", "Current_StreetDir", "Current_Street_Direction"],
+        ["Street Name", "StreetName", "Street_Name", "street_name", "res_street_name",
+         "ResidenceStreetName", "ResidentialStreetName", "Current_StreetName", "Current_Street_Name"],
+        ["Street Suffix", "StreetSuffix", "Street Type", "StreetType", "PostType", "StreetPostType",
+         "res_street_suffix", "ResidenceStreetSuffix", "ResidentialStreetSuffix", "Current_StreetSuffix"],
+        ["Suite/Apt", "Suite Apt", "Suite", "Apt", "Apartment Number", "ApartmentNumber",
+         "Apartment_Number", "Unit", "Unit Number", "res_unit", "res_apt", "ResidenceApartmentNumber",
+         "ResidentialApartmentNumber", "Current_ApartmentNumber", "Current_Apt"],
+        ["Address Line 2", "AddressLine2", "Address_Line_2", "ResidentialAddressLine2",
+         "ResidenceAddressLine2", "Mail Address 2", "MailAddress2", "MailingAddress2",
+         "Current_Address2", "Current Address 2"],
+        ["City", "MailingCity", "Mailing City", "MailCity", "res_city", "ResidenceCity",
+         "ResidentialCity", "Residential City", "Current_City", "CurrentCity"],
+        ["State", "MailingState", "Mailing State", "MailState", "res_state", "ResidenceState",
+         "ResidentialState", "Residential State", "Current_State", "CurrentState"],
+        ["Zip", "ZIP", "ZipCode", "ZIPCODE", "MailingZip", "Mailing Zip", "MailZip",
+         "res_zip", "ResidenceZip", "ResidentialZip", "Residential Zip", "Current_Zip", "CurrentZip"],
+        ["FirstName", "First Name", "first_name", "FNAME", "Current_FirstName"],
+        ["MiddleName", "Middle Name", "MiddleInitial", "Middle Initial", "middle_name", "MNAME", "Current_MiddleName"],
+        ["LastName", "Last Name", "last_name", "LNAME", "Current_LastName"],
+        ["Name Suffix", "NameSuffix", "Suffix", "name_suffix", "Current_NameSuffix"],
+        ["Name", "FullName", "Full Name", "VoterName", "Voter Name"],
+        ["res_address", "ResidenceAddress", "ResidentialAddress", "Residential Address", "Residence Address",
+         "Address", "Address1", "Address Line 1", "AddressLine1", "MailingAddress", "Mailing Address",
+         "Current_Address", "Current_ResidentialAddress", "Current_ResidenceAddress"],
+        ["HH_ID", "Household_ID", "Household ID", "_HouseholdKey"],
+    ]
+    selected = []
+    for group in candidate_groups:
+        hit = first_existing_detail(detail_columns, group)
+        if hit and hit not in selected:
+            selected.append(hit)
+
+    # Include compactly-named address columns that may not match exact lists.
+    address_needles = (
+        "house", "street", "address", "apartment", "apt", "unit",
+        "residence", "residential", "mailing", "city", "state", "zip"
+    )
+    for col in detail_columns:
+        n = _norm_col_name(col)
+        if any(x in n for x in address_needles) and col not in selected:
+            selected.append(col)
+
+    detail_id_col = first_existing_detail(detail_columns, ["voter_id", "VoterID", "Voter_ID", "PAID", "PA ID Number", "PA_ID"])
+    index_columns = st.session_state.get("columns", []) or []
+    index_id_col = first_existing_precise(index_columns, ["voter_id", "VoterID", "Voter_ID", "PAID", "PA ID Number", "PA_ID"])
+
+    q = quote_ident
+
+    # Best path: use the already-prepared canonical index view for filters, then semi-join detail rows.
+    if detail_id_col and index_id_col:
+        if detail_id_col not in selected:
+            selected.append(detail_id_col)
+        select_expr = ",\n    ".join([f"d.{q(col)} as {q(col)}" for col in selected if col in detail_columns])
+        where_sql, params = current_filter_clause(active_filters, index_columns)
+        sql = f"""
+        WITH filtered_ids AS (
+            SELECT DISTINCT {q(index_id_col)} AS _cc_join_id
+            FROM voters
+            {where_sql}
+        ),
+        detail_src AS (
+            SELECT * FROM {dataset_scan_sql(detail_paths)}
+        )
+        SELECT
+            {select_expr}
+        FROM detail_src d
+        SEMI JOIN filtered_ids f
+          ON cast(d.{q(detail_id_col)} as varchar) = cast(f._cc_join_id as varchar)
+        """
+        df = con.execute(sql, params).df()
+    else:
+        # Fallback if voter id is unavailable: use old direct detail filtering.
+        sql, params = build_detail_export_sql(detail_paths, active_filters, include_all=False, selected_raw_cols=selected)
+        df = con.execute(sql, params).df()
+
+    df = apply_voter_corrections_to_df(df)
+    if has_global_followup_filters(active_filters):
+        df = apply_global_followup_filters_df(df, active_filters)
+    return df
+
+
+def build_mail_export(active_filters, householded=False):
+    df = fetch_mail_export_detail(active_filters).copy()
+    vendor_cols = [
+        "House Number", "Street Direction", "Street Name", "Street Suffix", "Suite/Apt", "Address Line 2",
+        "City", "State", "Zip", "First Name", "Middle Name", "Last Name", "Name Suffix", "Name"
+    ]
+    if df.empty:
+        return pd.DataFrame(columns=vendor_cols)
+
+    base_rows = _build_vendor_mail_export_rows(df)
 
     if householded:
+        # Group household mail records by household key when available, otherwise by full address.
         key_name = "_HouseholdKey" if "_HouseholdKey" in df.columns else None
-        temp = pd.DataFrame({
-            "_BaseName": df["Name"].apply(normalize_export_text),
-            "FirstName": safe_group_series(df, "FirstName"),
-            "LastName": safe_group_series(df, "LastName"),
-            "Address1": export_df["Address1"].apply(normalize_export_text),
-            "City": export_df["City"].apply(normalize_export_text),
-            "State": export_df["State"].apply(normalize_export_text),
-            "Zip": export_df["Zip"].apply(clean_zip_value),
-        })
-
-        address_text = temp["Address1"].apply(normalize_export_text)
-        zip_text = temp["Zip"].apply(clean_zip_value)
-        fallback_key = address_text + "|" + zip_text
-
+        address_text = (
+            base_rows["House Number"].astype(str) + "|" +
+            base_rows["Street Direction"].astype(str) + "|" +
+            base_rows["Street Name"].astype(str) + "|" +
+            base_rows["Street Suffix"].astype(str) + "|" +
+            base_rows["Suite/Apt"].astype(str) + "|" +
+            base_rows["Address Line 2"].astype(str) + "|" +
+            base_rows["City"].astype(str) + "|" +
+            base_rows["State"].astype(str) + "|" +
+            base_rows["Zip"].astype(str)
+        )
         if key_name and key_name in df.columns:
             base_key = safe_group_series(df, key_name)
-            grp_key = base_key.where(base_key != "", fallback_key)
+            grp_key = base_key.where(base_key != "", address_text)
         else:
-            grp_key = fallback_key
+            grp_key = address_text
 
-        temp["_grp"] = grp_key.fillna("").astype(str)
-        temp["Name"] = temp["_BaseName"]
+        temp = base_rows.copy()
+        temp["_grp"] = grp_key.fillna("").astype(str).values
+        temp["_BaseName"] = base_rows["Name"].fillna("").astype(str).values
+        temp["_LastName"] = base_rows["Last Name"].fillna("").astype(str).values
 
         grouped_rows = []
         grouped = temp.sort_values(by=["_grp", "_BaseName"]).groupby("_grp", dropna=False, sort=False)
         for _, grp in grouped:
             first_row = grp.iloc[0].copy()
-            first_row["MailName"] = build_household_mail_name(grp)
-            row = {
-                "Name": first_row["MailName"],
-                "Address1": normalize_export_text(first_row["Address1"]),
-                "City": normalize_export_text(first_row["City"]),
-                "State": normalize_export_text(first_row["State"]),
-                "Zip": clean_zip_value(first_row["Zip"]),
-            }
+            household_name = build_household_mail_name(pd.DataFrame({
+                "Name": grp["_BaseName"],
+                "LastName": grp["_LastName"],
+            }))
+            row = {col: first_row.get(col, "") for col in vendor_cols}
+            row["First Name"] = ""
+            row["Middle Name"] = ""
+            row["Last Name"] = ""
+            row["Name Suffix"] = ""
+            row["Name"] = normalize_name_value(household_name)
             grouped_rows.append(row)
 
-        out = pd.DataFrame(grouped_rows)
-        cols = ["Name", "Address1", "City", "State", "Zip"]
-        out = out[cols]
-        out = out.reset_index(drop=True)
-        return normalize_mail_dataframe(out)
+        return pd.DataFrame(grouped_rows, columns=vendor_cols).reset_index(drop=True)
 
-    out = export_df.rename(columns={"MailName": "Name"})
-    cols = ["Name", "Address1", "City", "State", "Zip"]
-    out = out[cols]
-    out = out.reset_index(drop=True)
-    return normalize_mail_dataframe(out)
+    return base_rows[vendor_cols]
+
+
+
+def _label_line(value: str) -> str:
+    """Clean a value for printable mailing labels."""
+    return collapse_spaces(normalize_export_text(value))
+
+
+def _mailing_label_rows(active_filters, householded=False) -> pd.DataFrame:
+    """Use the same cleaned mail export data for labels that CSV/Excel uses."""
+    rows = build_mail_export(active_filters, householded=householded).copy()
+    if rows.empty:
+        return rows
+    for col in rows.columns:
+        rows[col] = rows[col].fillna("").astype(str).map(_label_line)
+
+    # Drop rows that have neither a name nor enough address to print.
+    addr_key = (
+        rows.get("House Number", "").astype(str) + " " +
+        rows.get("Street Name", "").astype(str) + " " +
+        rows.get("City", "").astype(str) + " " +
+        rows.get("Zip", "").astype(str)
+    ).map(_label_line)
+    name_key = rows.get("Name", "").astype(str).map(_label_line)
+    rows = rows[(name_key != "") & (addr_key != "")].reset_index(drop=True)
+    return rows
+
+
+def generate_mailing_labels_pdf_bytes(active_filters, householded=False):
+    """Generate Avery 5160-style mailing labels from the applied universe.
+
+    Layout: Letter portrait, 3 columns x 10 rows, 30 labels per page.
+    Uses the already-cleaned Mail CSV/Excel export fields so labels match vendor files.
+    """
+    label_df = _mailing_label_rows(active_filters, householded=householded)
+    if label_df.empty:
+        return b""
+
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    # Avery 5160 approximate geometry, in points.
+    left_margin = 13.5
+    top_margin = 36.0
+    label_w = 189.0
+    label_h = 72.0
+    col_pitch = 198.0
+    row_pitch = 72.0
+    inner_x = 8.0
+    first_y_offset = 15.0
+    line_h = 10.5
+
+    labels_per_page = 30
+    printed_date = datetime.now().strftime("%m/%d/%Y")
+
+    for i, row in label_df.iterrows():
+        page_index = i % labels_per_page
+        if i > 0 and page_index == 0:
+            c.showPage()
+
+        col = page_index % 3
+        r = page_index // 3
+        x = left_margin + col * col_pitch
+        y_top = height - top_margin - r * row_pitch
+
+        name = _label_line(row.get("Name", ""))
+        house = _label_line(row.get("House Number", ""))
+        street_dir = _label_line(row.get("Street Direction", ""))
+        street_name = _label_line(row.get("Street Name", ""))
+        street_suffix = _label_line(row.get("Street Suffix", ""))
+        suite = normalize_unit_or_address2_value(row.get("Suite/Apt", ""))
+        addr2 = normalize_unit_or_address2_value(row.get("Address Line 2", ""))
+        city = _label_line(row.get("City", ""))
+        state = _label_line(row.get("State", "")).upper()
+        zip_code = _label_line(row.get("Zip", ""))
+
+        address1 = collapse_spaces(" ".join([p for p in [house, street_dir, street_name, street_suffix] if p]))
+        address2_parts = []
+        if suite:
+            address2_parts.append(suite)
+        if addr2 and addr2.upper() != suite.upper():
+            address2_parts.append(addr2)
+        address2 = collapse_spaces(" ".join(address2_parts))
+        city_state_zip = collapse_spaces(f"{city}, {state} {zip_code}".replace(" ,", ","))
+
+        text_x = x + inner_x
+        text_y = y_top - first_y_offset
+        max_text_w = label_w - (inner_x * 2) - 3
+
+        def _wrap_label_line(text, font_name, font_size, max_width, max_lines=2):
+            """Wrap label text without using ellipses. Keeps USPS/vendor labels readable."""
+            text = collapse_spaces(str(text or ""))
+            if not text:
+                return []
+            words = text.split(" ")
+            lines = []
+            current = ""
+            for word in words:
+                test = word if not current else current + " " + word
+                if c.stringWidth(test, font_name, font_size) <= max_width:
+                    current = test
+                else:
+                    if current:
+                        lines.append(current)
+                    current = word
+                    if len(lines) >= max_lines:
+                        break
+            if current and len(lines) < max_lines:
+                lines.append(current)
+            return lines
+
+        c.setFillColor(colors.black)
+        name_font = "Helvetica-Bold"
+        name_size = 8.7
+        body_font = "Helvetica"
+        body_size = 8.3
+        label_line_h = 9.4
+
+        name_lines = _wrap_label_line(name, name_font, name_size, max_text_w, max_lines=2)
+        y_cursor = text_y
+        c.setFont(name_font, name_size)
+        for line in name_lines:
+            c.drawString(text_x, y_cursor, line)
+            y_cursor -= label_line_h
+
+        c.setFont(body_font, body_size)
+        for line in [address1, address2, city_state_zip]:
+            if not line:
+                continue
+            # Address lines should not use ellipses either. Wrap long apartment/building lines if needed.
+            wrapped = _wrap_label_line(line, body_font, body_size, max_text_w, max_lines=2 if line == address2 else 1)
+            for wline in wrapped:
+                c.drawString(text_x, y_cursor, wline)
+                y_cursor -= label_line_h
+
+    c.save()
+    return buffer.getvalue()
 
 def dataframe_to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
+
+
+def _first_present_column(columns, candidates):
+    norm = {_norm_col_name(c): c for c in columns}
+    for cand in candidates:
+        hit = norm.get(_norm_col_name(cand))
+        if hit:
+            return hit
+    return None
+
+def build_export_area_counts_sheet(export_df: pd.DataFrame) -> pd.DataFrame:
+    """Build Sheet 1 counts for CSV-style exports only after Prepare is clicked."""
+    if export_df is None or export_df.empty:
+        return pd.DataFrame(columns=["Area Type", "Area", "Voters", "Households"])
+
+    df = export_df.copy()
+    cols = list(df.columns)
+    muni_col = _first_present_column(cols, ["Municipality", "municipality", "Muni", "City", "CITY"])
+    precinct_col = _first_present_column(cols, ["Precinct", "precinct", "Precinct Name", "PrecinctName"])
+
+    muni_values = []
+    if muni_col:
+        muni_values = sorted({normalize_export_text(v) for v in df[muni_col].tolist() if normalize_export_text(v)})
+
+    if muni_col and len(muni_values) > 1:
+        area_col = muni_col
+        area_type = "Municipality"
+    elif precinct_col:
+        area_col = precinct_col
+        area_type = "Precinct"
+    elif muni_col:
+        area_col = muni_col
+        area_type = "Municipality"
+    else:
+        df["_cc_area"] = "TOTAL"
+        area_col = "_cc_area"
+        area_type = "Total"
+
+    hh_col = _first_present_column(cols, ["HH_ID", "Household_ID", "Household ID", "HouseholdKey", "_HouseholdKey"])
+    if hh_col:
+        df["_cc_hh"] = df[hh_col].fillna("").astype(str).map(normalize_export_text)
+    else:
+        address_parts = []
+        for cand in ["House Number", "Street Direction", "Street Name", "Street Suffix", "Suite/Apt", "Address Line 2", "City", "State", "Zip", "PA ID Number"]:
+            col = _first_present_column(cols, [cand])
+            if col:
+                address_parts.append(df[col].fillna("").astype(str).map(normalize_export_text))
+        if address_parts:
+            key = address_parts[0]
+            for part in address_parts[1:]:
+                key = key + "|" + part
+            df["_cc_hh"] = key
+        else:
+            df["_cc_hh"] = df.index.astype(str)
+
+    df["_cc_area_label"] = df[area_col].fillna("").astype(str).map(normalize_export_text)
+    df.loc[df["_cc_area_label"].eq(""), "_cc_area_label"] = "(Blank)"
+
+    rows = []
+    for area, grp in df.groupby("_cc_area_label", dropna=False, sort=True):
+        hh_count = grp["_cc_hh"].replace("", pd.NA).dropna().nunique()
+        rows.append({"Area Type": area_type, "Area": area, "Voters": int(len(grp)), "Households": int(hh_count)})
+
+    total_households = df["_cc_hh"].replace("", pd.NA).dropna().nunique()
+    rows.append({"Area Type": "Total", "Area": "TOTAL", "Voters": int(len(df)), "Households": int(total_households)})
+    return pd.DataFrame(rows, columns=["Area Type", "Area", "Voters", "Households"])
+
+def dataframe_to_export_excel_bytes(export_df: pd.DataFrame, export_label: str = "Export") -> bytes:
+    output = BytesIO()
+    data_df = export_df.copy() if export_df is not None else pd.DataFrame()
+    counts_df = build_export_area_counts_sheet(data_df)
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        counts_df.to_excel(writer, sheet_name="Area Counts", index=False)
+        data_df.to_excel(writer, sheet_name="Data", index=False)
+        wb = writer.book
+        for ws in wb.worksheets:
+            ws.freeze_panes = "A2"
+            for col_cells in ws.columns:
+                max_len = 0
+                letter = col_cells[0].column_letter
+                for cell in col_cells[:200]:
+                    val = "" if cell.value is None else str(cell.value)
+                    max_len = max(max_len, len(val))
+                ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 42)
+    output.seek(0)
+    return output.getvalue()
 
 def sanitize_filename_part(value: str) -> str:
     s = normalize_export_text(value)
@@ -1414,9 +3681,9 @@ def build_turf_packet_zip(active_filters, mode: str, target_size: int = 50, volu
 
     df["Name"] = df.apply(full_name_from_row, axis=1)
     df["Address1"] = df.apply(build_address_line1_row, axis=1)
-    city_col = first_existing_detail(df.columns.tolist(), ["MailingCity", "Mailing City", "City", "MailCity"])
-    state_col = first_existing_detail(df.columns.tolist(), ["MailingState", "Mailing State", "State", "MailState"])
-    zip_col = first_existing_detail(df.columns.tolist(), ["MailingZip", "Mailing Zip", "ZIP", "Zip", "ZipCode", "ZIPCODE", "MailZip"])
+    city_col = first_existing_detail(df.columns.tolist(), ["MailingCity", "Mailing City", "City", "MailCity", "res_city", "ResidenceCity", "ResidentialCity"])
+    state_col = first_existing_detail(df.columns.tolist(), ["MailingState", "Mailing State", "State", "MailState", "res_state", "ResidenceState", "ResidentialState"])
+    zip_col = first_existing_detail(df.columns.tolist(), ["MailingZip", "Mailing Zip", "ZIP", "Zip", "ZipCode", "ZIPCODE", "MailZip", "res_zip", "ResidenceZip", "ResidentialZip"])
     if city_col and "City" not in df.columns:
         df["City"] = df[city_col]
     if state_col and "State" not in df.columns:
@@ -1552,6 +3819,141 @@ def parse_apartment_sort(value) -> tuple:
     return (1, s.upper(), 0)
 
 
+
+def normalize_unit_or_address2_value(value) -> str:
+    """Clean apartment / address-line-2 values for USPS-style exports.
+
+    Rules:
+    - Keep real units like A, 2, 12E, C47, C-47, Apt 330, Unit B.
+    - Keep PO Box values.
+    - Drop street types, complex/building words, and broken values like
+      APT, APTS, APT RD, APT DR, APT STEEPLE, APT WATERFORD.
+    """
+    s = normalize_export_text(value)
+    if not s:
+        return ""
+    s = s.replace(".", " ").replace(",", " ")
+    s = collapse_spaces(s)
+    up = s.upper().strip()
+
+    street_type_words = {
+        "ST", "STREET", "RD", "ROAD", "DR", "DRIVE", "LN", "LANE", "CIR", "CIRCLE",
+        "CT", "COURT", "AVE", "AVENUE", "BLVD", "BOULEVARD", "WAY", "PL", "PLACE",
+        "TER", "TERRACE", "PKWY", "PARKWAY", "HWY", "HIGHWAY", "PIKE", "TRL", "TRAIL",
+        "RDG", "RIDGE", "RUN", "N", "S", "E", "W", "NE", "NW", "SE", "SW"
+    }
+    unit_prefixes = {"APT", "APARTMENT", "APARTMENTS", "APTS", "UNIT", "STE", "SUITE", "#"}
+    bad_unit_words = street_type_words | unit_prefixes | {
+        "BLDG", "BUILDING", "FLOOR", "FL", "ROOM", "RM", "LOT",
+        "WATERFORD", "WATERTFORD", "STEEPLE", "STEEPLECHASE", "APTS", "APT"
+    }
+
+    if up in bad_unit_words:
+        return ""
+
+    # Keep real postal secondary lines.
+    if re.match(r"^(P\s*O\s*BOX|PO\s+BOX|BOX)\s+", up):
+        box_num = re.sub(r"^(P\s*O\s*BOX|PO\s+BOX|BOX)\s+", "", up).strip()
+        return collapse_spaces(f"PO Box {box_num}")
+
+    cleaned = up
+    for _ in range(4):
+        m = re.match(r"^(APT|APARTMENT|APARTMENTS|APTS|UNIT|STE|SUITE|#)\s*(.*)$", cleaned)
+        if not m:
+            break
+        cleaned = m.group(2).strip()
+
+    cleaned = cleaned.strip(" -#")
+    cleaned = collapse_spaces(cleaned)
+    if not cleaned:
+        return ""
+    if cleaned in bad_unit_words:
+        return ""
+
+    tokens = [t for t in re.split(r"\s+", cleaned) if t]
+    if tokens and all(t in bad_unit_words for t in tokens):
+        return ""
+
+    # Reject pure words/complex names. Good units almost always contain a digit,
+    # are a single letter, or are a short letter-number code like C47 / 12E / C-47.
+    compact = cleaned.replace("-", "").replace(" ", "")
+    if not re.fullmatch(r"[A-Z]?\d+[A-Z]?|[A-Z]\d+[A-Z]?|\d+[A-Z]|[A-Z]", compact):
+        return ""
+
+    return "Apt " + title_case_report_value(cleaned.replace(" ", "-" if "-" in cleaned else " "))
+
+
+def normalize_walk_address_label(value, address_value="", street_value="") -> str:
+    """Ensure walk sheet address headers read House Number + Street + Apt.
+    Also repairs older labels like 'Cape Horn Rd | 850'.
+    """
+    s = normalize_export_text(value)
+    if "|" in s:
+        parts = [collapse_spaces(p) for p in s.split("|") if collapse_spaces(p)]
+        if len(parts) >= 2:
+            first, second = parts[0], parts[1]
+            # If the first part looks like a street and second begins with a house number, reverse them.
+            if re.search(r"\b(ST|STREET|RD|ROAD|DR|DRIVE|LN|LANE|CIR|CIRCLE|CT|COURT|AVE|AVENUE|BLVD|WAY|PL|PLACE)\b", first.upper()) and re.match(r"^\d", second):
+                s = collapse_spaces(second + " " + first)
+            else:
+                s = collapse_spaces(" ".join(parts))
+    if not s:
+        s = collapse_spaces(" ".join([normalize_export_text(address_value), normalize_address_value(street_value)]))
+    return s
+
+
+def build_walk_address_display(house_value, street_value, unit_value="") -> str:
+    house = normalize_export_text(house_value)
+    street = normalize_address_value(street_value)
+    unit = normalize_unit_or_address2_value(unit_value)
+    return collapse_spaces(" ".join([x for x in [house, street, unit] if x]))
+
+
+def build_area_break_counts_from_street_df(street_df: pd.DataFrame) -> pd.DataFrame:
+    """Counts for Excel exports only. This runs only after the user clicks Prepare."""
+    if street_df is None or street_df.empty:
+        return pd.DataFrame(columns=["Area Type", "Area", "Voters", "Households"])
+
+    df = street_df.copy()
+    for col in ["Municipality", "Precinct", "StreetGroup", "AddressLine"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    muni_values = sorted({normalize_export_text(v) for v in df["Municipality"].tolist() if normalize_export_text(v)})
+    area_col = "Municipality" if len(muni_values) > 1 else "Precinct"
+    area_type = "Municipality" if area_col == "Municipality" else "Precinct"
+
+    df["_area"] = df[area_col].apply(normalize_export_text)
+    df.loc[df["_area"].eq(""), "_area"] = "(Blank)"
+    df["_hh_key"] = (
+        df["StreetGroup"].apply(normalize_export_text) + "|" +
+        df["AddressLine"].apply(normalize_export_text)
+    )
+
+    rows = []
+    for area, grp in df.groupby("_area", dropna=False, sort=True):
+        households = grp["_hh_key"].replace("", pd.NA).dropna().nunique()
+        rows.append({
+            "Area Type": area_type,
+            "Area": area,
+            "Voters": int(len(grp)),
+            "Households": int(households),
+        })
+
+    total_households = df["_hh_key"].replace("", pd.NA).dropna().nunique()
+    rows.append({
+        "Area Type": "Total",
+        "Area": "TOTAL",
+        "Voters": int(len(df)),
+        "Households": int(total_households),
+    })
+    return pd.DataFrame(rows, columns=["Area Type", "Area", "Voters", "Households"])
+
+
+def clear_prepared_download_state(key: str):
+    st.session_state.pop(key, None)
+
+
 def expand_party_label(code: str) -> str:
     mapping = {"R": "Republicans", "D": "Democrats", "O": "Others"}
     return mapping.get(normalize_export_text(code).upper(), normalize_export_text(code))
@@ -1629,8 +4031,19 @@ def build_filter_summary_lines(active_filters: dict) -> list[str]:
 
     mb_perm = active_filters.get("mb_perm_pick", []) or []
     if mb_perm:
-        expanded = ", ".join("Y" if normalize_export_text(v).upper() == "Y" else "N" for v in mb_perm)
-        lines.append(f"MB Perm: {expanded}")
+        expanded = ", ".join("Y" if normalize_export_text(v).upper() == "Y" else normalize_export_text(v) for v in mb_perm)
+        lines.append(f"Permanent Mail Ballot: {expanded}")
+
+    source_file = active_filters.get("source_file_pick", []) or []
+    if source_file:
+        lines.append(f"Current Mail Ballot Voters: {', '.join(map(str, source_file))}")
+    # Mail Ballot New Registrant is intentionally hidden from the main universe summary.
+    sent_status = active_filters.get("current_ballot_sent_status", "All")
+    if sent_status and sent_status != "All":
+        lines.append(f"Current Ballot Sent: {sent_status}")
+    returned_status = active_filters.get("current_ballot_returned_status", "All")
+    if returned_status and returned_status != "All":
+        lines.append(f"Current Ballot Returned: {returned_status}")
 
     for key, label in [("County","County"),("Precinct","Precinct"),("USC","USC"),("STS","STS"),("STH","STH"),("School District","School District"),
                        ("hh_party_pick","Household Party"),("calc_party_pick","Calculated Party"),("gender_pick","Gender"),
@@ -1641,10 +4054,14 @@ def build_filter_summary_lines(active_filters: dict) -> list[str]:
 
     if active_filters.get("new_reg_months", 0):
         lines.append(f"Newly Registered: within last {active_filters['new_reg_months']} month(s)")
-    for key, label in [("has_email","Email"),("has_landline","Landline"),("has_mobile","Mobile")]:
+    for key, label in [("has_email","Email"),("has_landline","Landline"),("has_mobile","Mobile"),("has_applicant_phone","Applicant Phone")]:
         val = active_filters.get(key)
         if val and val != "All":
             lines.append(f"{label}: {val}")
+    for key, label in [("applicant_phone_type_pick", "Applicant Phone Type"), ("applicant_phone_compliance_pick", "Applicant Phone Compliance")]:
+        val = active_filters.get(key) or []
+        if val:
+            lines.append(f"{label}: {', '.join(map(str, val))}")
     return lines or ["No additional filters selected"]
 
 
@@ -1685,7 +4102,7 @@ def apply_followup_preset(preset_name: str):
 
     st.session_state.active_filters = current
     st.session_state.filters_applied = True
-    st.session_state.workspace_mode = "universe"
+    st.session_state.workspace_mode = "landing"
     st.session_state.lookup_view_active = False
     st.rerun()
 
@@ -1945,10 +4362,40 @@ def get_street_results_sheet_bytes(active_filters):
         "FullName": "Name",
         "Sex": "Gender",
     })
+    counts_df = build_area_break_counts_from_street_df(street_df)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Street List Tracking"
+    ws_counts = wb.active
+    ws_counts.title = "Area Counts"
+    ws = wb.create_sheet("Street List Data")
+
+    title_fill = PatternFill("solid", fgColor="7A1523")
+    header_fill = PatternFill("solid", fgColor="9F2032")
+    header_font = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin", color="D7B7BC")
+
+    ws_counts["A1"] = "Candidate Connect Area Break Counts"
+    ws_counts["A1"].font = Font(bold=True, size=14, color="FFFFFF")
+    ws_counts["A1"].fill = title_fill
+    ws_counts["A2"] = f"Generated {datetime.now().strftime('%Y-%m-%d %I:%M %p')}"
+    ws_counts["A2"].font = Font(italic=True, size=10)
+    ws_counts.merge_cells(start_row=1, start_column=1, end_row=1, end_column=4)
+    ws_counts.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4)
+    for c, header in enumerate(counts_df.columns.tolist(), start=1):
+        cell = ws_counts.cell(row=4, column=c, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for r, row in enumerate(counts_df.itertuples(index=False), start=5):
+        for c, value in enumerate(row, start=1):
+            cell = ws_counts.cell(row=r, column=c, value=value)
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            if c in {3, 4}:
+                cell.alignment = Alignment(horizontal="center")
+    for letter, width in {"A": 18, "B": 36, "C": 14, "D": 14}.items():
+        ws_counts.column_dimensions[letter].width = width
+    ws_counts.freeze_panes = "A5"
 
     ws["A1"] = "Candidate Connect Street List Tracking Sheet"
     ws["A2"] = f"Generated {datetime.now().strftime('%Y-%m-%d %I:%M %p')}"
@@ -1957,20 +4404,18 @@ def get_street_results_sheet_bytes(active_filters):
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(export_df.columns))
     ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(export_df.columns))
     ws["A1"].font = Font(bold=True, size=14, color="FFFFFF")
-    ws["A1"].fill = PatternFill("solid", fgColor="7A1523")
+    ws["A1"].fill = title_fill
     ws["A1"].alignment = Alignment(horizontal="center")
     ws["A2"].font = Font(italic=True, size=10)
     ws["A3"].font = Font(size=10)
 
     headers = export_df.columns.tolist()
     header_row = 5
-    thin = Side(style="thin", color="D7B7BC")
-    header_fill = PatternFill("solid", fgColor="9F2032")
     check_fill = PatternFill("solid", fgColor="F9E8EA")
 
     for c, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=c, value=header)
-        cell.font = Font(bold=True, color="FFFFFF")
+        cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -2222,7 +4667,7 @@ def build_walk_sheet_tracking_excel_bytes(active_filters):
         export_df = pd.DataFrame({
             "Precinct": street_df["Precinct"].apply(normalize_export_text),
             "Street": street_df["StreetGroup"].apply(normalize_export_text),
-            "Address": street_df["AddressLine"].apply(normalize_export_text),
+            "Address": street_df["WalkAddressDisplay"].apply(normalize_export_text) if "WalkAddressDisplay" in street_df.columns else street_df["AddressLine"].apply(normalize_export_text),
             "Name": street_df["FullName"].apply(normalize_export_text),
             "Phone": street_df["Phone"].apply(normalize_export_text),
             "Party": street_df["Party"].apply(normalize_export_text),
@@ -2236,11 +4681,14 @@ def build_walk_sheet_tracking_excel_bytes(active_filters):
             "Notes": street_df.get("Walk Notes", pd.Series([""] * len(street_df))).apply(normalize_export_text),
         })
 
+    counts_df = build_area_break_counts_from_street_df(street_df)
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        export_df.to_excel(writer, sheet_name="Walk Sheet Tracking", index=False, startrow=4)
+        counts_df.to_excel(writer, sheet_name="Area Counts", index=False, startrow=3)
+        export_df.to_excel(writer, sheet_name="Walk Sheet Data", index=False, startrow=4)
         workbook = writer.book
-        worksheet = writer.sheets["Walk Sheet Tracking"]
+        counts_ws = writer.sheets["Area Counts"]
+        worksheet = writer.sheets["Walk Sheet Data"]
 
         title_font = Font(bold=True, size=14, color="7A1523")
         sub_font = Font(italic=True, size=10, color="555555")
@@ -2252,6 +4700,18 @@ def build_walk_sheet_tracking_excel_bytes(active_filters):
         note_fill = PatternFill(fill_type="solid", fgColor="FFF9F9")
         center_align = Alignment(horizontal="center", vertical="center")
         wrap_align = Alignment(vertical="top", wrap_text=True)
+
+        counts_ws["A1"] = "Candidate Connect Area Break Counts"
+        counts_ws["A1"].font = title_font
+        counts_ws["A2"] = f"Generated: {datetime.now().strftime('%m/%d/%Y %I:%M %p')}"
+        counts_ws["A2"].font = sub_font
+        for cell in counts_ws[4]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+        for col_letter, width in {"A": 18, "B": 36, "C": 14, "D": 14}.items():
+            counts_ws.column_dimensions[col_letter].width = width
+        counts_ws.freeze_panes = "A5"
 
         worksheet["A1"] = "Candidate Connect Walk Sheet Tracking Sheet"
         worksheet["A1"].font = title_font
@@ -2266,7 +4726,7 @@ def build_walk_sheet_tracking_excel_bytes(active_filters):
             cell.alignment = center_align
 
         width_map = {
-            "A": 14, "B": 22, "C": 16, "D": 28, "E": 18, "F": 8, "G": 9, "H": 8,
+            "A": 14, "B": 22, "C": 24, "D": 28, "E": 18, "F": 8, "G": 9, "H": 8,
             "I": 15, "J": 11, "K": 16, "L": 16, "M": 11, "N": 28
         }
         for col_letter, width in width_map.items():
@@ -2295,14 +4755,16 @@ def build_street_list_dataframe(active_filters):
     df = merge_uploaded_walk_results_into_detail_df(df)
     if df.empty:
         return pd.DataFrame(columns=[
-            "Precinct","StreetGroup","AddressLine","FullName","Phone","Party","Sex","Age","PA ID Number",
+            "Municipality","Precinct","StreetGroup","AddressLine","UnitDisplay","WalkAddressDisplay","FullName","Phone","Party","Sex","Age","PA ID Number",
             "F","A","U","NH","Yard Sign","Notes","Contacted","Result","Support Level","Follow-Up","Walk Notes","MB_Perm","HouseNumSort","AptSort"
         ])
 
+    municipality_col = first_existing_detail(df.columns.tolist(), ["Municipality"])
     precinct_col = first_existing_detail(df.columns.tolist(), ["Precinct"])
     street_col = first_existing_detail(df.columns.tolist(), ["Street Name"])
     house_col = first_existing_detail(df.columns.tolist(), ["House Number"])
     apt_col = first_existing_detail(df.columns.tolist(), ["Apartment Number"])
+    address2_col = first_existing_detail(df.columns.tolist(), ["Address Line 2", "AddressLine2", "Address 2"])
     sex_col = first_existing_detail(df.columns.tolist(), ["Gender", "Sex"])
     age_col = first_existing_detail(df.columns.tolist(), ["Age"])
     party_col = first_existing_detail(df.columns.tolist(), ["Party"])
@@ -2310,13 +4772,28 @@ def build_street_list_dataframe(active_filters):
     mb_perm_col = first_existing_detail(df.columns.tolist(), ["MB_PERM", "MB_Perm", "MB_Pern"])
 
     out = pd.DataFrame()
+    out["Municipality"] = df[municipality_col].apply(normalize_export_text) if municipality_col else ""
     out["Precinct"] = df[precinct_col].apply(normalize_export_text) if precinct_col else ""
-    out["StreetGroup"] = df[street_col].apply(normalize_address_value) if street_col else ""
-    house_vals = df[house_col].apply(normalize_export_text) if house_col else pd.Series([""] * len(df))
-    apt_vals = df[apt_col].apply(normalize_export_text) if apt_col else pd.Series([""] * len(df))
+    street_vals = df[street_col].apply(normalize_address_value) if street_col else pd.Series([""] * len(df), index=df.index)
+    house_vals = df[house_col].apply(normalize_export_text) if house_col else pd.Series([""] * len(df), index=df.index)
+    apt_raw_vals = df[apt_col].apply(normalize_export_text) if apt_col else pd.Series([""] * len(df), index=df.index)
+    addr2_raw_vals = df[address2_col].apply(normalize_export_text) if address2_col else pd.Series([""] * len(df), index=df.index)
+
+    apt_vals = apt_raw_vals.apply(normalize_unit_or_address2_value)
+    addr2_vals = addr2_raw_vals.apply(normalize_unit_or_address2_value)
+    unit_vals = apt_vals.copy()
+    unit_vals.loc[unit_vals.eq("") & addr2_vals.ne("")] = addr2_vals[unit_vals.eq("") & addr2_vals.ne("")]
+
+    out["StreetGroup"] = street_vals
+    out["UnitDisplay"] = unit_vals
     out["AddressLine"] = house_vals
-    out.loc[apt_vals != "", "AddressLine"] = out.loc[apt_vals != "", "AddressLine"] + " Apt " + apt_vals[apt_vals != ""]
+    out.loc[unit_vals.ne(""), "AddressLine"] = out.loc[unit_vals.ne(""), "AddressLine"] + " " + unit_vals[unit_vals.ne("")]
     out["AddressLine"] = out["AddressLine"].apply(collapse_spaces).apply(normalize_address_value)
+    out["WalkAddressDisplay"] = [
+        build_walk_address_display(h, s, u)
+        for h, s, u in zip(house_vals.tolist(), street_vals.tolist(), unit_vals.tolist())
+    ]
+
     out["FullName"] = df.apply(full_name_from_row, axis=1).apply(normalize_name_value)
     out["Phone"] = df.apply(choose_best_phone, axis=1)
     out["Party"] = df[party_col].apply(normalize_export_text) if party_col else ""
@@ -2336,10 +4813,11 @@ def build_street_list_dataframe(active_filters):
     out["Walk Notes"] = df["Walk Notes"].apply(normalize_export_text) if "Walk Notes" in df.columns else ""
     out["MB_Perm"] = df[mb_perm_col].apply(normalize_mb_perm_value) if mb_perm_col else ""
     out["HouseNumSort"] = house_vals.apply(parse_house_number)
-    out["AptSort"] = apt_vals.apply(parse_apartment_sort)
+    out["AptSort"] = unit_vals.apply(parse_apartment_sort)
 
     out = out.sort_values(by=["Precinct", "StreetGroup", "HouseNumSort", "AptSort", "FullName"], kind="stable").reset_index(drop=True)
     return out
+
 
 def build_precinct_summary(street_df: pd.DataFrame) -> pd.DataFrame:
     if street_df.empty:
@@ -2407,13 +4885,13 @@ def draw_brand(c, y_top):
     except Exception:
         pass
     try:
-        if TSS_LOGO.exists():
-            c.drawImage(ImageReader(str(TSS_LOGO)), width - 118, y_top - 28, width=78, height=24, preserveAspectRatio=True, mask='auto')
+        if get_reporting_tss_logo_path().exists():
+            c.drawImage(ImageReader(str(TSS_LOGO)), width - 132, y_top - 34, width=94, height=30, preserveAspectRatio=True, mask='auto')
     except Exception:
         pass
     c.setFillColor(REPORT_NAVY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawRightString(width - 40, y_top - 6, "Powered By")
+    c.setFont("Helvetica-Bold", 5.5)
+    c.drawCentredString(width - 85, y_top - 5, "Powered By")
 
 def _street_pdf_precinct_pages(street_df: pd.DataFrame):
     body_top = 480
@@ -2479,7 +4957,7 @@ def _draw_cover_page(c, width, height, county_desc, party_desc, printed_date, to
         c.setFillColor(REPORT_NAVY)
         c.setFont("Helvetica-Bold", 10)
         c.drawCentredString(width / 2, 84, "Powered By")
-        if TSS_LOGO.exists():
+        if get_reporting_tss_logo_path().exists():
             c.drawImage(ImageReader(str(TSS_LOGO)), width/2 - 48, 42, width=96, height=30, preserveAspectRatio=True, mask='auto')
     except Exception:
         pass
@@ -2638,7 +5116,7 @@ def generate_street_list_pdf_bytes(active_filters):
                 c.rect(52, y - 8, width - 104, 12, fill=1, stroke=0)
 
                 c.setFillColor(colors.black)
-                c.drawString(cols["Full Name"], y - 5, truncate_text(row["FullName"], 34))
+                c.drawString(cols["Full Name"], y - 5, truncate_text(normalize_export_text(row.get("FullName", "")) or full_name_from_row(row), 34))
                 c.drawString(cols["Phone"], y - 5, truncate_text(row["Phone"], 22))
                 c.drawString(cols["Party"], y - 5, truncate_text(row["Party"], 2))
                 c.drawString(cols["Sex"], y - 5, truncate_text(row["Sex"], 1))
@@ -2678,10 +5156,12 @@ def _make_walk_sheet_groups(active_filters):
         precinct_df = precinct_df.sort_values(["StreetGroup", "HouseNumSort", "AptSort", "FullName"], kind="stable")
         for (street, address), addr_grp in precinct_df.groupby(["StreetGroup", "AddressLine"], sort=False, dropna=False):
             addr_grp = addr_grp.reset_index(drop=True)
+            display_address = normalize_export_text(addr_grp["WalkAddressDisplay"].iloc[0]) if "WalkAddressDisplay" in addr_grp.columns and len(addr_grp) else ""
             groups.append({
                 "precinct": normalize_export_text(precinct),
                 "street": normalize_export_text(street),
                 "address": normalize_export_text(address),
+                "display_address": normalize_walk_address_label(display_address, normalize_export_text(address), normalize_export_text(street)),
                 "rows": addr_grp.to_dict("records"),
             })
     return street_df, groups
@@ -2792,7 +5272,12 @@ def generate_walk_sheet_pdf_bytes(active_filters):
         c.roundRect(24, y - 15, width - 48, 17, 6, fill=1, stroke=0)
         c.setFillColor(REPORT_NAVY)
         c.setFont("Helvetica-Bold", 10)
-        c.drawString(32, y - 10, truncate_text(f"{group['street']}  |  {group['address']}", 110))
+        address_label = normalize_walk_address_label(
+            group.get("display_address", ""),
+            group.get("address", ""),
+            group.get("street", ""),
+        )
+        c.drawString(32, y - 10, truncate_text(address_label, 110))
         y -= address_h
 
         for row in group["rows"]:
@@ -2816,7 +5301,7 @@ def generate_walk_sheet_pdf_bytes(active_filters):
 
             c.setFillColor(colors.black)
             c.setFont("Helvetica-Bold", 10)
-            c.drawString(92, row_y - 6, truncate_text(row.get("FullName", ""), 32))
+            c.drawString(92, row_y - 6, truncate_text(normalize_export_text(row.get("FullName", "")) or full_name_from_row(row), 32))
 
             detail = " / ".join(
                 part for part in [
@@ -2849,14 +5334,16 @@ def build_street_list_dataframe_from_detail_df(df: pd.DataFrame):
     df = merge_uploaded_walk_results_into_detail_df(df)
     if df is None or df.empty:
         return pd.DataFrame(columns=[
-            "Precinct","StreetGroup","AddressLine","FullName","Phone","Party","Sex","Age","PA ID Number",
+            "Municipality","Precinct","StreetGroup","AddressLine","UnitDisplay","WalkAddressDisplay","FullName","Phone","Party","Sex","Age","PA ID Number",
             "F","A","U","NH","Yard Sign","Notes","Contacted","Result","Support Level","Follow-Up","Walk Notes","MB_Perm","HouseNumSort","AptSort"
         ])
 
+    municipality_col = first_existing_detail(df.columns.tolist(), ["Municipality"])
     precinct_col = first_existing_detail(df.columns.tolist(), ["Precinct"])
     street_col = first_existing_detail(df.columns.tolist(), ["Street Name"])
     house_col = first_existing_detail(df.columns.tolist(), ["House Number"])
     apt_col = first_existing_detail(df.columns.tolist(), ["Apartment Number"])
+    address2_col = first_existing_detail(df.columns.tolist(), ["Address Line 2", "AddressLine2", "Address 2"])
     sex_col = first_existing_detail(df.columns.tolist(), ["Gender", "Sex"])
     age_col = first_existing_detail(df.columns.tolist(), ["Age"])
     party_col = first_existing_detail(df.columns.tolist(), ["Party"])
@@ -2864,13 +5351,28 @@ def build_street_list_dataframe_from_detail_df(df: pd.DataFrame):
     mb_perm_col = first_existing_detail(df.columns.tolist(), ["MB_PERM", "MB_Perm", "MB_Pern"])
 
     out = pd.DataFrame()
+    out["Municipality"] = df[municipality_col].apply(normalize_export_text) if municipality_col else ""
     out["Precinct"] = df[precinct_col].apply(normalize_export_text) if precinct_col else ""
-    out["StreetGroup"] = df[street_col].apply(normalize_address_value) if street_col else ""
-    house_vals = df[house_col].apply(normalize_export_text) if house_col else pd.Series([""] * len(df))
-    apt_vals = df[apt_col].apply(normalize_export_text) if apt_col else pd.Series([""] * len(df))
+    street_vals = df[street_col].apply(normalize_address_value) if street_col else pd.Series([""] * len(df), index=df.index)
+    house_vals = df[house_col].apply(normalize_export_text) if house_col else pd.Series([""] * len(df), index=df.index)
+    apt_raw_vals = df[apt_col].apply(normalize_export_text) if apt_col else pd.Series([""] * len(df), index=df.index)
+    addr2_raw_vals = df[address2_col].apply(normalize_export_text) if address2_col else pd.Series([""] * len(df), index=df.index)
+
+    apt_vals = apt_raw_vals.apply(normalize_unit_or_address2_value)
+    addr2_vals = addr2_raw_vals.apply(normalize_unit_or_address2_value)
+    unit_vals = apt_vals.copy()
+    unit_vals.loc[unit_vals.eq("") & addr2_vals.ne("")] = addr2_vals[unit_vals.eq("") & addr2_vals.ne("")]
+
+    out["StreetGroup"] = street_vals
+    out["UnitDisplay"] = unit_vals
     out["AddressLine"] = house_vals
-    out.loc[apt_vals != "", "AddressLine"] = out.loc[apt_vals != "", "AddressLine"] + " Apt " + apt_vals[apt_vals != ""]
+    out.loc[unit_vals.ne(""), "AddressLine"] = out.loc[unit_vals.ne(""), "AddressLine"] + " " + unit_vals[unit_vals.ne("")]
     out["AddressLine"] = out["AddressLine"].apply(collapse_spaces).apply(normalize_address_value)
+    out["WalkAddressDisplay"] = [
+        build_walk_address_display(h, s, u)
+        for h, s, u in zip(house_vals.tolist(), street_vals.tolist(), unit_vals.tolist())
+    ]
+
     out["FullName"] = df.apply(full_name_from_row, axis=1).apply(normalize_name_value)
     out["Phone"] = df.apply(choose_best_phone, axis=1)
     out["Party"] = df[party_col].apply(normalize_export_text) if party_col else ""
@@ -2890,10 +5392,10 @@ def build_street_list_dataframe_from_detail_df(df: pd.DataFrame):
     out["Walk Notes"] = df["Walk Notes"].apply(normalize_export_text) if "Walk Notes" in df.columns else ""
     out["MB_Perm"] = df[mb_perm_col].apply(normalize_mb_perm_value) if mb_perm_col else ""
     out["HouseNumSort"] = house_vals.apply(parse_house_number)
-    out["AptSort"] = apt_vals.apply(parse_apartment_sort)
-
+    out["AptSort"] = unit_vals.apply(parse_apartment_sort)
     out = out.sort_values(by=["Precinct", "StreetGroup", "HouseNumSort", "AptSort", "FullName"], kind="stable").reset_index(drop=True)
     return out
+
 
 def make_walk_sheet_groups_from_street_df(street_df: pd.DataFrame):
     if street_df is None or street_df.empty:
@@ -2904,10 +5406,12 @@ def make_walk_sheet_groups_from_street_df(street_df: pd.DataFrame):
         precinct_df = precinct_df.sort_values(["StreetGroup", "HouseNumSort", "AptSort", "FullName"], kind="stable")
         for (street, address), addr_grp in precinct_df.groupby(["StreetGroup", "AddressLine"], sort=False, dropna=False):
             addr_grp = addr_grp.reset_index(drop=True)
+            display_address = normalize_export_text(addr_grp["WalkAddressDisplay"].iloc[0]) if "WalkAddressDisplay" in addr_grp.columns and len(addr_grp) else ""
             groups.append({
                 "precinct": normalize_export_text(precinct),
                 "street": normalize_export_text(street),
                 "address": normalize_export_text(address),
+                "display_address": normalize_walk_address_label(display_address, normalize_export_text(address), normalize_export_text(street)),
                 "rows": addr_grp.to_dict("records"),
             })
     return groups
@@ -2962,7 +5466,12 @@ def generate_walk_sheet_pdf_from_street_df(street_df: pd.DataFrame, title: str, 
         c.roundRect(24, y - 15, width - 48, 17, 6, fill=1, stroke=0)
         c.setFillColor(REPORT_NAVY)
         c.setFont("Helvetica-Bold", 10)
-        c.drawString(32, y - 10, truncate_text(f"{group['street']}  |  {group['address']}", 110))
+        address_label = normalize_walk_address_label(
+            group.get("display_address", ""),
+            group.get("address", ""),
+            group.get("street", ""),
+        )
+        c.drawString(32, y - 10, truncate_text(address_label, 110))
         y -= address_h
 
         for row in group["rows"]:
@@ -2974,7 +5483,7 @@ def generate_walk_sheet_pdf_from_street_df(street_df: pd.DataFrame, title: str, 
 
             c.setFillColor(colors.black)
             c.setFont("Helvetica-Bold", 10)
-            c.drawString(92, row_y - 6, truncate_text(row.get("FullName", ""), 32))
+            c.drawString(92, row_y - 6, truncate_text(normalize_export_text(row.get("FullName", "")) or full_name_from_row(row), 32))
 
             detail = " / ".join(
                 part for part in [
@@ -3162,6 +5671,7 @@ def generate_summary_report_pdf_bytes(active_filters, columns):
 
 
 cc_logo_uri = img_to_data_uri(CC_LOGO)
+# Use the real uploaded The Political Technology Company logo.
 tss_logo_uri = img_to_data_uri(TSS_LOGO)
 
 header_html = f"""
@@ -3170,15 +5680,193 @@ header_html = f"""
     <div class="brand-left">{f'<img class="logo-cc" src="{cc_logo_uri}"/>' if cc_logo_uri else ''}</div>
     <div class="brand-center">
       <div class="brand-title">Candidate Connect</div>
-      <div class="brand-sub">DuckDB + R2 Pass 1: Fast counts and filters on R2 index shards</div>
-      <div class="brand-status">Storage: Cloudflare R2 Public Read &nbsp;&nbsp;|&nbsp;&nbsp; Last Local Manifest: {file_modified_text(LOCAL_MANIFEST)}</div>
+      <div class="brand-sub">VOTER DATA & ENGAGEMENT PLATFORM</div>
+      <div class="brand-status">Campaign Intelligence Workspace</div>
     </div>
-    <div class="brand-right"><div class="powered-by">Powered By</div>{f'<img class="logo-tss" src="{tss_logo_uri}"/>' if tss_logo_uri else ''}</div>
+    <div class="brand-right"><img class="logo-tss" src="{tss_logo_uri}" alt="The Political Technology Company"/></div>
   </div>
 </div>
 """
 st.markdown(header_html, unsafe_allow_html=True)
 
+
+
+
+def _cc_html_escape(value) -> str:
+    return str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+
+def _cc_open_pct(part, total) -> float:
+    try:
+        return 0.0 if float(total) <= 0 else (float(part) / float(total)) * 100.0
+    except Exception:
+        return 0.0
+
+
+def _cc_count_from_chart(df: pd.DataFrame, label_col: str, label_value: str) -> int:
+    try:
+        if df is None or df.empty or label_col not in df.columns or 'Count' not in df.columns:
+            return 0
+        hit = df[df[label_col].astype(str).str.upper().eq(str(label_value).upper())]
+        if hit.empty:
+            return 0
+        return safe_int(pd.to_numeric(hit['Count'], errors='coerce').fillna(0).sum())
+    except Exception:
+        return 0
+
+
+def _cc_open_bar_html(age_df: pd.DataFrame) -> str:
+    preferred = ['18-24', '25-34', '35-44', '45-54', '55-64', '65-74', '75-84', '85+']
+    rows = []
+    if age_df is not None and not age_df.empty:
+        temp = age_df.copy()
+        temp['Count'] = pd.to_numeric(temp['Count'], errors='coerce').fillna(0)
+        for bucket in preferred:
+            match = temp[temp['Age Range'].astype(str).eq(bucket)] if 'Age Range' in temp.columns else pd.DataFrame()
+            count = float(match['Count'].sum()) if not match.empty else 0.0
+            rows.append((bucket, count))
+    if not rows:
+        rows = [(b, 0.0) for b in preferred]
+    max_count = max([v for _, v in rows] + [1])
+    bars = []
+    labels = []
+    for label, count in rows:
+        h = max(20, int((count / max_count) * 205)) if max_count else 20
+        bars.append(f'<div class="cc-open-bar-wrap"><div class="cc-open-bar-value">{fmt_pct(_cc_open_pct(count, sum(v for _, v in rows)))}</div><div class="cc-bar" style="height:{h}px"></div></div>')
+        labels.append(f'<div>{_cc_html_escape(label)}</div>')
+    return '<div class="cc-bars">' + ''.join(bars) + '</div><div class="cc-bar-labels">' + ''.join(labels) + '</div>'
+
+
+def _cc_open_donut_html(values, center_label='Total', center_sub='Universe') -> str:
+    total = sum(max(0, float(v[1])) for v in values) or 1.0
+    start = 0.0
+    stops = []
+    for _label, count, color in values:
+        pct = max(0.0, float(count)) / total * 100.0
+        end = start + pct
+        stops.append(f'{color} {start:.3f}% {end:.3f}%')
+        start = end
+    gradient = ', '.join(stops) if stops else '#334155 0 100%'
+    return f'<div class="cc-donut" style="background:conic-gradient({gradient});"><div class="cc-donut-center"><b>{_cc_html_escape(center_label)}</b><span>{_cc_html_escape(center_sub)}</span></div></div>'
+
+
+
+def _cc_open_icon_html(kind: str) -> str:
+    """KPI icons loaded from PNG files in the same folder as app.py."""
+    icon_map = {
+        "people": Path("icon_total_voters.png"),
+        "elephant": Path("icon_republican.png"),
+        "donkey": Path("icon_democrat.png"),
+        "person": Path("icon_other.png"),
+        "unknown": Path("icon_unknown.png"),
+    }
+    path = icon_map.get(kind)
+    if path and path.exists():
+        return f'<img src="{img_to_data_uri(path)}" alt="{kind} icon"/>'
+    # Fallbacks if the PNG files are accidentally missing.
+    if kind == "people":
+        return '<svg viewBox="0 0 64 64"><circle cx="24" cy="23" r="9"/><circle cx="43" cy="25" r="8"/><path d="M8 54c1-13 9-21 20-21s19 8 20 21z"/><path d="M36 54c1-10 7-16 16-16 6 0 11 4 13 11v5z" opacity=".75"/></svg>'
+    if kind == "elephant":
+        return '<svg viewBox="0 0 64 64"><path d="M10 34c0-11 9-20 23-20h12c7 0 12 5 12 12v11c0 8-7 15-15 15H23c-7 0-13-5-13-12z"/><path d="M45 25h13v14c0 5-4 9-9 9h-4z"/><path d="M13 36H5c0-7 3-13 8-17z"/><circle cx="29" cy="28" r="3" fill="#07101A"/><rect x="18" y="49" width="7" height="10" rx="2"/><rect x="39" y="49" width="7" height="10" rx="2"/></svg>'
+    if kind == "donkey":
+        return '<span class="dletter">D</span>'
+    if kind == "person":
+        return '<svg viewBox="0 0 64 64"><circle cx="32" cy="21" r="11"/><path d="M13 56c2-14 10-22 19-22s17 8 19 22z"/></svg>'
+    return '<span class="dletter">?</span>'
+
+def render_opening_dashboard_preview():
+    """Fast right-pane statewide opening dashboard shown before Apply Filters is clicked."""
+    active = st.session_state.get('active_filters', {}) or {}
+    columns = st.session_state.get('columns', []) or []
+    preview_active = dict(active)
+
+    try:
+        metrics = query_metrics(preview_active, columns)
+    except Exception:
+        metrics = {'voters': 0, 'households': None, 'emails': 0, 'mobiles': 0, 'unique_precincts': 0}
+
+    try:
+        party_df = query_chart(preview_active, columns, '_PartyNorm', 'Party')
+    except Exception:
+        party_df = pd.DataFrame(columns=['Party', 'Count'])
+    try:
+        gender_df = query_chart(preview_active, columns, '_Gender', 'Gender')
+    except Exception:
+        gender_df = pd.DataFrame(columns=['Gender', 'Count'])
+    try:
+        age_df = query_chart(preview_active, columns, '_AgeRange', 'Age Range')
+    except Exception:
+        age_df = pd.DataFrame(columns=['Age Range', 'Count'])
+
+    voters = safe_int(metrics.get('voters'))
+    r_count = _cc_count_from_chart(party_df, 'Party', 'R')
+    d_count = _cc_count_from_chart(party_df, 'Party', 'D')
+    o_count = _cc_count_from_chart(party_df, 'Party', 'O')
+    unknown_count = max(0, voters - r_count - d_count - o_count)
+
+    f_count = _cc_count_from_chart(gender_df, 'Gender', 'F')
+    m_count = _cc_count_from_chart(gender_df, 'Gender', 'M')
+    u_count = max(0, safe_int(pd.to_numeric(gender_df.get('Count', pd.Series(dtype=float)), errors='coerce').fillna(0).sum()) - f_count - m_count)
+
+    party_donut = _cc_open_donut_html([
+        ('Republican', r_count, CC_THEME['rep_red']),
+        ('Democrat', d_count, CC_THEME['dem_blue']),
+        ('Other', o_count, CC_THEME['other_green']),
+        ('Unknown', unknown_count, CC_THEME['brand_gold']),
+    ], f'{voters:,}', 'Total')
+    gender_donut = _cc_open_donut_html([
+        ('Female', f_count, CC_THEME['rep_red']),
+        ('Male', m_count, CC_THEME['dem_blue']),
+        ('Other / Unknown', u_count, CC_THEME['other_green']),
+    ], f'{(f_count + m_count + u_count):,}', 'Total')
+
+    metric_cards = [
+        ('TOTAL VOTERS', f'{voters:,}', 'red', _cc_open_icon_html('people')),
+        ('REPUBLICAN', f'{r_count:,}', 'red', _cc_open_icon_html('elephant')),
+        ('DEMOCRAT', f'{d_count:,}', 'blue', _cc_open_icon_html('donkey')),
+        ('OTHER / UNAFFILIATED', f'{o_count:,}', 'green', _cc_open_icon_html('person')),
+    ]
+    metric_html = ''.join([
+        f'<div class="cc-open-metric {klass}"><div class="icon">{icon}</div><div><div class="label">{label}</div><div class="value">{value}</div><div class="sub">{fmt_pct(_cc_open_pct(int(value.replace(",", "")) if value.replace(",", "").isdigit() else 0, voters))} of universe</div></div></div>'
+        for label, value, klass, icon in metric_cards
+    ])
+
+    party_legend = ''.join([
+        f'<div class="cc-legend-row"><span><i class="cc-dot" style="background:{color}"></i>{label}</span><b>{count:,} ({fmt_pct(_cc_open_pct(count, voters))})</b></div>'
+        for label, count, color in [
+            ('Republican', r_count, CC_THEME['rep_red']),
+            ('Democrat', d_count, CC_THEME['dem_blue']),
+            ('Other / Unaffiliated', o_count, CC_THEME['other_green']),
+            ('Unknown', unknown_count, CC_THEME['brand_gold']),
+        ]
+    ])
+    gender_legend = ''.join([
+        f'<div class="cc-legend-row"><span><i class="cc-dot" style="background:{color}"></i>{label}</span><b>{count:,} ({fmt_pct(_cc_open_pct(count, max(1, f_count + m_count + u_count)))})</b></div>'
+        for label, count, color in [
+            ('Female', f_count, CC_THEME['rep_red']),
+            ('Male', m_count, CC_THEME['dem_blue']),
+            ('Other / Unknown', u_count, CC_THEME['other_green']),
+        ]
+    ])
+
+    geo_rows = ''.join([
+        f'<tr><td>{geo}</td><td>{voters:,}</td><td class="red">{r_count:,} ({fmt_pct(_cc_open_pct(r_count, voters))})</td><td class="blue">{d_count:,} ({fmt_pct(_cc_open_pct(d_count, voters))})</td><td class="green">{o_count:,} ({fmt_pct(_cc_open_pct(o_count, voters))})</td><td class="gold">{unknown_count:,} ({fmt_pct(_cc_open_pct(unknown_count, voters))})</td></tr>'
+        for geo in ['US Congress', 'State Senate', 'State House']
+    ])
+
+    html = f'''
+    <div class="cc-opening-dashboard">
+      <div class="cc-open-metrics">{metric_html}</div>
+      <div class="cc-open-main-grid">
+        <div class="cc-open-card party-card"><h3>VOTERS BY PARTY <span>•••</span></h3><div class="cc-open-split"><div>{party_donut}</div><div>{party_legend}</div></div><p>Universe: All Voters</p></div>
+        <div class="cc-open-card age-card"><h3>VOTERS BY AGE RANGE <span>•••</span></h3>{_cc_open_bar_html(age_df)}<p>Universe: All Voters</p></div>
+        <div class="cc-open-card gender-card"><h3>VOTERS BY GENDER <span>•••</span></h3><div class="cc-open-split"><div>{gender_donut}</div><div>{gender_legend}</div></div><p>Universe: All Voters</p></div>
+        <div class="cc-open-card geo-card"><h3>VOTERS BY GEOGRAPHY <span>•••</span></h3><table class="cc-open-table"><thead><tr><th>Geography</th><th>Total Voters</th><th>Republican</th><th>Democrat</th><th>Other / Unaffiliated</th></tr></thead><tbody>{geo_rows}</tbody></table><p>Universe: All Voters</p></div>
+      </div>
+      <div class="cc-open-note">Use the sidebar to build a campaign universe.</div>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def format_lookup_date(value) -> str:
@@ -3240,11 +5928,33 @@ def sanitize_selectbox_value(current_value, option_values, fallback=None):
         return fallback
     return options_list[0]
 
+def sanitize_slider_range(current_value, low, high, numeric_type=int):
+    """Keep saved slider defaults inside the current data range.
+
+    Streamlit raises an exception when a saved universe has slider values
+    outside the available min/max for the current dataset. This helper lets
+    saved filters load safely after data changes.
+    """
+    try:
+        if not isinstance(current_value, (list, tuple)) or len(current_value) != 2:
+            return (numeric_type(low), numeric_type(high))
+        a = numeric_type(current_value[0])
+        b = numeric_type(current_value[1])
+        lo = numeric_type(low)
+        hi = numeric_type(high)
+        a = max(lo, min(a, hi))
+        b = max(lo, min(b, hi))
+        if a > b:
+            a, b = b, a
+        return (a, b)
+    except Exception:
+        return (numeric_type(low), numeric_type(high))
+
+
 
 def get_detail_columns(detail_paths):
     con = get_conn()
-    paths_sql = "[" + ", ".join(sql_string_literal(p) for p in detail_paths) + "]"
-    df = con.execute(f"DESCRIBE SELECT * FROM read_parquet({paths_sql}, union_by_name=True)").df()
+    df = con.execute(f"DESCRIBE SELECT * FROM {dataset_scan_sql(detail_paths)}").df()
     return df["column_name"].tolist()
 
 
@@ -3257,12 +5967,11 @@ def _detail_col_expr(columns, candidates, fallback="''"):
 
 @st.cache_data(show_spinner=False)
 def get_detail_distinct_values(detail_paths, column_name: str):
-    paths_sql = "[" + ", ".join(sql_string_literal(p) for p in detail_paths) + "]"
     qcol = quote_ident(column_name)
     df = get_conn().execute(
         f'''
         SELECT DISTINCT trim(cast({qcol} as varchar)) AS value
-        FROM read_parquet({paths_sql}, union_by_name=True)
+        FROM {dataset_scan_sql(detail_paths)}
         WHERE nullif(trim(cast({qcol} as varchar)), '') IS NOT NULL
         ORDER BY 1
         '''
@@ -3438,7 +6147,8 @@ def search_voters_for_lookup(active_filters, search_text: str, limit: int = 50, 
         ORDER BY {order_sql}
         LIMIT {int(limit)}
     '''
-    return get_conn().execute(sql, params).df()
+    df = get_conn().execute(sql, params).df()
+    return apply_voter_corrections_to_df(df)
 
 def get_lookup_selected_row(results_df: pd.DataFrame):
     if results_df is None or results_df.empty:
@@ -3569,7 +6279,7 @@ def render_lookup_field_block(title: str, rows: list[tuple[str, str]]):
     if not clean_rows:
         st.caption("No data available")
     else:
-        st.dataframe(pd.DataFrame(clean_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(clean_rows), width="stretch", hide_index=True)
 
 
 def format_vote_method_label(value: str) -> str:
@@ -3590,27 +6300,106 @@ def vote_method_icon(value: str) -> str:
 
 
 def vote_method_title(value: str) -> str:
-    raw = normalize_export_text(value).upper()
+    raw = normalize_export_text(value).upper().strip()
     if raw == "MB":
         return "Mail Ballot"
-    if raw == "AP":
+    if raw in {"AP", "IP", "AT POLL", "AT POLLS", "POLL", "POLLING PLACE"}:
         return "At Poll"
-    if raw in {"PROVISIONAL", "PV", "P"}:
+    if raw in {"PROVISIONAL", "PV", "PROV"}:
         return "Provisional"
     return "Did Not Vote"
 
 
-def render_lookup_vote_history_matrix(row, election_prefix: str, title: str, start_year: int = 26, end_year: int = 20):
-    years = list(range(start_year, end_year - 1, -1))
+def is_did_not_vote_value(value: str) -> bool:
+    raw = normalize_export_text(value).upper().strip()
+    return raw in {"", "0", "O", "N", "NO", "DID NOT VOTE", "DNV", "NONE", "NAN", "NULL", "-", "—"}
+
+
+def _lookup_election_years(row, election_prefix: str, max_year: int = 25, lookback_years: int = 10) -> list[int]:
+    """Detect available election years from the actual voter row.
+
+    Pipeline columns are usually G24_method / G24_party and P24_method / P24_party,
+    while older lookup code expected G24_VM / G24_P. This keeps lookup compatible
+    with both schemas and intentionally skips 2026 until that election is loaded.
+    """
+    prefix = str(election_prefix).upper()
+    found = set()
+    try:
+        cols = list(row.index)
+    except Exception:
+        cols = []
+    pat = re.compile(rf"^{re.escape(prefix)}(\d{{2}})(?:_(?:METHOD|PARTY|VM|P))$", re.IGNORECASE)
+    for col in cols:
+        m = pat.match(str(col).strip())
+        if not m:
+            continue
+        yy = int(m.group(1))
+        if yy <= max_year and yy >= max_year - lookback_years + 1:
+            found.add(yy)
+    if found:
+        return sorted(found, reverse=True)
+    return list(range(max_year, max_year - lookback_years, -1))
+
+
+def _lookup_election_method(row, prefix: str, yy: int) -> str:
+    prefix = str(prefix).upper()
+    candidates = [
+        f"{prefix}{yy}_method", f"{prefix}{yy}_METHOD",
+        f"{prefix}{yy}_VoteMethod", f"{prefix}{yy}_Vote_Method",
+        f"{prefix}{yy}_VM", f"{prefix}{yy}_Method",
+        f"{prefix}{yy} method", f"{prefix}{yy} METHOD",
+        f"{prefix}{yy}",
+    ]
+    direct = normalize_export_text(get_lookup_value(row, candidates)).upper()
+    if direct:
+        return direct
+
+    # Broader legacy fallback: find any column for this election year that looks like a method/vote-method field.
+    pat = re.compile(rf"^{re.escape(prefix)}0?{yy}(?:[^A-Z0-9]*(?:METHOD|VOTEMETHOD|VOTE_METHOD|VM))$", re.IGNORECASE)
+    try:
+        for col in row.index:
+            if pat.match(str(col).strip()):
+                val = normalize_export_text(row[col]).upper()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return ""
+
+
+def _lookup_election_party(row, prefix: str, yy: int) -> str:
+    prefix = str(prefix).upper()
+    candidates = [
+        f"{prefix}{yy}_party", f"{prefix}{yy}_PARTY",
+        f"{prefix}{yy}_Party", f"{prefix}{yy}_P",
+        f"{prefix}{yy} party", f"{prefix}{yy} PARTY",
+    ]
+    direct = normalize_export_text(get_lookup_value(row, candidates)).upper()
+    if direct:
+        return direct
+    pat = re.compile(rf"^{re.escape(prefix)}0?{yy}(?:[^A-Z0-9]*(?:PARTY|P))$", re.IGNORECASE)
+    try:
+        for col in row.index:
+            if pat.match(str(col).strip()):
+                val = normalize_export_text(row[col]).upper()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return ""
+
+
+def render_lookup_vote_history_matrix(row, election_prefix: str, title: str, start_year: int = 25, end_year: int = 16):
+    years = _lookup_election_years(row, election_prefix, max_year=start_year, lookback_years=(start_year - end_year + 1))
     header_cells = ''.join([f'<th>{election_prefix}{yy}</th>' for yy in years])
     party_cells = []
     method_cells = []
     for yy in years:
-        party_val = get_lookup_value(row, [f"{election_prefix}{yy}_P"]).upper() or "—"
-        vm_raw = normalize_export_text(get_lookup_value(row, [f"{election_prefix}{yy}_VM"])).upper()
-        not_voted = vm_raw == ""
+        vm_raw = _lookup_election_method(row, election_prefix, yy)
+        not_voted = is_did_not_vote_value(vm_raw)
+        party_val = "" if not_voted else (_lookup_election_party(row, election_prefix, yy) or "")
         cell_class = "lookup-vh-cell lookup-vh-dnv" if not_voted else "lookup-vh-cell"
-        method_text = vote_method_icon(vm_raw) if vm_raw else ""
+        method_text = "" if not_voted else vote_method_icon(vm_raw)
         title_attr = vote_method_title(vm_raw)
         party_cells.append(f'<td class="{cell_class}">{party_val}</td>')
         method_cells.append(f'<td class="{cell_class}" title="{title_attr}">{method_text}</td>')
@@ -3679,8 +6468,8 @@ def _pdf_vote_method_code(vm_raw: str) -> str:
     return "DNV"
 
 
-def _draw_pdf_vote_history_table(c, row, x, y, title, prefix, start_year=26, end_year=20):
-    years = list(range(start_year, end_year - 1, -1))
+def _draw_pdf_vote_history_table(c, row, x, y, title, prefix, start_year=25, end_year=16):
+    years = _lookup_election_years(row, prefix, max_year=start_year, lookback_years=(start_year - end_year + 1))
     cell_w = 48
     row_h = 20
     label_w = 56
@@ -3706,13 +6495,13 @@ def _draw_pdf_vote_history_table(c, row, x, y, title, prefix, start_year=26, end
     c.drawString(x+6, party_y-13, "Party")
     for i, yy in enumerate(years):
         cx = x + label_w + i * cell_w
-        vm_raw = normalize_export_text(get_lookup_value(row, [f"{prefix}{yy}_VM"])).upper()
-        party_val = normalize_export_text(get_lookup_value(row, [f"{prefix}{yy}_P"]))
+        vm_raw = _lookup_election_method(row, prefix, yy)
+        party_val = _lookup_election_party(row, prefix, yy)
         c.setFillColor(_pdf_vote_cell_fill(vm_raw))
         c.rect(cx, party_y-row_h, cell_w, row_h, stroke=1, fill=1)
         c.setFillColor(colors.HexColor("#1E3A8A") if vm_raw else colors.HexColor("#667085"))
         c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(cx + cell_w/2, party_y-13, party_val or "—")
+        c.drawCentredString(cx + cell_w/2, party_y-13, "" if is_did_not_vote_value(vm_raw) else (party_val or ""))
 
     method_y = party_y - row_h
     c.setFillColor(colors.white)
@@ -3722,7 +6511,7 @@ def _draw_pdf_vote_history_table(c, row, x, y, title, prefix, start_year=26, end
     c.drawString(x+6, method_y-13, "Method")
     for i, yy in enumerate(years):
         cx = x + label_w + i * cell_w
-        vm_raw = normalize_export_text(get_lookup_value(row, [f"{prefix}{yy}_VM"])).upper()
+        vm_raw = _lookup_election_method(row, prefix, yy)
         c.setFillColor(_pdf_vote_cell_fill(vm_raw))
         c.rect(cx, method_y-row_h, cell_w, row_h, stroke=1, fill=1)
         c.setFillColor(colors.black if vm_raw else colors.HexColor("#98A2B3"))
@@ -3772,7 +6561,7 @@ def build_voter_report_pdf_bytes(row) -> bytes:
     c.setFont("Helvetica-Bold", 9)
     c.setFillColor(colors.HexColor("#4B5563"))
     c.drawCentredString(logo_center_x, header_top - 6, "Powered By")
-    if TSS_LOGO.exists():
+    if get_reporting_tss_logo_path().exists():
         try:
             c.drawImage(
                 ImageReader(str(TSS_LOGO)),
@@ -3889,11 +6678,15 @@ def build_voter_report_pdf_bytes(row) -> bytes:
 
 
 def get_lookup_household_members(selected_row) -> pd.DataFrame:
+    """Return household members without assuming CamelCase name/address columns.
+
+    Some detail shards use lowercase pipeline names like last_name/first_name, while
+    older lookup code ordered by "LastName"/"FirstName" directly. That caused a
+    Binder Error after finding a voter. This version uses detected expressions.
+    """
     detail_paths, _ = ensure_detail_shards()
     detail_columns = get_conn().execute(
-        "DESCRIBE SELECT * FROM read_parquet([" +
-        ", ".join(sql_string_literal(p) for p in detail_paths) +
-        "], union_by_name=True)"
+        f"DESCRIBE SELECT * FROM {dataset_scan_sql(detail_paths)}"
     ).df()["column_name"].tolist()
 
     base_sql, base_params = build_detail_export_sql(detail_paths, {})
@@ -3901,25 +6694,35 @@ def get_lookup_household_members(selected_row) -> pd.DataFrame:
     pa_id_val = normalize_numeric_string(
         get_lookup_value(
             selected_row,
-            ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "VoterID"]
+            ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "VoterID", "voter_id", "ID Number", "IDNumber"]
         )
     )
+
+    # Detected source expressions from the detail shards / base export query.
+    last_expr, _ = _detail_col_expr(detail_columns, ["LastName", "Last Name", "last_name", "LNAME"])
+    first_expr, _ = _detail_col_expr(detail_columns, ["FirstName", "First Name", "first_name", "FNAME"])
+    age_expr, _ = _detail_col_expr(detail_columns, ["Age", "age", "Age_Calc"])
+    house_expr, _ = _detail_col_expr(detail_columns, ["House Number", "HouseNumber", "house_number", "Street Number"])
+    street_expr, _ = _detail_col_expr(detail_columns, ["Street Name", "StreetName", "street_name", "Street"])
+    apt_expr, _ = _detail_col_expr(detail_columns, ["Apartment Number", "ApartmentNumber", "apartment_number", "Unit", "Apt"])
+    city_expr, _ = _detail_col_expr(detail_columns, ["MailingCity", "Mailing City", "City", "res_city", "mail_city", "MailCity"])
+    county_expr, _ = _detail_col_expr(detail_columns, ["County", "county"])
 
     if house_key:
         member_where = "coalesce(_HouseholdKey, '') = ?"
         member_params = [house_key]
     else:
-        house_num = normalize_export_text(get_lookup_value(selected_row, ["House Number", "HouseNumber", "Street Number"]))
-        street_name = normalize_export_text(get_lookup_value(selected_row, ["Street Name", "StreetName", "Street"]))
-        apt_num = normalize_export_text(get_lookup_value(selected_row, ["Apartment Number", "ApartmentNumber", "Unit", "Apt"]))
-        city_val = normalize_export_text(get_lookup_value(selected_row, ["MailingCity", "Mailing City", "City", "MailCity"]))
-        county_val = normalize_export_text(get_lookup_value(selected_row, ["County"]))
-        member_where = """
-            upper(trim(coalesce(cast("House Number" as varchar), ''))) = upper(trim(?))
-            AND upper(trim(coalesce(cast("Street Name" as varchar), ''))) = upper(trim(?))
-            AND upper(trim(coalesce(cast("Apartment Number" as varchar), ''))) = upper(trim(?))
-            AND upper(trim(coalesce(cast("MailingCity" as varchar), cast("City" as varchar), ''))) = upper(trim(?))
-            AND upper(trim(coalesce(cast("County" as varchar), ''))) = upper(trim(?))
+        house_num = normalize_export_text(get_lookup_value(selected_row, ["House Number", "HouseNumber", "house_number", "Street Number"]))
+        street_name = normalize_export_text(get_lookup_value(selected_row, ["Street Name", "StreetName", "street_name", "Street"]))
+        apt_num = normalize_export_text(get_lookup_value(selected_row, ["Apartment Number", "ApartmentNumber", "apartment_number", "Unit", "Apt"]))
+        city_val = normalize_export_text(get_lookup_value(selected_row, ["MailingCity", "Mailing City", "City", "res_city", "MailCity"]))
+        county_val = normalize_export_text(get_lookup_value(selected_row, ["County", "county"]))
+        member_where = f"""
+            upper(trim({house_expr})) = upper(trim(?))
+            AND upper(trim({street_expr})) = upper(trim(?))
+            AND upper(trim({apt_expr})) = upper(trim(?))
+            AND upper(trim({city_expr})) = upper(trim(?))
+            AND upper(trim({county_expr})) = upper(trim(?))
         """
         member_params = [house_num, street_name, apt_num, city_val, county_val]
 
@@ -3928,9 +6731,9 @@ def get_lookup_household_members(selected_row) -> pd.DataFrame:
         SELECT *
         FROM ({base_sql}) src
         WHERE {member_where}
-        ORDER BY upper(trim(coalesce(cast("LastName" as varchar), ''))),
-                 upper(trim(coalesce(cast("FirstName" as varchar), ''))),
-                 try_cast("Age" as double) DESC NULLS LAST
+        ORDER BY upper(trim({last_expr})),
+                 upper(trim({first_expr})),
+                 try_cast({age_expr} as double) DESC NULLS LAST
         """,
         base_params + member_params,
     ).df()
@@ -3938,10 +6741,12 @@ def get_lookup_household_members(selected_row) -> pd.DataFrame:
     if members_df.empty:
         return members_df
 
+    members_df = apply_voter_corrections_to_df(members_df)
+
     if pa_id_val:
         def _same_selected(row):
             row_pa = normalize_numeric_string(
-                get_lookup_value(row, ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "VoterID"])
+                get_lookup_value(row, ["PA ID Number", "PA_ID_Number", "PA ID", "StateVoterID", "VoterID", "voter_id", "ID Number", "IDNumber"])
             )
             return row_pa == pa_id_val
         members_df["_IsSelectedMember"] = members_df.apply(_same_selected, axis=1)
@@ -4004,7 +6809,7 @@ def render_voter_lookup_results():
             row_key = result_row.get("_LookupRowKey", "")
             is_selected = st.session_state.get("lookup_selected_key", "") == row_key
             render_lookup_result_card(result_row, is_selected)
-            if st.button("Selected" if is_selected else "View Voter", key=f'lookup_pick_{row_key}', use_container_width=True, type="primary" if is_selected else "secondary"):
+            if st.button("Selected" if is_selected else "View Voter", key=f'lookup_pick_{row_key}', width="stretch", type="primary" if is_selected else "secondary"):
                 st.session_state["lookup_selected_key"] = row_key
                 st.rerun()
 
@@ -4012,6 +6817,7 @@ def render_voter_lookup_results():
     if selected_row is None:
         st.markdown('</div>', unsafe_allow_html=True)
         return
+    selected_row = apply_voter_corrections_to_row(selected_row)
 
     with right_col:
         voter_name = normalize_name_value(normalize_export_text(selected_row.get("_LookupName", ""))) or "Unnamed voter"
@@ -4029,7 +6835,7 @@ def render_voter_lookup_results():
                 data=pdf_bytes,
                 file_name=f"{safe_name}_voter_report.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                width="stretch",
             )
 
         metric_cols = st.columns(4, gap="small")
@@ -4063,10 +6869,18 @@ def render_voter_lookup_results():
                 ("Mail Ballot Applied", get_lookup_value(selected_row, ["MIB_Applied"])),
                 ("Mail Ballot Status", get_lookup_value(selected_row, ["MIB_BALLOT"])),
                 ("Permanent Mail", get_lookup_value(selected_row, ["MB_PERM", "MB_Perm", "MB_Pern"])),
+                ("App Return Date", get_lookup_value(selected_row, ["Current_App_Return_Date", "AppReturnDate"], formatter=format_lookup_date)),
+                ("Ballot Sent Date", get_lookup_value(selected_row, ["Current_Ballot_Sent_Date", "BallotSentDate"], formatter=format_lookup_date)),
+                ("Ballot Returned Date", get_lookup_value(selected_row, ["Current_Ballot_Returned_Date", "BallotReturnedDate"], formatter=format_lookup_date)),
+                ("Mail Ballot Applicant Phone", format_lookup_phone(get_lookup_value(selected_row, ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"]))),
+                ("Mail Ballot New Registrant", get_lookup_value(selected_row, ["MailBallotNewRegistrant"])),
                 ("Mail Ballot Score", get_lookup_value(selected_row, ["MB_AProp_Score", "MMB_AProp_Score"], formatter=lambda v: normalize_numeric_string(v))),
             ])
 
-        household_df = get_lookup_household_members(selected_row)
+        with st.expander("Edit / Correct This Voter Record", expanded=True):
+            render_voter_correction_editor(selected_row)
+
+        household_df = apply_voter_corrections_to_df(get_lookup_household_members(selected_row))
         st.markdown("#### Household Members")
         if household_df.empty:
             st.caption("No household members found.")
@@ -4094,7 +6908,7 @@ def render_voter_lookup_results():
                             )
                         )
                         member_button_key = member_pa_id or f"member_{idx}"
-                        if st.button("Open", key=f"hh_open_{member_button_key}_{idx}", use_container_width=True):
+                        if st.button("Open", key=f"hh_open_{member_button_key}_{idx}", width="stretch"):
                             if member_pa_id:
                                 st.session_state["lookup_household_open_pa_id"] = member_pa_id
                                 st.session_state.workspace_mode = "lookup"
@@ -4103,6 +6917,144 @@ def render_voter_lookup_results():
         render_lookup_vote_history_tables(selected_row)
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+
+GEO_FILTER_COLUMNS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
+
+def _geo_value_clean(v) -> str:
+    return normalize_export_text(v) if "normalize_export_text" in globals() else str(v or "").strip()
+
+
+@st.cache_data(show_spinner=False)
+def load_geo_dependency_table() -> pd.DataFrame:
+    """Load compact geography hierarchy for interdependent geography filters."""
+    candidates = [
+        Path("data/shards/speed/geo_hierarchy.parquet"),
+        Path("data") / "shards" / "speed" / "geo_hierarchy.parquet",
+    ]
+    for path in candidates:
+        try:
+            if path.exists():
+                df = pd.read_parquet(path)
+                for col in GEO_FILTER_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = ""
+                    df[col] = df[col].astype(str).map(_geo_value_clean)
+                return df[GEO_FILTER_COLUMNS].drop_duplicates().reset_index(drop=True)
+        except Exception:
+            pass
+
+    rows = []
+    try:
+        opts = st.session_state.get("options", {}) or {}
+        max_len = max([len(opts.get(c, [])) for c in GEO_FILTER_COLUMNS] + [0])
+        for i in range(max_len):
+            row = {}
+            for col in GEO_FILTER_COLUMNS:
+                vals = opts.get(col, []) or []
+                row[col] = vals[i] if i < len(vals) else ""
+            rows.append(row)
+    except Exception:
+        rows = []
+    df = pd.DataFrame(rows)
+    for col in GEO_FILTER_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    return df[GEO_FILTER_COLUMNS].fillna("").astype(str)
+
+
+
+def geo_sort_key(value):
+    """Sort district-style geography values numerically when possible."""
+    s = str(value or "").strip()
+    m = re.search(r'(\d+)', s)
+    if m:
+        try:
+            return (0, int(m.group(1)), s)
+        except Exception:
+            pass
+    return (1, s.lower())
+
+
+def _geo_options_for_column(geo_df: pd.DataFrame, target_col: str, current_selections: dict, fallback_options: list[str]) -> list[str]:
+    if geo_df is None or geo_df.empty or target_col not in geo_df.columns:
+        return fallback_options
+
+    temp = geo_df.copy()
+    for col, selected in (current_selections or {}).items():
+        if col == target_col or col not in temp.columns:
+            continue
+        selected = [_geo_value_clean(x) for x in (selected or []) if _geo_value_clean(x)]
+        if selected:
+            temp = temp[temp[col].astype(str).isin(selected)]
+
+    vals = sorted(
+        {str(v).strip() for v in temp[target_col].dropna().astype(str).tolist() if str(v).strip() and str(v).strip() != "(Blank)"},
+        key=geo_sort_key
+    )
+    return vals or fallback_options
+
+
+def render_interdependent_geo_filters(cols, opts) -> dict:
+    """Render geography filters with mutual narrowing.
+
+    Streamlit does not allow changing st.session_state for a widget key after
+    that widget has been instantiated. To make Clear Filters and Load Universe
+    safe, these widgets use a generation suffix in their keys. Clearing or
+    loading increments the generation, so Streamlit creates a fresh set of
+    widgets instead of us modifying existing widget state.
+    """
+    geo_cols = [c for c in GEO_FILTER_COLUMNS if c in cols]
+    geo_df = load_geo_dependency_table()
+    selections = {}
+
+    st.markdown("<div class='cc-active-section-title'>Geography</div>", unsafe_allow_html=True)
+    st.caption("Geography options narrow together as selections are made.")
+
+    if "geo_widget_generation" not in st.session_state:
+        st.session_state.geo_widget_generation = 0
+
+    if st.session_state.pop("reset_geo_filter_widgets", False):
+        st.session_state.geo_widget_generation += 1
+
+    _pending_geo_filters = st.session_state.pop("pending_geo_widget_filters", None)
+    if isinstance(_pending_geo_filters, dict):
+        st.session_state.geo_widget_generation += 1
+        # Use active_filters as the source of defaults for the new widget generation.
+        # Do not assign to geo_dep_* widget keys directly.
+        merged = dict(st.session_state.get("active_filters", {}) or {})
+        for _geo_col in GEO_FILTER_COLUMNS:
+            _vals = _pending_geo_filters.get(_geo_col, []) or []
+            merged[_geo_col] = _vals if isinstance(_vals, list) else []
+        st.session_state.active_filters = merged
+
+    gen = st.session_state.geo_widget_generation
+
+    current = {}
+    for col in geo_cols:
+        key = f"geo_dep_{_norm_col_name(col)}__{gen}"
+        existing = st.session_state.get(key, st.session_state.active_filters.get(col, []))
+        current[col] = existing if isinstance(existing, list) else []
+
+    for col in geo_cols:
+        key = f"geo_dep_{_norm_col_name(col)}__{gen}"
+        fallback = opts.get(col, []) or []
+        options = _geo_options_for_column(geo_df, col, current, fallback)
+
+        extras = [v for v in current.get(col, []) if v and v not in options]
+        full_options = options + [v for v in extras if v not in options]
+
+        selections[col] = st.multiselect(
+            geo_label(col),
+            full_options,
+            default=sanitize_multiselect_defaults(current.get(col, []), full_options),
+            key=key,
+            help="Options narrow based on your other geography selections.",
+        )
+        current[col] = selections[col]
+
+    return selections
 
 
 def render_lookup_sidebar(active_filters, columns):
@@ -4121,11 +7073,8 @@ def render_lookup_sidebar(active_filters, columns):
         st.session_state["lookup_last_query"] = pending_household_open_query
         st.session_state["lookup_selected_key"] = ""
 
-    with st.expander("Voter Lookup", expanded=st.session_state.get("workspace_mode", "universe") == "lookup"):
+    with st.expander("Voter Lookup", expanded=st.session_state.get("workspace_mode", "landing") == "lookup"):
         st.caption("Search the full statewide active voter file by name, county, address, PA ID, phone, or email.")
-        if st.button("Show Voter Lookup", use_container_width=True, key="show_lookup_workspace"):
-            st.session_state.workspace_mode = "lookup"
-            st.rerun()
         with st.form("lookup_form", clear_on_submit=False):
             lookup_query = st.text_input(
                 "Search voters",
@@ -4134,8 +7083,8 @@ def render_lookup_sidebar(active_filters, columns):
             )
             result_limit = st.selectbox("Max Results", [10, 25, 50, 100], index=1, key="lookup_result_limit")
             action_cols = st.columns(2, gap="small")
-            search_clicked = action_cols[0].form_submit_button("Search", use_container_width=True, type="primary")
-            clear_clicked = action_cols[1].form_submit_button("Clear Lookup", use_container_width=True)
+            search_clicked = action_cols[0].form_submit_button("Search", width="stretch", type="primary")
+            clear_clicked = action_cols[1].form_submit_button("Clear Lookup", width="stretch")
 
         if clear_clicked:
             st.session_state["lookup_clear_requested"] = True
@@ -4412,7 +7361,7 @@ def _ai_render_table(df, height=360, sticky_cols=None, key=""):
     st.markdown(html_table, unsafe_allow_html=True)
 
 def render_area_intelligence_workspace():
-    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Phase 2 area profiles, mail program, and strategy foundation.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-card"><div class="small-header">Area Intelligence</div><div class="tiny-muted">Regional intelligence and campaign strategy workspace.</div></div>', unsafe_allow_html=True)
 
     try:
         area_df = load_area_precinct_summary()
@@ -4431,7 +7380,7 @@ def render_area_intelligence_workspace():
 
     # Normalize Area Intelligence geography fields. District columns are optional,
     # but when present they power district-level reports.
-    for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"]:
+    for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
         if col not in area_df.columns:
             area_df[col] = ""
         area_df[col] = area_df[col].astype(str).fillna("").replace({"nan": "", "None": ""}).str.strip()
@@ -4647,14 +7596,14 @@ def render_area_intelligence_workspace():
             party_chart = pd.DataFrame({"Party": ["Democratic", "Republican", "Other"], "Voters": [dem, rep, other]})
             party_chart["Voters"] = pd.to_numeric(party_chart["Voters"], errors="coerce").fillna(0)
             party_chart["Percent"] = party_chart["Voters"].apply(lambda x: pct_val(x))
-            party_colors = ["#1565c0", "#c62828", "#2e7d32"]
+            party_colors = [PARTY_NAME_COLOR_MAP["Democratic"], PARTY_NAME_COLOR_MAP["Republican"], PARTY_NAME_COLOR_MAP["Other"]]
             if party_chart["Voters"].sum() > 0:
                 chart = alt.Chart(party_chart).mark_arc(innerRadius=62, outerRadius=98).encode(
                     theta=alt.Theta(field="Voters", type="quantitative"),
                     color=alt.Color(field="Party", type="nominal", scale=alt.Scale(domain=party_chart["Party"].tolist(), range=party_colors), legend=alt.Legend(title="Party")),
                     tooltip=[alt.Tooltip("Party:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f", title="Percent")],
                 ).properties(height=265)
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
                 st.markdown(make_summary_table(party_chart, "Party", "Voters", party_colors), unsafe_allow_html=True)
             else:
                 st.caption("No party data available.")
@@ -4672,7 +7621,7 @@ def render_area_intelligence_workspace():
                     color=alt.Color(field="Gender", type="nominal", scale=alt.Scale(domain=gender_chart["Gender"].tolist(), range=gender_colors), legend=alt.Legend(title="Gender")),
                     tooltip=[alt.Tooltip("Gender:N"), alt.Tooltip("Voters:Q", format=","), alt.Tooltip("Percent:Q", format=".1f", title="Percent")],
                 ).properties(height=265)
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
                 st.markdown(make_summary_table(gender_chart, "Gender", "Voters", gender_colors), unsafe_allow_html=True)
             else:
                 st.caption("No gender data available.")
@@ -4754,12 +7703,599 @@ if "data_loaded" not in st.session_state:
     st.session_state.data_loaded = False
 if "filters_applied" not in st.session_state:
     st.session_state.filters_applied = False
+
+# Auto-load the fast index/speed tables on app startup.
+# The old manual Load Voter Data button was useful when shard scans were slow,
+# but speed tables now make startup light enough to do safely.
+if not st.session_state.data_loaded:
+    with st.spinner("Opening Candidate Connect data..."):
+        local_paths, _manifest = ensure_index_shards()
+        try:
+            st.session_state.data_source_label = _manifest.get("source", "unknown") if isinstance(_manifest, dict) else "unknown"
+        except Exception:
+            st.session_state.data_source_label = "unknown"
+        st.session_state.columns = prepare_db(local_paths)
+        st.session_state.options = get_basic_options(st.session_state.columns)
+        st.session_state.data_loaded = True
+        st.session_state.filters_applied = False
 if "active_filters" not in st.session_state:
     st.session_state.active_filters = {}
 if "columns" not in st.session_state:
     st.session_state.columns = []
 if "options" not in st.session_state:
     st.session_state.options = {}
+if "geo_widget_generation" not in st.session_state:
+    st.session_state.geo_widget_generation = 0
+
+
+def _mb_clean_options(values, field=None):
+    """Clean Mail Ballot Center dropdown values so raw/current-file junk does not leak into UI."""
+    field_key = str(field or "").strip().upper()
+    bad_common = {"", "(BLANK)", "NAN", "NONE", "NULL", "<NA>"}
+    # These are source artifacts or redundant/raw statuses that confused the MB Center dropdowns.
+    bad_ballot_detail = {"1", "0", "TRUE", "FALSE", "VOTE RECORDED", "VOTED", "V", "PENDING", "CANCELLED", "CANCELED"}
+    bad_application = {"1", "0", "TRUE", "FALSE", "VOTE RECORDED"}
+    cleaned = []
+    seen = set()
+    for v in values or []:
+        s = str(v).strip()
+        u = s.upper().strip()
+        if u in bad_common:
+            continue
+        if field_key in {"MIB_BALLOT", "BALLOT"} and u in bad_ballot_detail:
+            continue
+        if field_key in {"MIB_APPLIED", "APPLICATION"} and u in bad_application:
+            continue
+        if field_key in {"MB_PERM", "PERMANENT", "PERMANENT_MB"}:
+            if u in {"TRUE", "T", "YES", "Y", "1"}:
+                s, u = "Y", "Y"
+            elif u in {"FALSE", "F", "NO", "N", "0"}:
+                s, u = "N", "N"
+            else:
+                # Guardrail: the raw/speed option table can sometimes carry unrelated
+                # geo labels here. Permanent MB must only ever be Y/N.
+                continue
+        if u not in seen:
+            cleaned.append(s)
+            seen.add(u)
+    return cleaned
+
+
+def _mb_clean_application_options(values):
+    opts = _mb_clean_options(values, field="MIB_Applied")
+    for required in ["APP", "DNA"]:
+        if required not in {str(x).upper() for x in opts}:
+            opts.append(required)
+    return sorted(opts, key=lambda x: (0 if str(x).upper() in {"APP", "DNA"} else 1, str(x).upper()))
+
+
+def _mb_clean_ballot_detail_options(values):
+    # Ballot Sent/Returned are already handled by dedicated controls. This optional
+    # detail dropdown should only show genuinely useful county/cure/problem values.
+    return _mb_clean_options(values, field="MIB_BALLOT")
+
+
+def _mb_first_present(options, preferred):
+    options_set = {str(x): str(x) for x in options or []}
+    for p in preferred:
+        if p in options_set:
+            return p
+    return "All"
+
+
+def _mb_apply_preset_to_filters(preset, filters):
+    """Apply operational mail-ballot presets without touching geography/base universe filters."""
+    out = dict(filters or {})
+
+    # Clear only Mail Ballot Center-controlled fields.
+    out = _mb_strip_filters(out)
+
+    if preset == "Chase outstanding ballots":
+        out["mib_applied_pick"] = ["APP"]
+        out["current_ballot_sent_status"] = "Sent"
+        out["current_ballot_returned_status"] = "Not Returned/Unknown"
+    elif preset == "Cure / problem ballots":
+        out["mib_applied_pick"] = ["APP"]
+        out["current_ballot_returned_status"] = "Not Returned/Unknown"
+    elif preset == "Non-applicant targeting":
+        out["mib_applied_pick"] = ["DNA"]
+        out["mb_score_slider"] = (2, 4)
+    elif preset == "mail ballot targeting":
+        out["mib_applied_pick"] = ["DNA"]
+        out["mb_score_slider"] = (2, 4)
+    elif preset == "Permanent mail voters":
+        out["mb_perm_pick"] = ["Y"]
+    return out
+
+
+def _mb_metric_count(base_filters, columns, **overrides):
+    f = dict(base_filters or {})
+    for k, v in overrides.items():
+        if v in (None, "All", [], ""):
+            f.pop(k, None)
+        else:
+            f[k] = v
+    try:
+        return int(query_metrics(f, columns).get("voters", 0) or 0)
+    except Exception:
+        return 0
+
+
+
+@st.cache_data(show_spinner=False, ttl=30, max_entries=64)
+def _mb_summary_metrics_cached(filter_json: str, columns_tuple: tuple):
+    active = json.loads(filter_json or "{}")
+    columns = list(columns_tuple or [])
+    try:
+        con = get_conn()
+        where_sql, params = current_filter_clause(active, columns)
+        row = con.execute(
+            f"""
+            SELECT
+                count(*) AS total,
+                sum(CASE WHEN _MIBApplied = 'APP' THEN 1 ELSE 0 END) AS apps,
+                sum(CASE WHEN _MIBApplied = 'DNA' THEN 1 ELSE 0 END) AS non_applicants,
+                sum(CASE WHEN _CurrentBallotSentDate IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+                sum(CASE WHEN _CurrentBallotReturnedDate IS NOT NULL THEN 1 ELSE 0 END) AS returned,
+                sum(CASE WHEN _CurrentBallotSentDate IS NOT NULL AND _CurrentBallotReturnedDate IS NULL THEN 1 ELSE 0 END) AS outstanding,
+                sum(CASE WHEN _HasEmail THEN 1 ELSE 0 END) AS emails,
+                sum(CASE WHEN _HasMobile THEN 1 ELSE 0 END) AS mobiles,
+                sum(CASE WHEN _HasLandline THEN 1 ELSE 0 END) AS landlines,
+                sum(CASE WHEN _HasApplicantPhone THEN 1 ELSE 0 END) AS applicant_phones
+            FROM voters
+            {where_sql}
+            """,
+            params,
+        ).df().iloc[0].to_dict()
+        return {k: int(v or 0) for k, v in row.items()}
+    except Exception:
+        return {
+            "total": 0, "apps": 0, "non_applicants": 0, "sent": 0, "returned": 0,
+            "outstanding": 0, "emails": 0, "mobiles": 0, "landlines": 0, "applicant_phones": 0,
+        }
+
+
+def _mb_summary_metrics(active_filters, columns):
+    try:
+        filter_json = json.dumps(active_filters or {}, sort_keys=True, default=str)
+    except Exception:
+        filter_json = "{}"
+    return _mb_summary_metrics_cached(filter_json, tuple(columns or []))
+
+
+def _mb_party_chart(chart_df: pd.DataFrame):
+    if chart_df is None or chart_df.empty:
+        return pd.DataFrame(columns=["Party", "Count"])
+    out = chart_df.copy()
+    out["Party"] = out["Party"].astype(str).str.upper().map({"R": "Republican", "D": "Democrat", "O": "Other"}).fillna("Other")
+    out["Count"] = pd.to_numeric(out["Count"], errors="coerce").fillna(0)
+    out = out.groupby("Party", as_index=False)["Count"].sum()
+    order = {"Republican": 0, "Democrat": 1, "Other": 2}
+    out["_order"] = out["Party"].map(order).fillna(9)
+    return out.sort_values("_order").drop(columns=["_order"])
+
+
+def _mb_format_metric(value):
+    try:
+        return f"{int(value):,}"
+    except Exception:
+        return "0"
+
+
+def _mb_status_note(active_filters):
+    parts = []
+    if active_filters.get("mib_applied_pick"):
+        parts.append("Application: " + ", ".join(active_filters.get("mib_applied_pick", [])))
+    if active_filters.get("current_ballot_sent_status"):
+        parts.append("Sent: " + active_filters.get("current_ballot_sent_status"))
+    if active_filters.get("current_ballot_returned_status"):
+        parts.append("Returned: " + active_filters.get("current_ballot_returned_status"))
+    if active_filters.get("mb_score_slider") is not None:
+        lo, hi = active_filters.get("mb_score_slider")
+        parts.append(f"MB Score: {lo}-{hi}")
+    if active_filters.get("has_applicant_phone"):
+        parts.append("Applicant Phone: " + active_filters.get("has_applicant_phone"))
+    return " | ".join(parts) if parts else "No Mail Ballot Center filters applied yet."
+
+
+def _mb_download_bytes_csv(df: pd.DataFrame) -> bytes:
+    if df is None:
+        df = pd.DataFrame()
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def render_mail_ballot_center_workspace():
+    columns = st.session_state.get("columns", []) or []
+    opts = st.session_state.get("options", {}) or {}
+    main_active = st.session_state.get("active_filters", {}) or {}
+
+    if "mail_ballot_center_filters" not in st.session_state:
+        st.session_state.mail_ballot_center_filters = {}
+    if "mail_ballot_center_use_main_universe" not in st.session_state:
+        st.session_state.mail_ballot_center_use_main_universe = True
+
+    use_main_universe = bool(st.session_state.get("mail_ballot_center_use_main_universe", True))
+    mb_only_filters = st.session_state.get("mail_ballot_center_filters", {}) or {}
+    base_filters = dict(main_active) if use_main_universe else {}
+    active_mb_filters = dict(base_filters)
+    active_mb_filters.update(mb_only_filters)
+
+    st.markdown(
+        '<div class="section-card"><div class="small-header">Mail Ballot Center</div>'
+        '<div class="tiny-muted">Strategic mail ballot operations, targeting, and follow-up workspace.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    mb_summary = _mb_summary_metrics(active_mb_filters, columns)
+    total = mb_summary.get("total", 0)
+    apps = mb_summary.get("apps", 0)
+    sent = mb_summary.get("sent", 0)
+    returned = mb_summary.get("returned", 0)
+    outstanding = mb_summary.get("outstanding", 0)
+    non_applicants = mb_summary.get("non_applicants", 0)
+
+    metric_cols = st.columns(6)
+    metric_data = [
+        ("Current MB Universe", total),
+        ("Applications", apps),
+        ("Ballots Sent", sent),
+        ("Ballots Returned", returned),
+        ("Outstanding", outstanding),
+        ("Did Not Apply", non_applicants),
+    ]
+    for col, (label, value) in zip(metric_cols, metric_data):
+        with col:
+            st.markdown(
+                f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{_mb_format_metric(value)}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    contact_metrics = mb_summary
+    contact_cols = st.columns(3)
+    for col, label, key in [
+        (contact_cols[0], "With Email", "emails"),
+        (contact_cols[1], "With Mobile", "mobiles"),
+        (contact_cols[2], "With Landline", "landlines"),
+    ]:
+        with col:
+            st.markdown(
+                f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{_mb_format_metric(contact_metrics.get(key, 0))}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-header">Build Mail Ballot Universe</div>', unsafe_allow_html=True)
+    st.caption("Use this to create chase, cure, non-applicant, and MB-probability universes without changing the main dashboard until you choose to export or save.")
+
+    app_options = _mb_clean_application_options(opts.get("mib_applied_vals") or opts.get("MIB_Applied") or (speed_option_values("MIB_Applied") if "speed_option_values" in globals() else []))
+    ballot_options = _mb_clean_ballot_detail_options(opts.get("mib_ballot_vals") or opts.get("MIB_BALLOT") or (speed_option_values("MIB_BALLOT") if "speed_option_values" in globals() else []))
+    perm_options = _mb_clean_options(opts.get("mb_perm_vals") or opts.get("MB_PERM") or (speed_option_values("MB_PERM") if "speed_option_values" in globals() else []), field="MB_PERM")
+
+    with st.form("mail_ballot_center_form", clear_on_submit=False):
+        top_cols = st.columns([1.2, 1, 1], gap="medium")
+        with top_cols[0]:
+            preset = st.selectbox(
+                "Operational Preset",
+                ["Custom", "Chase outstanding ballots", "Cure / problem ballots", "Non-applicant targeting", "mail ballot targeting", "Permanent mail voters"],
+                index=0,
+                help="Preset fills the core mail-ballot filters. You can still adjust the controls below before applying.",
+            )
+        with top_cols[1]:
+            use_main = st.checkbox(
+                "Start from current main universe",
+                value=use_main_universe,
+                help="When checked, the Mail Ballot Center respects the geography/party/voter filters already applied in Create Universe.",
+            )
+        with top_cols[2]:
+            st.markdown("<br>", unsafe_allow_html=True)
+            clear_mb = st.checkbox("Clear MB filters", value=False)
+
+        working_defaults = _mb_apply_preset_to_filters(preset, mb_only_filters) if preset != "Custom" else dict(mb_only_filters)
+
+        row1 = st.columns(4, gap="small")
+        with row1[0]:
+            app_pick = st.multiselect(
+                "Application Status",
+                app_options,
+                default=sanitize_multiselect_defaults(working_defaults.get("mib_applied_pick", []), app_options),
+                help="APP = applied/approved. DNA = did not apply.",
+            )
+        with row1[1]:
+            sent_status = st.selectbox(
+                "Ballot Sent",
+                ["All", "Sent", "Not Sent/Unknown"],
+                index=["All", "Sent", "Not Sent/Unknown"].index(working_defaults.get("current_ballot_sent_status", "All") if working_defaults.get("current_ballot_sent_status", "All") in ["All", "Sent", "Not Sent/Unknown"] else "All"),
+            )
+        with row1[2]:
+            returned_status = st.selectbox(
+                "Ballot Returned",
+                ["All", "Returned", "Not Returned/Unknown"],
+                index=["All", "Returned", "Not Returned/Unknown"].index(working_defaults.get("current_ballot_returned_status", "All") if working_defaults.get("current_ballot_returned_status", "All") in ["All", "Returned", "Not Returned/Unknown"] else "All"),
+            )
+        with row1[3]:
+            perm_pick = st.multiselect(
+                "Permanent MB",
+                perm_options,
+                default=sanitize_multiselect_defaults(working_defaults.get("mb_perm_pick", []), perm_options),
+            )
+
+        row2 = st.columns(5, gap="small")
+        with row2[0]:
+            mb_score_default = working_defaults.get("mb_score_slider", (0, 4))
+            try:
+                mb_score_default = (int(mb_score_default[0]), int(mb_score_default[1]))
+            except Exception:
+                mb_score_default = (0, 4)
+            mb_score = st.slider("MB Probability Score", 0, 4, mb_score_default, 1)
+        with row2[1]:
+            applicant_phone = st.selectbox(
+                "Applicant Phone",
+                ["All", "Has Applicant Phone", "No Applicant Phone"],
+                index=["All", "Has Applicant Phone", "No Applicant Phone"].index(working_defaults.get("has_applicant_phone", "All") if working_defaults.get("has_applicant_phone", "All") in ["All", "Has Applicant Phone", "No Applicant Phone"] else "All"),
+            )
+        with row2[2]:
+            mobile_status = st.selectbox(
+                "Mobile",
+                ["All", "Has Mobile", "No Mobile"],
+                index=["All", "Has Mobile", "No Mobile"].index(working_defaults.get("has_mobile", "All") if working_defaults.get("has_mobile", "All") in ["All", "Has Mobile", "No Mobile"] else "All"),
+            )
+        with row2[3]:
+            landline_status = st.selectbox(
+                "Landline",
+                ["All", "Has Landline", "No Landline"],
+                index=["All", "Has Landline", "No Landline"].index(working_defaults.get("has_landline", "All") if working_defaults.get("has_landline", "All") in ["All", "Has Landline", "No Landline"] else "All"),
+            )
+        with row2[4]:
+            email_status = st.selectbox(
+                "Email",
+                ["All", "Has Email", "No Email"],
+                index=["All", "Has Email", "No Email"].index(working_defaults.get("has_email", "All") if working_defaults.get("has_email", "All") in ["All", "Has Email", "No Email"] else "All"),
+            )
+
+        if ballot_options:
+            ballot_pick = st.multiselect(
+                "Ballot Status / Cure Status Detail",
+                ballot_options,
+                default=sanitize_multiselect_defaults(working_defaults.get("mib_ballot_pick", []), ballot_options),
+                help="Use this for county-specific ballot status or cure/problem status values coming from CURRENT.",
+            )
+        else:
+            ballot_pick = []
+
+        submit_cols = st.columns(3, gap="small")
+        with submit_cols[0]:
+            apply_mb = st.form_submit_button("Apply Mail Ballot Filters", width="stretch")
+        with submit_cols[1]:
+            save_to_main = st.form_submit_button("Send to Main Universe", width="stretch")
+        with submit_cols[2]:
+            reset_mb = st.form_submit_button("Reset Mail Ballot Center", width="stretch")
+
+    if apply_mb or save_to_main:
+        if clear_mb:
+            # Clear the center and any MB filters previously pushed into Create Universe.
+            _mb_clear_center_state(clear_main=True)
+            st.session_state["mb_run_analysis"] = False
+            st.success("Mail Ballot filters were cleared.")
+            st.stop()
+
+        new_mb_filters = {}
+        if app_pick:
+            new_mb_filters["mib_applied_pick"] = app_pick
+        if ballot_pick:
+            new_mb_filters["mib_ballot_pick"] = ballot_pick
+        if perm_pick:
+            new_mb_filters["mb_perm_pick"] = perm_pick
+        if sent_status != "All":
+            new_mb_filters["current_ballot_sent_status"] = sent_status
+        if returned_status != "All":
+            new_mb_filters["current_ballot_returned_status"] = returned_status
+        if applicant_phone != "All":
+            new_mb_filters["has_applicant_phone"] = applicant_phone
+        if mobile_status != "All":
+            new_mb_filters["has_mobile"] = mobile_status
+        if landline_status != "All":
+            new_mb_filters["has_landline"] = landline_status
+        if email_status != "All":
+            new_mb_filters["has_email"] = email_status
+        if tuple(mb_score) != (0, 4):
+            new_mb_filters["mb_score_slider"] = tuple(mb_score)
+
+        st.session_state.mail_ballot_center_use_main_universe = bool(use_main)
+        st.session_state.mail_ballot_center_filters = new_mb_filters
+        st.session_state["mb_run_analysis"] = False
+
+        if save_to_main:
+            # Important performance fix: do not st.rerun() after this submit.
+            # Streamlit already reruns once for the form submit; forcing another rerun
+            # could trap the app in a long refresh loop on large MB universes.
+            merged = dict(main_active if use_main else {})
+            merged.update(new_mb_filters)
+            st.session_state.active_filters = merged
+            st.session_state.filters_applied = True
+            st.session_state.workspace_mode = "universe"
+            st.success("Mail Ballot Center filters were sent to the main Universe. The next dashboard view will use the updated universe.")
+            st.stop()
+
+        st.success("Mail Ballot Center filters applied.")
+        st.stop()
+
+    if reset_mb:
+        # Reset returns the center to the full selected universe and removes any
+        # MB filters that were previously pushed into Create Universe.
+        _mb_clear_center_state(clear_main=True)
+        st.session_state["mb_run_analysis"] = False
+        st.success("Mail Ballot Center was reset.")
+        st.stop()
+
+    st.caption("Active Mail Ballot Center filters: " + _mb_status_note(active_mb_filters))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    analysis_tabs = st.tabs(["Operations", "Exports", "Analysis", "Notes"])
+
+    with analysis_tabs[0]:
+        op_cols = st.columns(4, gap="medium")
+        chase_count = _mb_metric_count(active_mb_filters, columns, mib_applied_pick=["APP"], current_ballot_sent_status="Sent", current_ballot_returned_status="Not Returned/Unknown")
+        nonapp_score_count = _mb_metric_count(active_mb_filters, columns, mib_applied_pick=["DNA"], mb_score_slider=(2, 4))
+        phone_chase_count = _mb_metric_count(active_mb_filters, columns, mib_applied_pick=["APP"], current_ballot_sent_status="Sent", current_ballot_returned_status="Not Returned/Unknown", has_applicant_phone="Has Applicant Phone")
+        no_contact_count = _mb_metric_count(active_mb_filters, columns, mib_applied_pick=["APP"], current_ballot_returned_status="Not Returned/Unknown", has_mobile="No Mobile", has_email="No Email")
+        for col, title, value, note in [
+            (op_cols[0], "Chase Universe", chase_count, "Sent but not returned"),
+            (op_cols[1], "Growth Universe", nonapp_score_count, "DNA with MB score 2-4"),
+            (op_cols[2], "Phone Chase", phone_chase_count, "Outstanding with applicant phone"),
+            (op_cols[3], "Needs Contact Append", no_contact_count, "Outstanding with no mobile/email"),
+        ]:
+            with col:
+                st.markdown(f'<div class="metric-card"><div class="metric-label">{title}</div><div class="metric-value">{_mb_format_metric(value)}</div><div class="tiny-muted">{note}</div></div>', unsafe_allow_html=True)
+
+        st.info("Daily mail ballot operations and follow-up workspace.")
+
+    with analysis_tabs[1]:
+        st.caption("Exports use the same stabilized detail-shard engine as the main Output Center, so they remain universe-safe.")
+        export_cols = st.columns(3, gap="medium")
+        with export_cols[0]:
+            if st.button("Prepare MB Filtered CSV", width="stretch"):
+                with st.spinner("Building filtered CSV from detail shards..."):
+                    st.session_state["mb_filtered_csv_df"] = build_filtered_csv_export(active_mb_filters)
+            if isinstance(st.session_state.get("mb_filtered_csv_df"), pd.DataFrame):
+                df = st.session_state["mb_filtered_csv_df"]
+                st.download_button("Download MB Filtered CSV", data=_mb_download_bytes_csv(df), file_name="mail_ballot_center_filtered.csv", mime="text/csv", width="stretch")
+        with export_cols[1]:
+            if st.button("Prepare MB Excel Workbook", width="stretch"):
+                with st.spinner("Building Excel workbook from detail shards..."):
+                    df = build_filtered_csv_export(active_mb_filters)
+                    st.session_state["mb_filtered_excel_bytes"] = dataframe_to_export_excel_bytes(df, "Mail Ballot Center")
+            if st.session_state.get("mb_filtered_excel_bytes"):
+                st.download_button("Download MB Excel Workbook", data=st.session_state["mb_filtered_excel_bytes"], file_name="mail_ballot_center_filtered.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+        with export_cols[2]:
+            if st.button("Prepare MB Texting CSV", width="stretch"):
+                with st.spinner("Building texting CSV from detail shards..."):
+                    st.session_state["mb_texting_csv_df"] = build_texting_export(active_mb_filters)
+            if isinstance(st.session_state.get("mb_texting_csv_df"), pd.DataFrame):
+                df = st.session_state["mb_texting_csv_df"]
+                st.download_button("Download MB Texting CSV", data=_mb_download_bytes_csv(df), file_name="mail_ballot_center_texting.csv", mime="text/csv", width="stretch")
+
+        mail_cols = st.columns(3, gap="medium")
+        with mail_cols[0]:
+            household_mail = st.checkbox("Household mail export", value=True, key="mb_household_mail_export")
+        with mail_cols[1]:
+            if st.button("Prepare USPS Mail CSV", width="stretch"):
+                with st.spinner("Building USPS mail export..."):
+                    st.session_state["mb_mail_csv_df"] = build_mail_export(active_mb_filters, householded=household_mail)
+            if isinstance(st.session_state.get("mb_mail_csv_df"), pd.DataFrame):
+                df = st.session_state["mb_mail_csv_df"]
+                st.download_button("Download USPS Mail CSV", data=_mb_download_bytes_csv(df), file_name="mail_ballot_center_usps_mail.csv", mime="text/csv", width="stretch")
+        with mail_cols[2]:
+            if st.button("Prepare Mailing Labels PDF", width="stretch"):
+                with st.spinner("Building mailing labels PDF..."):
+                    st.session_state["mb_labels_pdf_bytes"] = generate_mailing_labels_pdf_bytes(active_mb_filters, householded=household_mail)
+            if st.session_state.get("mb_labels_pdf_bytes"):
+                st.download_button("Download Mailing Labels PDF", data=st.session_state["mb_labels_pdf_bytes"], file_name="mail_ballot_center_labels.pdf", mime="application/pdf", width="stretch")
+
+    with analysis_tabs[2]:
+        st.markdown('<div class="section-card"><div class="small-header">Mail Ballot Analysis</div><div class="tiny-muted">Detailed analysis is intentionally run on demand so normal filter changes stay fast.</div></div>', unsafe_allow_html=True)
+        if st.button("Run / Refresh Mail Ballot Analysis", width="stretch", key="run_mb_analysis_now"):
+            st.session_state["mb_run_analysis"] = True
+
+        if not st.session_state.get("mb_run_analysis", False):
+            st.info("Click Run / Refresh Mail Ballot Analysis when you want the deeper charts and county table. This keeps day-to-day filter changes from re-running heavier analysis queries every time.")
+        else:
+            try:
+                contactable = int(mb_summary.get("emails", 0) or 0)
+                applicant_phone_count = int(mb_summary.get("applicant_phones", 0) or 0)
+                high_prob_nonapp = _mb_metric_count(active_mb_filters, columns, mib_applied_pick=["DNA"], mb_score_slider=(3, 4))
+                return_rate = 0 if apps == 0 else round((returned / apps) * 100, 1)
+                outstanding_rate = 0 if sent == 0 else round((outstanding / sent) * 100, 1)
+
+                insight_cols = st.columns(5, gap="small")
+                for col, title, value, note in [
+                    (insight_cols[0], "Return Rate", f"{return_rate}%", "Returned / applications"),
+                    (insight_cols[1], "Outstanding Rate", f"{outstanding_rate}%", "Outstanding / sent"),
+                    (insight_cols[2], "With Email", _mb_format_metric(contactable), "Email contact available"),
+                    (insight_cols[3], "Applicant Phone", _mb_format_metric(applicant_phone_count), "Phone from CURRENT"),
+                    (insight_cols[4], "High-Prob DNA", _mb_format_metric(high_prob_nonapp), "DNA with score 3-4"),
+                ]:
+                    with col:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">{title}</div><div class="metric-value">{value}</div><div class="tiny-muted">{note}</div></div>', unsafe_allow_html=True)
+
+                return_chart = pd.DataFrame([
+                    {"Status": "Returned", "Voters": returned},
+                    {"Status": "Outstanding", "Voters": outstanding},
+                    {"Status": "Not Sent / Unknown", "Voters": max(apps - sent, 0)},
+                ])
+                contact_chart = pd.DataFrame([
+                    {"Contact Type": "Email", "Voters": int(mb_summary.get("emails", 0) or 0)},
+                    {"Contact Type": "Mobile", "Voters": int(mb_summary.get("mobiles", 0) or 0)},
+                    {"Contact Type": "Landline", "Voters": int(mb_summary.get("landlines", 0) or 0)},
+                    {"Contact Type": "Applicant Phone", "Voters": applicant_phone_count},
+                ])
+                party_chart = _mb_party_chart(query_chart(active_mb_filters, columns, "_PartyNorm", "Party"))
+                score_chart = query_chart(active_mb_filters, columns, "_MBScore", "MB Score", not_blank=False)
+
+                chart_cols = st.columns(2, gap="medium")
+                with chart_cols[0]:
+                    st.markdown('<div class="chart-card"><div class="small-header">Mail Ballot Return Status</div>', unsafe_allow_html=True)
+                    if not return_chart.empty:
+                        st.altair_chart(alt.Chart(return_chart).mark_arc(innerRadius=45).encode(theta="Voters:Q", color="Status:N", tooltip=["Status:N", "Voters:Q"]), width="stretch")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with chart_cols[1]:
+                    st.markdown('<div class="chart-card"><div class="small-header">Contact Coverage</div>', unsafe_allow_html=True)
+                    st.altair_chart(alt.Chart(contact_chart).mark_bar().encode(x="Contact Type:N", y="Voters:Q", tooltip=["Contact Type:N", "Voters:Q"]), width="stretch")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                chart_cols2 = st.columns(2, gap="medium")
+                with chart_cols2[0]:
+                    st.markdown('<div class="chart-card"><div class="small-header">Party Mix</div>', unsafe_allow_html=True)
+                    if party_chart is not None and not party_chart.empty:
+                        st.altair_chart(
+                            alt.Chart(party_chart).mark_bar().encode(
+                                x=alt.X("Party:N", sort=["Republican", "Democrat", "Other"]),
+                                y="Count:Q",
+                                color=alt.Color(
+                                    "Party:N",
+                                    scale=alt.Scale(
+                                        domain=["Republican", "Democrat", "Other"],
+                                        range=[PARTY_NAME_COLOR_MAP["Republican"], PARTY_NAME_COLOR_MAP["Democrat"], PARTY_NAME_COLOR_MAP["Other"]],
+                                    ),
+                                    legend=None,
+                                ),
+                                tooltip=["Party:N", "Count:Q"],
+                            ),
+                            width="stretch",
+                        )
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with chart_cols2[1]:
+                    st.markdown('<div class="chart-card"><div class="small-header">MB Probability Score</div>', unsafe_allow_html=True)
+                    if score_chart is not None and not score_chart.empty:
+                        score_chart["MB Score"] = score_chart["MB Score"].astype(str)
+                        st.altair_chart(alt.Chart(score_chart).mark_bar().encode(x="MB Score:N", y="Count:Q", tooltip=["MB Score:N", "Count:Q"]), width="stretch")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="table-card"><div class="small-header">Top Counties in Current MB Universe</div>', unsafe_allow_html=True)
+                county_df = query_area_summary(active_mb_filters, columns, "County") if "County" in columns else pd.DataFrame()
+                if county_df is not None and not county_df.empty:
+                    st.dataframe(county_df.head(25), width="stretch", hide_index=True, height=360)
+                else:
+                    st.caption("County summary is not available for this selection.")
+                st.markdown('</div>', unsafe_allow_html=True)
+            except Exception as exc:
+                st.warning("Mail Ballot Center analysis could not load, but filters and exports are still available.")
+                st.caption(str(exc))
+
+    with analysis_tabs[3]:
+        st.markdown("""
+        **What is included in this first operational patch**
+
+        - Dedicated Mail Ballot Center workspace
+        - Chase, cure, non-applicant, MB probability, and permanent MB presets
+        - mail ballot fields: application status, ballot sent, ballot returned, applicant phone
+        - MB probability score slider
+        - Shared CSV, Excel, texting, USPS mail, and label export engine
+        - Safe option to send Mail Ballot Center filters back into the main Universe
+
+        **Still queued next**: county mailing-start tracking, daily mail ballot deltas, deeper cure classification, and saved MB report packs.
+        """)
+
+
 if "saved_universes" not in st.session_state:
     st.session_state.saved_universes = load_saved_universes()
 if "street_results_df" not in st.session_state:
@@ -4773,52 +8309,116 @@ if "walk_results_filters" not in st.session_state:
 if "lookup_view_active" not in st.session_state:
     st.session_state.lookup_view_active = False
 if "workspace_mode" not in st.session_state:
-    st.session_state.workspace_mode = "universe"
+    st.session_state.workspace_mode = "landing"
 if "lookup_query_input" not in st.session_state:
     st.session_state.lookup_query_input = st.session_state.get("lookup_query", "")
 
+
+# Clean first-load sidebar state: show navigation only until user selects a workspace.
+if "cc_initial_workspace_set" not in st.session_state:
+    st.session_state.cc_initial_workspace_set = True
+    st.session_state.workspace_mode = "landing"
+    st.session_state.lookup_view_active = False
+
 with st.sidebar:
     if APP_ENV == "DEV":
-        st.header("Candidate Connect DEV")
-        st.warning("DEV VERSION - testing only")
+        st.header("Candidate Connect")
+        st.markdown(
+            "<div style='background:#374151;color:#f9fafb;border:1px solid #4b5563;border-radius:10px;padding:10px 12px;font-weight:800;margin:8px 0 12px 0;'>Internal DEV Workspace</div>",
+            unsafe_allow_html=True
+        )
     else:
         st.header("Candidate Connect")
-    st.markdown('<div class="sidebar-note">Load voter data first, then open Create Universe or Voter Lookup below.</div>', unsafe_allow_html=True)
 
     if not st.session_state.data_loaded:
-        if st.button("Load Voter Data", use_container_width=True, type="primary"):
-            with st.spinner("Downloading manifest and opening R2 index shards..."):
-                local_paths, _manifest = ensure_index_shards()
-                st.session_state.columns = prepare_db(local_paths)
-                st.session_state.options = get_basic_options(st.session_state.columns)
-                st.session_state.data_loaded = True
-                st.session_state.filters_applied = False
-            st.rerun()
+        st.info("Opening Candidate Connect...")
+        st.stop()
     else:
         cols = st.session_state.columns
         opts = st.session_state.options
 
-        with st.expander("Create Universe", expanded=st.session_state.get("workspace_mode", "universe") == "universe"):
-            if st.button("Show Create Universe", use_container_width=True, key="show_universe_workspace"):
-                st.session_state.workspace_mode = "universe"
-                st.session_state.lookup_view_active = False
-                st.rerun()
-            with st.form("filter_form", clear_on_submit=False):
-                with st.expander("Geography", expanded=False):
-                    geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in cols]
-                    geo_selections = {}
-                    for col in geo_cols:
-                        geo_selections[col] = st.multiselect(col, opts.get(col, []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get(col, []), opts.get(col, [])))
+        st.markdown("<div class='cc-nav-menu-title'>Navigation</div>", unsafe_allow_html=True)
+        if st.button("▦  Create Universe", key="nav_create_universe_single", width="stretch"):
+            st.session_state.workspace_mode = "universe"
+            st.session_state.lookup_view_active = False
+            st.rerun()
+        if st.button("⌕  Voter Lookup", key="nav_voter_lookup_single", width="stretch"):
+            st.session_state.workspace_mode = "lookup"
+            st.session_state.lookup_view_active = False
+            st.rerun()
+        if st.button("✉  Mail Ballot Center", key="nav_mail_ballot_single", width="stretch"):
+            st.session_state.workspace_mode = "mail_ballot_center"
+            st.session_state.lookup_view_active = False
+            st.rerun()
+        if st.button("⌂  Area Intelligence", key="nav_area_intel_single", width="stretch"):
+            st.session_state.workspace_mode = "area_intelligence"
+            st.session_state.lookup_view_active = False
+            st.rerun()
 
+        if st.session_state.get("workspace_mode", "landing") == "landing":
+            st.caption("Select a workspace above to begin.")
+
+        if st.session_state.get("workspace_mode", "landing") == "universe":
+            st.markdown("<div class='cc-active-section-title'>Create Universe</div>", unsafe_allow_html=True)
+            geo_selections = render_interdependent_geo_filters(cols, opts)
+
+            with st.form("filter_form", clear_on_submit=False):
                 with st.expander("Voter Details", expanded=False):
-                    party_pick = st.multiselect("Party", opts.get("party_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("party_pick", []), opts.get("party_vals", [])))
-                    hh_party_pick = st.multiselect("Household Party", opts.get("hh_party_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("hh_party_pick", []), opts.get("hh_party_vals", []))) if "HH-Party" in cols else []
-                    calc_party_pick = st.multiselect("Calculated Party", opts.get("calc_party_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("calc_party_pick", []), opts.get("calc_party_vals", []))) if "CalculatedParty" in cols else []
-                    gender_pick = st.multiselect("Gender", opts.get("gender_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("gender_pick", []), opts.get("gender_vals", [])))
-                    age_range_pick = st.multiselect("Age Range", opts.get("age_range_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("age_range_pick", []), opts.get("age_range_vals", [])))
+                    party_options = [v for v in ["D", "R", "O"] if v in (opts.get("party_vals", []) or [])]
+                    for v in opts.get("party_vals", []) or []:
+                        if v not in party_options:
+                            party_options.append(v)
+                    party_pick = st.multiselect(
+                        "Party",
+                        party_options,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("party_pick", []), party_options),
+                        help="D = Democratic, R = Republican, O = every other party/blank."
+                    )
+
+                    hh_party_options = opts.get("hh_party_vals", []) or []
+                    if hh_party_options:
+                        hh_party_pick = st.multiselect(
+                            "Household Party",
+                            hh_party_options,
+                            default=sanitize_multiselect_defaults(st.session_state.active_filters.get("hh_party_pick", []), hh_party_options),
+                        )
+                    else:
+                        hh_party_pick = []
+
+                    calc_party_options = opts.get("calc_party_vals", []) or []
+                    if "CalculatedParty" in cols:
+                        calc_party_pick = st.multiselect(
+                            "Calculated Party",
+                            calc_party_options,
+                            default=sanitize_multiselect_defaults(st.session_state.active_filters.get("calc_party_pick", []), calc_party_options),
+                            help="Modeled/calculated party category from the pipeline.",
+                        )
+                    else:
+                        calc_party_pick = []
+
+                    gender_options = opts.get("gender_vals", []) or []
+                    gender_pick = st.multiselect(
+                        "Gender",
+                        gender_options,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("gender_pick", []), gender_options),
+                    )
+
+                    age_range_options = opts.get("age_range_vals", []) or []
+                    age_range_pick = st.multiselect(
+                        "Age Range",
+                        age_range_options,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("age_range_pick", []), age_range_options),
+                    )
+
                     age_slider = None
                     if opts.get("age_min") is not None and opts.get("age_max") is not None:
-                        age_slider = st.slider("Age", opts["age_min"], opts["age_max"], st.session_state.active_filters.get("age_slider", (opts["age_min"], opts["age_max"])))
+                        age_default = sanitize_slider_range(
+                            st.session_state.active_filters.get("age_slider", (opts["age_min"], opts["age_max"])),
+                            opts["age_min"],
+                            opts["age_max"],
+                            int,
+                        )
+                        age_slider = st.slider("Age", opts["age_min"], opts["age_max"], age_default)
 
                 with st.expander("Vote History", expanded=False):
                     vh_type_options = ["All", "General", "Primary"]
@@ -4842,39 +8442,119 @@ with st.sidebar:
                         help="0-4 elections in the selected vote history field.",
                     )
 
-                    mib_applied_pick = st.multiselect("Mail Ballot Application Status", opts.get("mib_applied_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("mib_applied_pick", []), opts.get("mib_applied_vals", [])))
-                    mib_ballot_pick = st.multiselect("Mail Ballot Vote Status", opts.get("mib_ballot_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("mib_ballot_pick", []), opts.get("mib_ballot_vals", [])))
-                    mb_perm_pick = st.multiselect("MB Perm", opts.get("mb_perm_vals", []), default=sanitize_multiselect_defaults(st.session_state.active_filters.get("mb_perm_pick", []), opts.get("mb_perm_vals", [])))
-
-                    mb_score_slider = None
-                    if opts.get("mb_score_min") is not None and opts.get("mb_score_max") is not None:
-                        lo = float(opts["mb_score_min"])
-                        hi = float(opts["mb_score_max"])
-                        default_score = st.session_state.active_filters.get("mb_score_slider", (lo, hi))
-                        if not isinstance(default_score, (list, tuple)) or len(default_score) != 2:
-                            default_score = (lo, hi)
-                        mb_score_slider = st.slider(
-                            "MB Probability Score",
-                            min_value=lo,
-                            max_value=hi,
-                            value=(float(default_score[0]), float(default_score[1])),
-                        )
-
                     new_reg_months = st.slider(
                         "Newly Registered (within last N months; 0 = all)",
                         min_value=0,
                         max_value=24,
-                        value=st.session_state.active_filters.get("new_reg_months", 0),
+                        value=max(0, min(24, int(st.session_state.active_filters.get("new_reg_months", 0) or 0))),
                         step=1,
                     )
 
+
+                    st.markdown("**Election & Vote Method**")
+                    election_columns_found, election_year_options, election_type_options = election_filter_options(cols)
+
+                    election_years_pick = st.multiselect(
+                        "Election Years",
+                        election_year_options,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("election_years_pick", []), election_year_options),
+                        help="Select election years available in the voter history data.",
+                    )
+
+                    election_types_available = [t for t in ["General", "Primary"] if t in election_type_options]
+                    election_types_pick = st.multiselect(
+                        "Election Type",
+                        election_types_available,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("election_types_pick", []), election_types_available),
+                        help="Choose General, Primary, or leave blank for all available election types.",
+                    )
+
+                    vote_method_options = ["AP", "MB", "P", "DNV"]
+                    vote_methods_pick = st.multiselect(
+                        "Vote Method",
+                        vote_method_options,
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("vote_methods_pick", []), vote_method_options),
+                        help="AP = at poll, MB = mail ballot, P = provisional, DNV = did not vote.",
+                    )
+
+                    if not election_columns_found:
+                        st.caption("Use this to match voters by election year, election type, and how they voted.")
+
+                    # Mail ballot filters live in their own section below.
+                    if "election_years_pick" not in locals():
+                        election_years_pick = []
+                    if "election_types_pick" not in locals():
+                        election_types_pick = []
+                    if "vote_methods_pick" not in locals():
+                        vote_methods_pick = []
+                    mib_applied_pick = []
+                    mib_ballot_pick = []
+                    mb_perm_pick = []
+                    source_file_pick = []
+                    mb_new_reg_pick = []
+                    current_ballot_sent_status = "All"
+                    current_ballot_returned_status = "All"
+                    mb_score_slider = None
+
+                with st.expander("Mail Ballots", expanded=False):
+                    mib_applied_pick = st.multiselect(
+                        "Mail Ballot Application Status",
+                        opts.get("mib_applied_vals", []),
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("mib_applied_pick", []), opts.get("mib_applied_vals", [])),
+                        help="APP = applied/approved, DEC = declined/rejected, DNA = did not apply when present in the source data.",
+                    )
+                    # Mail Ballot Vote Status removed; Ballot Returned covers this use case.
+                    mib_ballot_pick = []
+                    mb_perm_pick = st.multiselect(
+                        "Permanent Mail Ballot",
+                        opts.get("mb_perm_vals", []),
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("mb_perm_pick", []), opts.get("mb_perm_vals", [])),
+                    )
+
+                    source_file_pick = []
+                    # Mail Ballot New Registrant removed from the main Universe builder.
+                    # It will return inside the dedicated Mail Ballot Center after the
+                    # CURRENT.txt overlay is isolated and verified at the pipeline level.
+                    mb_new_reg_pick = []
+                    current_ballot_sent_status = st.selectbox(
+                        "Ballot Sent",
+                        ["All", "Sent", "Not Sent/Unknown"],
+                        index=["All", "Sent", "Not Sent/Unknown"].index(sanitize_selectbox_value(st.session_state.active_filters.get("current_ballot_sent_status", "All"), ["All", "Sent", "Not Sent/Unknown"], "All")),
+                    )
+                    current_ballot_returned_status = st.selectbox(
+                        "Ballot Returned",
+                        ["All", "Returned", "Not Returned/Unknown"],
+                        index=["All", "Returned", "Not Returned/Unknown"].index(sanitize_selectbox_value(st.session_state.active_filters.get("current_ballot_returned_status", "All"), ["All", "Returned", "Not Returned/Unknown"], "All")),
+                    )
+
+                    if opts.get("mb_score_min") is not None and opts.get("mb_score_max") is not None:
+                        lo = float(opts["mb_score_min"])
+                        hi = float(opts["mb_score_max"])
+                        default_score = sanitize_slider_range(
+                            st.session_state.active_filters.get("mb_score_slider", (lo, hi)),
+                            lo,
+                            hi,
+                            float,
+                        )
+                        mb_score_slider = st.slider("MB Probability Score", min_value=lo, max_value=hi, value=default_score)
+
                 with st.expander("Contact Filters", expanded=False):
+                    tag_pick = st.multiselect(
+                        "Tags",
+                        opts.get("tag_vals", []),
+                        default=sanitize_multiselect_defaults(st.session_state.active_filters.get("tag_pick", []), opts.get("tag_vals", [])),
+                        help="Matches comma-separated values in the Tags column."
+                    ) if "Tags" in cols else []
                     email_opts = ["All", "Has Email", "No Email"]
                     landline_opts = ["All", "Has Landline", "No Landline"]
                     mobile_opts = ["All", "Has Mobile", "No Mobile"]
                     has_email = st.selectbox("Email", email_opts, index=email_opts.index(sanitize_selectbox_value(st.session_state.active_filters.get("has_email", "All"), email_opts, "All")))
                     has_landline = st.selectbox("Landline", landline_opts, index=landline_opts.index(sanitize_selectbox_value(st.session_state.active_filters.get("has_landline", "All"), landline_opts, "All")))
                     has_mobile = st.selectbox("Mobile", mobile_opts, index=mobile_opts.index(sanitize_selectbox_value(st.session_state.active_filters.get("has_mobile", "All"), mobile_opts, "All")))
+                    applicant_phone_opts = ["All", "Has Applicant Phone", "No Applicant Phone"]
+                    has_applicant_phone = st.selectbox("Mail Ballot Applicant Phone", applicant_phone_opts, index=applicant_phone_opts.index(sanitize_selectbox_value(st.session_state.active_filters.get("has_applicant_phone", "All"), applicant_phone_opts, "All")))
+                    applicant_phone_type_pick = []
+                    applicant_phone_compliance_pick = []
 
                 with st.expander("Smart Follow-Up", expanded=False):
                     contact_status_opts = ["All", "Not Contacted", "Contacted"]
@@ -4905,17 +8585,21 @@ with st.sidebar:
                         support_level_opts,
                         index=support_level_opts.index(current_support),
                     )
-                    st.caption("These filters use uploaded Street List and Walk Sheet tracking data across exports, reports, and turf packets.")
+                    st.caption("Use these filters to organize follow-up and field activity.")
 
-                st.caption("Counts stay at zero until you click Apply Filters.")
+                st.caption("")
                 cols2 = st.columns(2)
-                apply_filters = cols2[0].form_submit_button("Apply Filters", use_container_width=True, type="primary")
-                clear_filters = cols2[1].form_submit_button("Clear Filters", use_container_width=True)
+                apply_filters = cols2[0].form_submit_button("Apply Filters", width="stretch", type="primary")
+                clear_filters = cols2[1].form_submit_button("Clear Filters", width="stretch")
 
             if clear_filters:
                 st.session_state.active_filters = {}
+                # Do not directly modify geo_dep_* widget keys here. Streamlit forbids
+                # changing a widget's session_state after it has been instantiated.
+                # Set a reset flag and apply it before widgets render on the next run.
+                st.session_state.reset_geo_filter_widgets = True
                 st.session_state.filters_applied = False
-                st.session_state.workspace_mode = "universe"
+                st.session_state.workspace_mode = "landing"
                 st.session_state.lookup_view_active = False
                 st.rerun()
 
@@ -4927,6 +8611,7 @@ with st.sidebar:
                     "party_pick": party_pick,
                     "hh_party_pick": hh_party_pick,
                     "calc_party_pick": calc_party_pick,
+                    "tag_pick": tag_pick,
                     "gender_pick": gender_pick,
                     "age_range_pick": age_range_pick,
                     "age_slider": age_slider,
@@ -4935,11 +8620,21 @@ with st.sidebar:
                     "mib_applied_pick": mib_applied_pick,
                     "mib_ballot_pick": mib_ballot_pick,
                     "mb_perm_pick": mb_perm_pick,
+                    "source_file_pick": [],
+                    "mb_new_reg_pick": mb_new_reg_pick,
+                    "current_ballot_sent_status": current_ballot_sent_status,
+                    "current_ballot_returned_status": current_ballot_returned_status,
                     "mb_score_slider": mb_score_slider,
                     "new_reg_months": new_reg_months,
+                    "election_years_pick": election_years_pick,
+                    "election_types_pick": election_types_pick,
+                    "vote_methods_pick": vote_methods_pick,
                     "has_email": has_email,
                     "has_landline": has_landline,
                     "has_mobile": has_mobile,
+                    "has_applicant_phone": has_applicant_phone,
+                    "applicant_phone_type_pick": [],
+                    "applicant_phone_compliance_pick": [],
                     "contact_status": contact_status,
                     "global_nh": global_nh,
                     "global_follow_up": global_follow_up,
@@ -4952,34 +8647,31 @@ with st.sidebar:
                 st.caption("These buttons keep your existing geography and voter filters, but quickly set the Smart Follow-Up filters.")
                 qs_row1 = st.columns(2, gap="small")
                 with qs_row1[0]:
-                    if st.button("Re-Knock List", use_container_width=True, key="qs_reknock"):
+                    if st.button("Re-Knock List", width="stretch", key="qs_reknock"):
                         apply_followup_preset("Re-Knock List")
                 with qs_row1[1]:
-                    if st.button("Follow-Up List", use_container_width=True, key="qs_followup"):
+                    if st.button("Follow-Up List", width="stretch", key="qs_followup"):
                         apply_followup_preset("Follow-Up List")
 
                 qs_row2 = st.columns(2, gap="small")
                 with qs_row2[0]:
-                    if st.button("GOTV Supporters", use_container_width=True, key="qs_gotv"):
+                    if st.button("GOTV Supporters", width="stretch", key="qs_gotv"):
                         apply_followup_preset("GOTV Supporters")
                 with qs_row2[1]:
-                    if st.button("Undecided Persuasion", use_container_width=True, key="qs_undecided"):
+                    if st.button("Undecided Persuasion", width="stretch", key="qs_undecided"):
                         apply_followup_preset("Undecided Persuasion")
 
                 qs_row3 = st.columns(2, gap="small")
                 with qs_row3[0]:
-                    if st.button("Yard Sign Follow-Up", use_container_width=True, key="qs_yardsign"):
+                    if st.button("Yard Sign Follow-Up", width="stretch", key="qs_yardsign"):
                         apply_followup_preset("Yard Sign Follow-Up")
                 with qs_row3[1]:
-                    if st.button("Clear Quick Select", use_container_width=True, key="qs_clear"):
+                    if st.button("Clear Quick Select", width="stretch", key="qs_clear"):
                         apply_followup_preset("Clear")
 
             with st.expander("💾 Saved Universes", expanded=False):
                 store_label = get_saved_universe_store_label()
-                if store_label == "Cloudflare R2":
-                    st.caption("Saved universes are stored in persistent Cloudflare R2 storage.")
-                else:
-                    st.caption("Saved universes are using local fallback storage. Add R2 write secrets to keep them across restarts.")
+                st.caption("Saved universes are available for quick reuse.")
 
                 saved_universes = load_saved_universes()
                 st.session_state["saved_universes"] = saved_universes
@@ -4998,16 +8690,22 @@ with st.sidebar:
                     st.caption(universe_info.get("summary", "No filters"))
                     load_col, delete_col = st.columns(2, gap="small")
                     with load_col:
-                        if st.button("Load Universe", use_container_width=True, key="load_sidebar_universe"):
+                        if st.button("Load Universe", width="stretch", key="load_sidebar_universe"):
                             loaded_filters = universe_info.get("filters", {}) or {}
                             st.session_state.active_filters = loaded_filters
+                            # Apply loaded geo widget values before the geography widgets
+                            # render on the next run, not after they have already rendered.
+                            st.session_state.pending_geo_widget_filters = {
+                                _geo_col: loaded_filters.get(_geo_col, []) or []
+                                for _geo_col in GEO_FILTER_COLUMNS
+                            }
                             st.session_state.filters_applied = False
                             st.session_state.workspace_mode = "universe"
                             st.session_state.lookup_view_active = False
                             st.success(f"Loaded universe: {selected_sidebar_universe}")
                             st.rerun()
                     with delete_col:
-                        if st.button("Delete Universe", use_container_width=True, key="delete_sidebar_universe"):
+                        if st.button("Delete Universe", width="stretch", key="delete_sidebar_universe"):
                             saved_universes.pop(selected_sidebar_universe, None)
                             save_saved_universes(saved_universes)
                             st.session_state["saved_universes"] = saved_universes
@@ -5021,7 +8719,7 @@ with st.sidebar:
                     key="save_universe_name_sidebar",
                     placeholder="Example: GOTV Democrats Week 1",
                 )
-                if st.button("Save Current Universe", use_container_width=True, key="save_sidebar_universe"):
+                if st.button("Save Current Universe", width="stretch", key="save_sidebar_universe"):
                     universe_name = save_name.strip()
                     if universe_name:
                         current_filters = st.session_state.get("active_filters", {})
@@ -5039,13 +8737,15 @@ with st.sidebar:
                     else:
                         st.warning("Enter a universe name first.")
 
-        render_lookup_sidebar(st.session_state.active_filters, cols)
+        if st.session_state.get("workspace_mode") == "lookup":
+            render_lookup_sidebar(st.session_state.active_filters, cols)
 
-        with st.expander("Area Intelligence", expanded=st.session_state.get("workspace_mode") == "area_intelligence"):
-            if st.button("Show Area Intelligence", use_container_width=True, key="show_area_intelligence_workspace"):
-                st.session_state.workspace_mode = "area_intelligence"
-                st.session_state.lookup_view_active = False
-                st.rerun()
+        if st.session_state.get("workspace_mode") == "mail_ballot_center":
+            st.markdown("<div class='cc-active-section-title'>Mail Ballot Center</div>", unsafe_allow_html=True)
+            st.caption("Operations, analysis, follow-up, and reporting for the daily CURRENT.txt mail ballot overlay.")
+
+        if st.session_state.get("workspace_mode") == "area_intelligence":
+            st.markdown("<div class='cc-active-section-title'>Area Intelligence</div>", unsafe_allow_html=True)
             st.caption("Precinct profile, summary metrics, and strategy foundation.")
 
 if not st.session_state.data_loaded:
@@ -5054,24 +8754,37 @@ if not st.session_state.data_loaded:
 
 active = st.session_state.active_filters
 columns = st.session_state.columns
-workspace_mode = st.session_state.get("workspace_mode", "universe")
+workspace_mode = st.session_state.get("workspace_mode", "landing")
 
 if workspace_mode == "lookup":
     if st.session_state.get("lookup_view_active", False):
-        render_voter_lookup_results()
+        try:
+            render_voter_lookup_results()
+        except Exception as e:
+            st.error("Voter Lookup hit a data-field error instead of crashing the dashboard.")
+            st.info("The rest of Candidate Connect is still available.")
     else:
         render_lookup_empty_workspace()
+elif workspace_mode == "mail_ballot_center":
+    render_mail_ballot_center_workspace()
 elif workspace_mode == "area_intelligence":
     render_area_intelligence_workspace()
 else:
     if not st.session_state.filters_applied:
-        st.markdown('<div class="section-card empty-shell"><div class="small-header">Create Universe</div><div class="tiny-muted">Choose your filters in the left menu and click <strong>Apply Filters</strong> to run counts and charts.</div></div>', unsafe_allow_html=True)
+        st.markdown("<div style='font-size:28px;font-weight:900;letter-spacing:.08em;color:#ffffff;margin:0 0 18px 6px;text-transform:uppercase;'>Voters Statewide</div>", unsafe_allow_html=True)
+        render_opening_dashboard_preview()
         st.stop()
 
-    with st.spinner("Running DuckDB queries..."):
+    with st.spinner("Loading dashboard from speed tables..."):
         metrics = query_metrics(active, columns)
         large_filter_mode = use_large_filter_mode(active, columns)
-        followup_stats = query_dashboard_followup_stats(active)
+        # Speed-table dashboard rule: do not scan detail shards during Apply Filters.
+        # Contact-tracking aggregates will be added as their own lightweight table later.
+        followup_stats = {
+            "contacted_pct": 0, "nh_pct": 0, "followup_pct": 0, "undecided_pct": 0,
+            "contacted_count": 0, "nh_count": 0, "followup_count": 0, "undecided_count": 0,
+            "strong_pct": 0, "strong_count": 0, "large_mode": True, "speed_placeholder": True,
+        }
 
         if large_filter_mode:
             party_df = pd.DataFrame(columns=["Party", "Count"])
@@ -5082,12 +8795,12 @@ else:
             party_df = query_chart(active, columns, "_PartyNorm", "Party")
             gender_df = query_chart(active, columns, "_Gender", "Gender")
             age_df = query_chart(active, columns, "_AgeRange", "Age Range")
-            area_choices = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District"] if c in columns]
+            area_choices = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"] if c in columns]
 
     metric_cols = st.columns(5, gap="small")
     metric_values = [
         ("Voters", f"{safe_int(metrics.get('voters')):,}"),
-        ("Households", f"{safe_int(metrics.get('households')):,}"),
+        ("Households", "—" if metrics.get("households") is None else f"{safe_int(metrics.get('households')):,}"),
         ("Emails", f"{safe_int(metrics.get('emails')):,}"),
         ("Mobiles", f"{safe_int(metrics.get('mobiles')):,}"),
         ("Unique Precincts", f"{safe_int(metrics.get('unique_precincts')):,}"),
@@ -5095,6 +8808,8 @@ else:
     for col, (label, value) in zip(metric_cols, metric_values):
         with col:
             st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>', unsafe_allow_html=True)
+    if metrics.get("speed_mode"):
+        st.caption("")
     campaign_cols = st.columns(4, gap="small")
     campaign_values = [
         ("Contacted", f"{safe_int(followup_stats.get('contacted_pct'))}%", f"{safe_int(followup_stats.get('contacted_count')):,} voters"),
@@ -5112,21 +8827,21 @@ else:
     divider()
 
     if large_filter_mode:
-        st.warning("Large statewide filter detected. To keep the app stable, some detail-heavy tracking calculations are temporarily simplified until you narrow the universe.")
+        st.warning("Large statewide universe detected. Narrow by geography or voter filters for detailed charts and grouped tables.")
 
     dashboard_tabs = st.tabs(["Overview", "Contact Tracking", "Output Center"])
 
     with dashboard_tabs[0]:
         if large_filter_mode:
-            st.info("Summary-only mode is active for this large statewide filter. Narrow by county, municipality, or precinct to restore charts and grouped tables.")
+            st.info("Summary view is active for this large universe. Narrow by geography or voter filters for deeper charts and tables.")
             summary_only_df = pd.DataFrame([
                 {"Metric": "Voters", "Value": f"{safe_int(metrics.get('voters')):,}"},
-                {"Metric": "Households", "Value": f"{safe_int(metrics.get('households')):,}"},
+                {"Metric": "Households", "Value": "—" if metrics.get("households") is None else f"{safe_int(metrics.get('households')):,}"},
                 {"Metric": "Emails", "Value": f"{safe_int(metrics.get('emails')):,}"},
                 {"Metric": "Mobiles", "Value": f"{safe_int(metrics.get('mobiles')):,}"},
                 {"Metric": "Unique Precincts", "Value": f"{safe_int(metrics.get('unique_precincts')):,}"},
             ])
-            st.dataframe(summary_only_df, use_container_width=True, hide_index=True)
+            st.dataframe(summary_only_df, width="stretch", hide_index=True)
         else:
             chart_cols = st.columns(3, gap="medium")
             with chart_cols[0]:
@@ -5147,11 +8862,12 @@ else:
             st.markdown('<div class="table-card">', unsafe_allow_html=True)
             st.markdown('<div class="small-header">Counts by Area</div>', unsafe_allow_html=True)
             if area_choices:
-                selected_area = st.selectbox("Area", area_choices, label_visibility="collapsed", key="overview_area_group")
+                selected_area = st.selectbox("Area", area_choices, format_func=geo_label, label_visibility="collapsed", key="overview_area_group")
                 area_df = query_area_summary(active, columns, selected_area).copy()
                 area_df["Individuals"] = pd.to_numeric(area_df["Individuals"], errors="coerce").fillna(0).map(lambda x: f"{x:,.0f}")
-                area_df["Households"] = pd.to_numeric(area_df["Households"], errors="coerce").fillna(0).map(lambda x: f"{x:,.0f}")
-                st.dataframe(area_df, use_container_width=True, hide_index=True)
+                if "Households" in area_df.columns and not area_df["Households"].astype(str).eq("—").all():
+                    area_df["Households"] = pd.to_numeric(area_df["Households"], errors="coerce").fillna(0).map(lambda x: f"{x:,.0f}")
+                st.dataframe(area_df, width="stretch", hide_index=True)
             else:
                 st.caption("No area fields available.")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -5169,7 +8885,7 @@ else:
                     {"Metric": "Not Home", "Percent": f"{safe_int(followup_stats.get('nh_pct'))}%", "Voters": f"{safe_int(followup_stats.get('nh_count')):,}"},
                     {"Metric": "Follow-Up", "Percent": f"{safe_int(followup_stats.get('followup_pct'))}%", "Voters": f"{safe_int(followup_stats.get('followup_count')):,}"},
                 ])
-                st.dataframe(tracking_summary_df, use_container_width=True, hide_index=True)
+                st.dataframe(tracking_summary_df, width="stretch", hide_index=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             with tracking_cols[1]:
                 st.markdown('<div class="table-card">', unsafe_allow_html=True)
@@ -5178,7 +8894,7 @@ else:
                     {"Metric": "Strong Support", "Percent": f"{safe_int(followup_stats.get('strong_pct'))}%", "Voters": f"{safe_int(followup_stats.get('strong_count')):,}"},
                     {"Metric": "Undecided", "Percent": f"{safe_int(followup_stats.get('undecided_pct'))}%", "Voters": f"{safe_int(followup_stats.get('undecided_count')):,}"},
                 ])
-                st.dataframe(support_summary_df, use_container_width=True, hide_index=True)
+                st.dataframe(support_summary_df, width="stretch", hide_index=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
     with dashboard_tabs[2]:
@@ -5187,7 +8903,7 @@ else:
 
         if large_filter_mode:
             st.warning("Large statewide universe detected. Interactive outputs are paused here to keep the app stable. Use the statewide summary report below, or narrow geography to restore the normal Output Center.")
-            if st.button("Prepare Statewide Summary Report", use_container_width=True):
+            if st.button("Prepare Statewide Summary Report", width="stretch"):
                 with st.spinner("Building statewide summary report..."):
                     st.session_state["statewide_summary_report_bytes"] = build_statewide_summary_report_bytes(active, columns)
             if "statewide_summary_report_bytes" in st.session_state and st.session_state["statewide_summary_report_bytes"]:
@@ -5196,11 +8912,11 @@ else:
                     data=st.session_state["statewide_summary_report_bytes"],
                     file_name="candidate_connect_statewide_summary_report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                 )
-            st.caption("This workbook includes Overview, Filters, County, USC, STS, and STH sheets for the current universe.")
+            st.caption("This workbook includes Overview, Filters, County, Congressional, State Senate, and State House sheets for the current universe.")
         else:
-            output_tabs = st.tabs(["Exports", "Reports", "Turf Builder"])
+            output_tabs = st.tabs(["Exports", "Reports"])
             with output_tabs[0]:
                 st.markdown('<div class="small-header">Exports</div>', unsafe_allow_html=True)
                 st.caption("CSV files are only built when you click the button for that export type.")
@@ -5215,39 +8931,46 @@ else:
                 exp_cols = st.columns(3, gap="medium")
         
                 with exp_cols[0]:
-                    if st.button("Prepare Filtered CSV", use_container_width=True):
+                    if st.button("Prepare Filtered CSV", width="stretch"):
                         with st.spinner("Building filtered CSV from detail shards..."):
                             export_df = build_filtered_csv_export(active)
                             st.session_state["filtered_export_df"] = export_df
+                            st.session_state.pop("filtered_export_xlsx", None)
                     if "filtered_export_df" in st.session_state:
                         st.download_button(
                             "Download Filtered CSV",
                             data=dataframe_to_csv_bytes(st.session_state["filtered_export_df"]),
                             file_name="candidate_connect_filtered.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("filtered_export_df",),
                         )
         
                 with exp_cols[1]:
-                    if st.button("Prepare Texting CSV", use_container_width=True):
+                    if st.button("Prepare Texting CSV", width="stretch"):
                         with st.spinner("Building texting CSV from detail shards..."):
                             export_df = build_texting_export(active)
                             st.session_state["texting_export_df"] = export_df
+                            st.session_state.pop("texting_export_xlsx", None)
                     if "texting_export_df" in st.session_state:
                         st.download_button(
                             "Download Texting CSV",
                             data=dataframe_to_csv_bytes(st.session_state["texting_export_df"]),
                             file_name="candidate_connect_texting.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("texting_export_df",),
                         )
         
                 with exp_cols[2]:
-                    if st.button("Prepare Mail CSV", use_container_width=True):
-                        with st.spinner("Building mail CSV from detail shards..."):
+                    if st.button("Prepare Mail CSV", width="stretch"):
+                        with st.spinner("Building mail CSV from selected detail fields..."):
                             export_df = build_mail_export(active, householded=(mail_mode == "Householded"))
                             st.session_state["mail_export_df"] = export_df
                             st.session_state["mail_export_mode"] = mail_mode
+                            st.session_state.pop("mail_export_xlsx", None)
                     if "mail_export_df" in st.session_state:
                         suffix = "householded" if st.session_state.get("mail_export_mode") == "Householded" else "individual"
                         st.download_button(
@@ -5255,7 +8978,70 @@ else:
                             data=dataframe_to_csv_bytes(st.session_state["mail_export_df"]),
                             file_name=f"candidate_connect_mail_{suffix}.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("mail_export_df",),
+                        )
+
+                st.divider()
+                st.caption("Excel versions of the CSV exports are built only after you click Prepare, so they do not slow the dashboard or counts panel. Each workbook includes Sheet 1: Area Counts and Sheet 2: Data.")
+                excel_cols = st.columns(3, gap="medium")
+                with excel_cols[0]:
+                    if st.button("Prepare Filtered Excel", width="stretch"):
+                        with st.spinner("Building filtered Excel workbook..."):
+                            export_df = st.session_state.get("filtered_export_df")
+                            if export_df is None:
+                                export_df = build_filtered_csv_export(active)
+                                st.session_state["filtered_export_df"] = export_df
+                            st.session_state["filtered_export_xlsx"] = dataframe_to_export_excel_bytes(export_df, "Filtered")
+                    if st.session_state.get("filtered_export_xlsx"):
+                        st.download_button(
+                            "Download Filtered Excel",
+                            data=st.session_state["filtered_export_xlsx"],
+                            file_name="candidate_connect_filtered.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("filtered_export_xlsx",),
+                        )
+                with excel_cols[1]:
+                    if st.button("Prepare Texting Excel", width="stretch"):
+                        with st.spinner("Building texting Excel workbook..."):
+                            export_df = st.session_state.get("texting_export_df")
+                            if export_df is None:
+                                export_df = build_texting_export(active)
+                                st.session_state["texting_export_df"] = export_df
+                            st.session_state["texting_export_xlsx"] = dataframe_to_export_excel_bytes(export_df, "Texting")
+                    if st.session_state.get("texting_export_xlsx"):
+                        st.download_button(
+                            "Download Texting Excel",
+                            data=st.session_state["texting_export_xlsx"],
+                            file_name="candidate_connect_texting.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("texting_export_xlsx",),
+                        )
+                with excel_cols[2]:
+                    if st.button("Prepare Mail Excel", width="stretch"):
+                        with st.spinner("Building mail Excel workbook..."):
+                            export_df = st.session_state.get("mail_export_df")
+                            if export_df is None or st.session_state.get("mail_export_mode") != mail_mode:
+                                export_df = build_mail_export(active, householded=(mail_mode == "Householded"))
+                                st.session_state["mail_export_df"] = export_df
+                                st.session_state["mail_export_mode"] = mail_mode
+                            st.session_state["mail_export_xlsx"] = dataframe_to_export_excel_bytes(export_df, "Mail")
+                            st.session_state["mail_export_xlsx_mode"] = mail_mode
+                    if st.session_state.get("mail_export_xlsx"):
+                        suffix = "householded" if st.session_state.get("mail_export_xlsx_mode") == "Householded" else "individual"
+                        st.download_button(
+                            "Download Mail Excel",
+                            data=st.session_state["mail_export_xlsx"],
+                            file_name=f"candidate_connect_mail_{suffix}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            width="stretch",
+                            on_click=clear_prepared_download_state,
+                            args=("mail_export_xlsx",),
                         )
         
             with output_tabs[1]:
@@ -5268,7 +9054,7 @@ else:
                     st.caption("Builds a clean PDF summary of the current filtered universe with overview counts, selected filters, and party/gender/age breakdowns.")
                     summary_cols = st.columns(2, gap="medium")
                     with summary_cols[0]:
-                        if st.button("Prepare Summary Report PDF", use_container_width=True):
+                        if st.button("Prepare Summary Report PDF", width="stretch"):
                             with st.spinner("Building Summary Report PDF from current filtered universe..."):
                                 pdf_bytes = generate_summary_report_pdf_bytes(active, cols)
                                 st.session_state["summary_report_pdf_bytes"] = pdf_bytes
@@ -5279,7 +9065,7 @@ else:
                                 data=st.session_state["summary_report_pdf_bytes"],
                                 file_name="candidate_connect_summary_report.pdf",
                                 mime="application/pdf",
-                                use_container_width=True,
+                                width="stretch",
                             )
         
                 with report_sections[1]:
@@ -5291,15 +9077,22 @@ else:
                             data=get_street_results_template_csv_bytes(),
                             file_name="candidate_connect_street_results_template.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
+                            on_click="ignore",
                         )
-                        st.download_button(
-                            "Download Street List Excel Tracking Sheet",
-                            data=get_street_results_sheet_bytes(active),
-                            file_name="candidate_connect_street_list_tracking.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                        )
+                        if st.button("Prepare Street List Excel Tracking Sheet", width="stretch"):
+                            with st.spinner("Building Street List Excel tracking sheet from filtered detail shards..."):
+                                st.session_state["street_results_sheet_bytes"] = get_street_results_sheet_bytes(active)
+                        if st.session_state.get("street_results_sheet_bytes"):
+                            st.download_button(
+                                "Download Street List Excel Tracking Sheet",
+                                data=st.session_state["street_results_sheet_bytes"],
+                                file_name="candidate_connect_street_list_tracking.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                width="stretch",
+                                on_click=clear_prepared_download_state,
+                                args=("street_results_sheet_bytes",),
+                            )
                     with upload_cols[1]:
                         uploaded_results_file = st.file_uploader(
                             "Upload Street Results File",
@@ -5338,7 +9131,7 @@ else:
                         if isinstance(loaded_results, pd.DataFrame) and not loaded_results.empty:
                             st.caption(f"Loaded rows: {len(loaded_results):,}")
                             st.caption(f"Source: {st.session_state.get('street_results_upload_name', 'uploaded CSV')}")
-                            if st.button("Clear Uploaded Street Results", use_container_width=True):
+                            if st.button("Clear Uploaded Street Results", width="stretch"):
                                 st.session_state["street_results_df"] = pd.DataFrame(columns=["PA ID Number", "F", "A", "U", "NH", "Yard Sign", "Notes"])
                                 st.session_state["street_results_filters"] = {}
                                 st.session_state.pop("street_results_upload_sig", None)
@@ -5367,7 +9160,7 @@ else:
         
                     pdf_cols = st.columns(2, gap="medium")
                     with pdf_cols[0]:
-                        if st.button("Prepare Street List PDF", use_container_width=True):
+                        if st.button("Prepare Street List PDF", width="stretch"):
                             with st.spinner("Building Street List PDF from filtered detail shards..."):
                                 pdf_bytes = generate_street_list_pdf_bytes(active)
                                 st.session_state["street_pdf_bytes"] = pdf_bytes
@@ -5378,7 +9171,9 @@ else:
                                 data=st.session_state["street_pdf_bytes"],
                                 file_name="candidate_connect_street_list.pdf",
                                 mime="application/pdf",
-                                use_container_width=True,
+                                width="stretch",
+                                on_click=clear_prepared_download_state,
+                                args=("street_pdf_bytes",),
                             )
         
                 with report_sections[2]:
@@ -5390,9 +9185,10 @@ else:
                             data=get_walk_sheet_tracking_template_csv_bytes(),
                             file_name="candidate_connect_walk_sheet_tracking_template.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
+                            on_click="ignore",
                         )
-                        if st.button("Prepare Walk Sheet Excel Tracking Sheet", use_container_width=True):
+                        if st.button("Prepare Walk Sheet Excel Tracking Sheet", width="stretch"):
                             with st.spinner("Building Walk Sheet Excel tracking sheet from filtered detail shards..."):
                                 excel_bytes = build_walk_sheet_tracking_excel_bytes(active)
                                 st.session_state["walk_sheet_tracking_excel_bytes"] = excel_bytes
@@ -5402,7 +9198,9 @@ else:
                                 data=st.session_state["walk_sheet_tracking_excel_bytes"],
                                 file_name="candidate_connect_walk_sheet_tracking.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True,
+                                width="stretch",
+                                on_click=clear_prepared_download_state,
+                                args=("walk_sheet_tracking_excel_bytes",),
                             )
                     with upload_cols[1]:
                         uploaded_walk_file = st.file_uploader(
@@ -5442,7 +9240,7 @@ else:
                         if isinstance(loaded_walk_results, pd.DataFrame) and not loaded_walk_results.empty:
                             st.caption(f"Loaded rows: {len(loaded_walk_results):,}")
                             st.caption(f"Source: {st.session_state.get('walk_results_upload_name', 'uploaded file')}")
-                            if st.button("Clear Uploaded Walk Sheet Results", use_container_width=True):
+                            if st.button("Clear Uploaded Walk Sheet Results", width="stretch"):
                                 st.session_state["walk_results_df"] = pd.DataFrame(columns=["PA ID Number", "Contacted", "Result", "Support Level", "Follow-Up", "Notes"])
                                 st.session_state["walk_results_filters"] = {}
                                 st.session_state.pop("walk_results_upload_sig", None)
@@ -5501,7 +9299,7 @@ else:
         
                     walk_cols = st.columns(2, gap="medium")
                     with walk_cols[0]:
-                        if st.button("Prepare Walk Sheet PDF", use_container_width=True):
+                        if st.button("Prepare Walk Sheet PDF", width="stretch"):
                             with st.spinner("Building Walk Sheet PDF from filtered detail shards..."):
                                 pdf_bytes = generate_walk_sheet_pdf_bytes(active)
                                 st.session_state["walk_sheet_pdf_bytes"] = pdf_bytes
@@ -5512,7 +9310,9 @@ else:
                                 data=st.session_state["walk_sheet_pdf_bytes"],
                                 file_name="candidate_connect_walk_sheet.pdf",
                                 mime="application/pdf",
-                                use_container_width=True,
+                                width="stretch",
+                                on_click=clear_prepared_download_state,
+                                args=("walk_sheet_pdf_bytes",),
                             )
         
                 with report_sections[3]:
@@ -5525,7 +9325,7 @@ else:
                     )
                     label_cols = st.columns(2, gap="medium")
                     with label_cols[0]:
-                        if st.button("Prepare Mailing Labels PDF", use_container_width=True):
+                        if st.button("Prepare Mailing Labels PDF", width="stretch"):
                             with st.spinner("Building mailing labels PDF from filtered detail shards..."):
                                 pdf_bytes = generate_mailing_labels_pdf_bytes(active, householded=(label_mode == "Householded"))
                                 st.session_state["mailing_labels_pdf_bytes"] = pdf_bytes
@@ -5538,127 +9338,12 @@ else:
                                 data=st.session_state["mailing_labels_pdf_bytes"],
                                 file_name=f"candidate_connect_mailing_labels_{suffix}.pdf",
                                 mime="application/pdf",
-                                use_container_width=True,
+                                width="stretch",
+                                on_click=clear_prepared_download_state,
+                                args=("mailing_labels_pdf_bytes",),
                             )
         
         
-            with output_tabs[2]:
-                st.markdown('<div class="small-header">Turf Builder</div>', unsafe_allow_html=True)
-                st.caption("Split the current filtered universe into turf packets and download a ZIP with per-turf CSVs and Walk Sheet PDFs.")
-        
-                turf_mode_labels = {
-                    "Target Doors": "doors",
-                    "Target Voters": "voters",
-                    "By Precinct": "precinct",
-                    "By Municipality": "municipality",
-                }
-        
-                turf_mode = st.selectbox(
-                    "Split Method",
-                    list(turf_mode_labels.keys()),
-                    key="turf_mode_select",
-                )
-        
-                if turf_mode in ["Target Doors", "Target Voters"]:
-                    default_size = 50 if turf_mode == "Target Doors" else 100
-                    turf_target_size = st.slider(
-                        "Target Size Per Turf",
-                        min_value=10,
-                        max_value=500,
-                        value=default_size,
-                        step=5,
-                        key="turf_target_size_slider",
-                    )
-                    st.caption(
-                        "Target Doors uses households/address groups. Target Voters uses total voter records. "
-                        "Packets are built sequentially from the current filtered universe."
-                    )
-                else:
-                    turf_target_size = 0
-                    st.caption("This will create one turf per selected precinct or municipality in the current filtered universe.")
-        
-                assign_cols = st.columns(3, gap="medium")
-                with assign_cols[0]:
-                    turf_packet_label = st.text_input(
-                        "Packet Label",
-                        value="",
-                        placeholder="Week 1 - Team A",
-                        key="turf_packet_label_input",
-                    )
-                with assign_cols[1]:
-                    turf_volunteer_name = st.text_input(
-                        "Volunteer Name",
-                        value="",
-                        placeholder="Volunteer or team name",
-                        key="turf_volunteer_name_input",
-                    )
-                with assign_cols[2]:
-                    turf_packet_date = st.date_input(
-                        "Packet Date",
-                        value=datetime.now().date(),
-                        key="turf_packet_date_input",
-                    )
-        
-                perf_cols = st.columns([1.2, 1, 1], gap="medium")
-                with perf_cols[0]:
-                    turf_output_mode = st.selectbox(
-                        "Output Type",
-                        ["CSV + Walk Sheet PDFs", "CSV Only (faster)"],
-                        key="turf_output_mode_select",
-                    )
-                with perf_cols[1]:
-                    turf_limit_packets = st.number_input(
-                        "Limit Turf Packets",
-                        min_value=0,
-                        value=0,
-                        step=1,
-                        help="0 means build all turfs. Use a smaller number for quick tests.",
-                        key="turf_limit_packets_input",
-                    )
-                with perf_cols[2]:
-                    st.markdown("")
-                    st.caption("CSV Only is fastest. By Precinct and By Municipality can take much longer when PDFs are included.")
-        
-                if turf_output_mode == "CSV + Walk Sheet PDFs" and turf_mode in ["By Precinct", "By Municipality"]:
-                    st.warning("This can take longer because the app creates one PDF per turf. For the fastest build, choose CSV Only or set a small turf limit first.")
-        
-                turf_cols = st.columns(2, gap="medium")
-                with turf_cols[0]:
-                    if st.button("Prepare Turf Packet ZIP", use_container_width=True):
-                        spinner_text = "Building turf packet ZIP from filtered detail shards..."
-                        if turf_output_mode == "CSV + Walk Sheet PDFs":
-                            spinner_text = "Building turf packets and walk sheets from filtered detail shards..."
-                        with st.spinner(spinner_text):
-                            zip_bytes = build_turf_packet_zip(
-                                active_filters=active,
-                                mode=turf_mode_labels[turf_mode],
-                                target_size=turf_target_size,
-                                volunteer_name=turf_volunteer_name,
-                                packet_label=turf_packet_label,
-                                packet_date=turf_packet_date.strftime("%Y-%m-%d") if turf_packet_date else "",
-                                include_walksheets=(turf_output_mode == "CSV + Walk Sheet PDFs"),
-                                max_turfs=int(turf_limit_packets or 0),
-                            )
-                            st.session_state["turf_packet_zip_bytes"] = zip_bytes
-                            st.session_state["turf_packet_mode"] = turf_mode
-                            st.session_state["turf_packet_label"] = turf_packet_label
-                            st.session_state["turf_output_mode"] = turf_output_mode
-                            st.session_state["turf_limit_packets"] = int(turf_limit_packets or 0)
-                with turf_cols[1]:
-                    if "turf_packet_zip_bytes" in st.session_state and st.session_state["turf_packet_zip_bytes"]:
-                        mode_slug = normalize_export_text(st.session_state.get("turf_packet_mode", "turf_packets")).lower().replace(" ", "_")
-                        label_slug = sanitize_filename_part(st.session_state.get("turf_packet_label", ""))
-                        output_slug = "csv_only" if st.session_state.get("turf_output_mode") == "CSV Only (faster)" else "csv_and_pdfs"
-                        limit_val = int(st.session_state.get("turf_limit_packets", 0) or 0)
-                        limit_slug = f"_first_{limit_val}" if limit_val > 0 else ""
-                        file_stub = f"candidate_connect_turf_packets_{label_slug}_{mode_slug}_{output_slug}{limit_slug}" if label_slug else f"candidate_connect_turf_packets_{mode_slug}_{output_slug}{limit_slug}"
-                        st.download_button(
-                            "Download Turf Packet ZIP",
-                            data=st.session_state["turf_packet_zip_bytes"],
-                            file_name=f"{file_stub}.zip",
-                            mime="application/zip",
-                            use_container_width=True,
-                        )
-        
+
         
             st.markdown('</div>', unsafe_allow_html=True)
