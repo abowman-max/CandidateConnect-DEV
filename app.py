@@ -27,13 +27,13 @@ DISPLAY_LABELS = {
     "STH": "State House District",
     "Age_Range": "Age Range",
     "MIB_Applied": "Mail Ballot Application",
-    "MIB_BALLOT": "Mail Ballot Status",
+    "MIB_BALLOT": "Application Status",
     "MB_PERM": "Permanent Mail Ballot",
     "V4A": "Vote History - All Elections",
     "V4G": "Vote History - General Elections",
     "V4P": "Vote History - Primary Elections",
     "BallotSentStatus": "Ballot Sent",
-    "BallotReturnedStatus": "Ballot Returned",
+    "BallotReturnedStatus": "Ballot Status",
     "HasMobile": "Mobile Phone",
     "HasLandline": "Landline",
     "HasEmail": "Email",
@@ -182,6 +182,23 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     padding-left: 6px !important;
 }
 
+
+/* v13 stronger selected-chip clipping fix */
+[data-baseweb="tag"] {
+    padding-left: 12px !important;
+    margin-left: 6px !important;
+    max-width: none !important;
+}
+[data-baseweb="tag"] span {
+    padding-left: 4px !important;
+}
+[data-baseweb="select"] > div {
+    padding-left: 8px !important;
+}
+[data-baseweb="select"] input {
+    padding-left: 10px !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -253,8 +270,8 @@ def smart_sort_key(v):
 
 
 def selected(field: str):
-    return st.session_state.get(f"filter_{field}", [])
-
+    suffix = st.session_state.get("filter_reset_token", 0)
+    return st.session_state.get(f"filter_{field}_{suffix}", [])
 
 def active_filters() -> dict:
     out = {}
@@ -276,11 +293,46 @@ def active_special_filters() -> dict:
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
     return df
 
+def expand_filter_values(field: str, vals):
+    # User-facing mail ballot labels need to match several possible stored values.
+    expansions = {
+        "MIB_Applied": {
+            "Applied": ["Applied", "Y", "Yes", "1", "True", "TRUE"],
+            "Not Applied": ["Not Applied", "DNA", "N", "No", "0", "False", "FALSE", ""],
+        },
+        "MIB_BALLOT": {
+            "Approved": ["Approved", "APPROVED", "Y", "Yes", "1", "True", "TRUE"],
+            "Declined": ["Declined", "DECLINED", "Rejected", "REJECTED", "Denied", "DENIED", "N", "No", "0", "False", "FALSE"],
+        },
+        "BallotSentStatus": {
+            "Sent": ["Sent", "SENT", "Y", "Yes", "1", "True", "TRUE"],
+            "Not Sent": ["Not Sent", "NOT SENT", "N", "No", "0", "False", "FALSE", ""],
+        },
+        "BallotReturnedStatus": {
+            "Voted": ["Voted", "Returned", "VOTED", "RETURNED", "Y", "Yes", "1", "True", "TRUE"],
+            "Not Voted": ["Not Voted", "Not Returned", "NOT VOTED", "NOT RETURNED", "N", "No", "0", "False", "FALSE", ""],
+        },
+    }
+    out = []
+    mapping = expansions.get(field, {})
+    for v in vals:
+        sv = str(v)
+        out.extend(mapping.get(sv, [sv]))
+    # Deduplicate but preserve order
+    seen = set()
+    final = []
+    for v in out:
+        if v not in seen:
+            seen.add(v)
+            final.append(v)
+    return final
+
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
     for field, vals in active.items():
         if vals and field in out.columns:
-            out = out[out[field].astype(str).isin([str(v) for v in vals])]
+            expanded_vals = expand_filter_values(field, vals)
+            out = out[out[field].astype(str).isin([str(v) for v in expanded_vals])]
     return out
 
 
@@ -309,14 +361,14 @@ def clean_yes_no_all_options():
     return ["Y", "N"]
 
 def clean_mail_options(field: str):
-    # v12: Do not trust generic filter_options for mail fields.
-    # Some builds polluted these with numeric/geography values. Keep user-facing options stable.
+    # v13: clean user-facing mail ballot options only.
+    # Actual data may store Y/N or alternate wording; apply_filters expands these.
     fixed = {
-        "MIB_Applied": ["Applied", "DNA", "Not Applied", "Y", "N"],
-        "MIB_BALLOT": ["Voted", "Not Voted", "Returned", "Not Returned", "Y", "N"],
+        "MIB_Applied": ["Applied", "Not Applied"],
+        "MIB_BALLOT": ["Approved", "Declined"],
+        "BallotSentStatus": ["Sent", "Not Sent"],
+        "BallotReturnedStatus": ["Voted", "Not Voted"],
         "MB_PERM": ["Y", "N"],
-        "BallotSentStatus": ["Sent", "Not Sent", "Y", "N"],
-        "BallotReturnedStatus": ["Returned", "Not Returned", "Voted", "Not Voted", "Y", "N"],
         "HasMobile": ["Y", "N"],
         "HasLandline": ["Y", "N"],
         "HasEmail": ["Y", "N"],
@@ -482,7 +534,8 @@ def exact_counts(active: dict):
 
         for col, vals in active.items():
             if vals and col in df.columns:
-                df = df[df[col].astype(str).isin([str(v) for v in vals])]
+                expanded_vals = expand_filter_values(col, vals)
+                df = df[df[col].astype(str).isin([str(v) for v in expanded_vals])]
             elif vals:
                 df = df.iloc[0:0]
 
@@ -525,7 +578,8 @@ def build_export(active: dict, columns: list[str]):
 
         for col, vals in active.items():
             if vals and col in df.columns:
-                df = df[df[col].astype(str).isin([str(v) for v in vals])]
+                expanded_vals = expand_filter_values(col, vals)
+                df = df[df[col].astype(str).isin([str(v) for v in expanded_vals])]
             elif vals:
                 df = df.iloc[0:0]
 
@@ -557,7 +611,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v12</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v13</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, use_container_width=True)
@@ -573,23 +627,27 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+if "filter_reset_token" not in st.session_state:
+    st.session_state["filter_reset_token"] = 0
+_filter_suffix = st.session_state["filter_reset_token"]
+
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid")
+    st.caption("DEV final hybrid v13")
 
     st.divider()
     st.markdown("### Geography")
     for field in GEO_FIELDS:
         label = DISPLAY_LABELS.get(field, field)
         opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
-        st.multiselect(label, options=opts, key=f"filter_{field}")
+        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
     st.divider()
     st.markdown("### Party / Voter Profile")
     for field in ["Party", "Gender", "Age_Range"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}")
+        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
 
     st.divider()
@@ -597,27 +655,27 @@ with st.sidebar:
     for field in ["V4A", "V4G", "V4P"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}")
+        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
     st.divider()
     st.markdown("### Mail Ballot")
     for field in ["MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}")
+        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
     st.divider()
     st.markdown("### Contact Filters")
     for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}")
+        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
     tag_opts = field_options(filter_options, "Tags")
     if tag_opts:
         st.divider()
         st.markdown("### Tags")
-        st.multiselect("Tags", options=tag_opts, key="filter_Tags")
+        st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
 
 
 
@@ -648,9 +706,7 @@ with action_left:
 
 with action_mid:
     if st.button("Clear Filters", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            if key.startswith("filter_"):
-                del st.session_state[key]
+        st.session_state["filter_reset_token"] = st.session_state.get("filter_reset_token", 0) + 1
         st.session_state.pop("quick_summary", None)
         st.session_state.pop("count_mode", None)
         st.rerun()
