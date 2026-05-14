@@ -270,7 +270,7 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 }
 
 
-/* v20e force dark sidebar expander headers */
+/* v20f force dark sidebar expander headers */
 [data-testid="stSidebar"] details > summary,
 [data-testid="stSidebar"] details > summary:hover,
 [data-testid="stSidebar"] details > summary:focus,
@@ -380,64 +380,14 @@ def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
 def count_safe_filters(active: dict) -> dict:
-    # v16: quick counts use the rebuilt speed/count_cube fields.
-    safe = set(GEO_FIELDS + [
-        "Party", "Gender", "Age_Range", "V4A", "V4G", "V4P",
-        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM",
-        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
-    ])
+    # v20f: Update Counts uses only the proven-safe speed/count fields.
+    # Contact, mail ballot, tags, and sliders remain export/report filters for now.
+    safe = set(GEO_FIELDS + ["Party", "Gender", "Age_Range"])
     return {k: v for k, v in active.items() if k in safe}
 
 def non_count_filters(active: dict) -> dict:
-    safe = set(GEO_FIELDS + [
-        "Party", "Gender", "Age_Range", "V4A", "V4G", "V4P",
-        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM",
-        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
-    ])
+    safe = set(GEO_FIELDS + ["Party", "Gender", "Age_Range"])
     return {k: v for k, v in active.items() if k not in safe}
-
-def manifest_columns() -> list[str]:
-    try:
-        return (
-            (manifest.get("schema") or {}).get("index_columns")
-            or (manifest.get("index") or {}).get("columns")
-            or []
-        )
-    except Exception:
-        return []
-
-def election_filter_columns() -> list[str]:
-    cols = []
-    for c in manifest_columns():
-        s = str(c)
-        u = re.sub(r"[^A-Z0-9]+", "_", s.upper()).strip("_")
-        if re.search(r"(^|_)(G|GENERAL|GEN|P|PRIMARY|PRI|PRIM)_?((?:20)?\d{2})(_|$)", u) or re.search(r"(^|_)((?:20)?\d{2})_?(G|GENERAL|GEN|P|PRIMARY|PRI|PRIM)(_|$)", u):
-            cols.append(s)
-    return cols
-
-def election_years_from_columns() -> list[str]:
-    years = set()
-    for c in election_filter_columns():
-        u = re.sub(r"[^A-Z0-9]+", "_", str(c).upper()).strip("_")
-        for m in re.finditer(r"(20\d{2}|\d{2})", u):
-            y = m.group(1)
-            if len(y) == 2:
-                y = "20" + y
-            try:
-                yi = int(y)
-                if 2000 <= yi <= 2030:
-                    years.add(str(yi))
-            except Exception:
-                pass
-    return sorted(years, reverse=True)
-
-def vote_score_field_from_selection() -> str:
-    choice = st.session_state.get("vote_score_type", "All Elections")
-    if choice == "General Elections":
-        return "V4G"
-    if choice == "Primary Elections":
-        return "V4P"
-    return "V4A"
 
 
 def active_special_filters() -> dict:
@@ -541,7 +491,7 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v20e: Update Counts only uses the quick-count-safe categorical filters.
+    # v20f: Update Counts only uses the quick-count-safe categorical filters.
     # Sliders like MB Probability and Newly Registered stay visible and apply to exports/reports,
     # but they do not touch count updates so they cannot crash the count screen.
     safe_active = count_safe_filters(active) if "count_safe_filters" in globals() else active
@@ -808,7 +758,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20e</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20f</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -830,7 +780,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v20e")
+    st.caption("DEV final hybrid v20f")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
