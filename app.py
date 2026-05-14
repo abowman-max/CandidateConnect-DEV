@@ -220,6 +220,20 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     font-size: 12px !important;
 }
 
+
+/* v19 sidebar roll-up section polish */
+[data-testid="stSidebar"] details {
+    border: 1px solid rgba(148,163,184,.22);
+    border-radius: 10px;
+    padding: 2px 6px;
+    margin-bottom: 8px;
+    background: rgba(15,23,42,.35);
+}
+[data-testid="stSidebar"] summary {
+    font-weight: 850 !important;
+    color: #f8fafc !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -658,7 +672,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v18</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v19</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -680,7 +694,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v18")
+    st.caption("DEV final hybrid v19")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -710,45 +724,40 @@ with st.sidebar:
     if st.session_state.get("left_section") == "create_universe":
         st.markdown("### Create Universe")
 
-        st.markdown("#### Geography")
-        for field in GEO_FIELDS:
-            label = DISPLAY_LABELS.get(field, field)
-            opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
-            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+        with st.expander("Geography", expanded=False):
+            for field in GEO_FIELDS:
+                label = DISPLAY_LABELS.get(field, field)
+                opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
+                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        st.divider()
-        st.markdown("#### Party / Voter Profile")
-        for field in ["Party", "Gender", "Age_Range"]:
-            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-            opts = field_options(filter_options, field)
-            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+        with st.expander("Party / Voter Profile", expanded=False):
+            for field in ["Party", "Gender", "Age_Range"]:
+                label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+                opts = field_options(filter_options, field)
+                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        st.divider()
-        st.markdown("#### Vote History")
-        for field in ["V4A", "V4G", "V4P"]:
-            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-            opts = field_options(filter_options, field)
-            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+        with st.expander("Vote History", expanded=False):
+            for field in ["V4A", "V4G", "V4P"]:
+                label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+                opts = field_options(filter_options, field)
+                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        st.divider()
-        st.markdown("#### Mail Ballot")
-        for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
-            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-            opts = field_options(filter_options, field)
-            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+        with st.expander("Mail Ballot", expanded=False):
+            for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
+                label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+                opts = field_options(filter_options, field)
+                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        st.divider()
-        st.markdown("#### Contact Filters")
-        for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
-            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-            opts = field_options(filter_options, field)
-            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+        with st.expander("Contact Filters", expanded=False):
+            for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
+                label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+                opts = field_options(filter_options, field)
+                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
         tag_opts = field_options(filter_options, "Tags")
         if tag_opts:
-            st.divider()
-            st.markdown("#### Tags")
-            st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
+            with st.expander("Tags", expanded=False):
+                st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
 
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
