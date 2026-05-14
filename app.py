@@ -1,5 +1,5 @@
-# Candidate Connect DEV — Final Hybrid Cloud App
-# Fast counts + exact verification + guarded export.
+# Candidate Connect DEV — Final Hybrid Cloud App v9
+# Full safe filters + fast counts + exact verification + guarded export.
 # Designed after R2/manifest/filter-layer diagnostics passed.
 
 import io
@@ -18,7 +18,7 @@ EXPORT_ROW_LIMIT = 250_000
 st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
 
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
-VOTER_FIELDS = ["Party", "Gender", "Age_Range", "MIB_Applied", "MIB_BALLOT", "MB_PERM"]
+VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
 
 DISPLAY_LABELS = {
@@ -29,6 +29,16 @@ DISPLAY_LABELS = {
     "MIB_Applied": "Mail Ballot Application",
     "MIB_BALLOT": "Mail Ballot Status",
     "MB_PERM": "Permanent Mail Ballot",
+    "V4A": "Vote History - All Elections",
+    "V4G": "Vote History - General Elections",
+    "V4P": "Vote History - Primary Elections",
+    "BallotSentStatus": "Ballot Sent",
+    "BallotReturnedStatus": "Ballot Returned",
+    "HasMobile": "Mobile Phone",
+    "HasLandline": "Landline",
+    "HasEmail": "Email",
+    "HasApplicantPhone": "Applicant Phone",
+    "Tags": "Tags",
 }
 
 LOGO_CANDIDATE_CONNECT = "candidate_connect_logo.png"
@@ -239,6 +249,46 @@ def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
 
+def active_special_filters() -> dict:
+    special = {}
+
+    age_range = st.session_state.get("age_slider", (18, 100))
+    if age_range != (18, 100):
+        special["Age"] = {"min": int(age_range[0]), "max": int(age_range[1])}
+
+    mb_prob = st.session_state.get("mb_prob_slider", (0, 4))
+    if mb_prob != (0, 4):
+        special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
+
+    new_reg_days = st.session_state.get("new_reg_days", 0)
+    if new_reg_days and int(new_reg_days) > 0:
+        special["RegistrationDate"] = {"days": int(new_reg_days)}
+
+    return special
+
+
+def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
+    out = df
+
+    if "Age" in special and "Age" in out.columns:
+        rule = special["Age"]
+        ages = pd.to_numeric(out["Age"], errors="coerce")
+        out = out[(ages >= rule["min"]) & (ages <= rule["max"])]
+
+    if "MB_Prob_Score" in special and "MB_Prob_Score" in out.columns:
+        rule = special["MB_Prob_Score"]
+        scores = pd.to_numeric(out["MB_Prob_Score"], errors="coerce")
+        out = out[(scores >= rule["min"]) & (scores <= rule["max"])]
+
+    if "RegistrationDate" in special and "RegistrationDate" in out.columns:
+        days = int(special["RegistrationDate"]["days"])
+        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+        regs = pd.to_datetime(out["RegistrationDate"], errors="coerce")
+        out = out[regs >= cutoff]
+
+    return out
+
+
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
     for field, vals in active.items():
@@ -358,6 +408,8 @@ def render_quick_exact_comparison():
     st.dataframe(comp, use_container_width=True, hide_index=True)
 
 def quick_counts(active: dict):
+    # Quick counts are based on the speed/count cube and categorical filters.
+    # Slider/range filters are included in exact verification and exports.
     needed = set(["Party"])
     needed.update(active.keys())
     # Include possible count column names. Parquet will error if missing, so we try in stages.
@@ -383,8 +435,10 @@ def quick_counts(active: dict):
 
 
 def exact_counts(active: dict):
+    special = active_special_filters()
     needed = set(["Party"])
     needed.update(active.keys())
+    needed.update(special.keys())
     cols = tuple(sorted(needed))
 
     total = 0
@@ -406,6 +460,8 @@ def exact_counts(active: dict):
             elif vals:
                 df = df.iloc[0:0]
 
+        df = apply_special_filters(df, special)
+
         total += len(df)
 
         if "Party" in df.columns and not df.empty:
@@ -422,11 +478,13 @@ def exact_counts(active: dict):
 
 
 def build_export(active: dict, columns: list[str]):
-    if not active:
+    special = active_special_filters()
+    if not active and not special:
         raise RuntimeError("Please select at least one filter before exporting.")
 
     needed = set(columns)
     needed.update(active.keys())
+    needed.update(special.keys())
     cols = tuple(sorted(needed))
 
     parts = []
@@ -444,6 +502,8 @@ def build_export(active: dict, columns: list[str]):
                 df = df[df[col].astype(str).isin([str(v) for v in vals])]
             elif vals:
                 df = df.iloc[0:0]
+
+        df = apply_special_filters(df, special)
 
         if not df.empty:
             keep_cols = [c for c in columns if c in df.columns]
@@ -507,24 +567,71 @@ with st.sidebar:
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
     st.divider()
-    st.markdown("### Basic Voter Filters")
-    for field in VOTER_FIELDS:
+    st.markdown("### Party / Voter Profile")
+    for field in ["Party", "Gender", "Age_Range"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = options_from_filter_table(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
+    st.slider("Age Slider", min_value=18, max_value=100, value=(18, 100), key="age_slider")
+
+    st.divider()
+    st.markdown("### Vote History")
+    for field in ["V4A", "V4G", "V4P"]:
+        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+        opts = options_from_filter_table(filter_options, field)
+        st.multiselect(label, options=opts, key=f"filter_{field}")
+
+    st.divider()
+    st.markdown("### Mail Ballot")
+    for field in ["MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus"]:
+        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+        opts = options_from_filter_table(filter_options, field)
+        st.multiselect(label, options=opts, key=f"filter_{field}")
+    st.slider("MB Probability Score", min_value=0, max_value=4, value=(0, 4), key="mb_prob_slider")
+
+    st.divider()
+    st.markdown("### Contact Filters")
+    for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
+        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+        opts = options_from_filter_table(filter_options, field)
+        st.multiselect(label, options=opts, key=f"filter_{field}")
+
+    tag_opts = options_from_filter_table(filter_options, "Tags")
+    if tag_opts:
+        st.divider()
+        st.markdown("### Tags")
+        st.multiselect("Tags", options=tag_opts, key="filter_Tags")
+
+    st.divider()
+    st.markdown("### Newly Registered")
+    st.selectbox(
+        "Registered within",
+        options=[0, 30, 60, 90, 180, 365],
+        format_func=lambda x: "All voters" if x == 0 else f"Last {x} days",
+        key="new_reg_days",
+    )
+
 active = active_filters()
 
 st.markdown("### Current Universe")
-if active:
+special_active = active_special_filters()
+
+if active or special_active:
     chips = []
     for k, vals in active.items():
         chips.append(f"**{DISPLAY_LABELS.get(k, k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals) > 6 else ''}")
+    if "Age" in special_active:
+        chips.append(f"**Age Slider:** {special_active['Age']['min']}–{special_active['Age']['max']}")
+    if "MB_Prob_Score" in special_active:
+        chips.append(f"**MB Probability:** {special_active['MB_Prob_Score']['min']}–{special_active['MB_Prob_Score']['max']}")
+    if "RegistrationDate" in special_active:
+        chips.append(f"**Newly Registered:** last {special_active['RegistrationDate']['days']} days")
     st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
 else:
     st.info("No filters selected. Choose filters in the left pane.")
 
-level, note = confidence_level(active)
+level, note = confidence_level({**active, **{k: [v] for k, v in special_active.items()}})
 if level == "High confidence":
     st.markdown(f'<div class="cc-note"><b>{level} quick counts.</b> {note}</div>', unsafe_allow_html=True)
 else:
