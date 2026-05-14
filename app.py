@@ -389,12 +389,12 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    if is_cube_safe(active):
-        summary, err = quick_counts(active)
-        if err is None:
-            return summary, "quick", None
-    # Fallback for mail ballot/contact/tags/vote-history fields.
-    return exact_counts(active), "exact", None
+    # v14b: Update Counts NEVER scans detail shards.
+    # It uses the quick count table only. Detail shards are for exports/reports.
+    summary, err = quick_counts(active)
+    if err is None:
+        return summary, "quick", None
+    return None, "unavailable", err
 
 
 def pct(n, d):
@@ -486,13 +486,14 @@ def render_quick_exact_comparison():
     st.dataframe(comp, use_container_width=True, hide_index=True)
 
 def quick_counts(active: dict):
-    # Quick counts are based on the speed/count cube and categorical filters.
-    # Slider/range filters are included in exact verification and exports.
+    # v14b: quick counts only use selected columns from speed/count_cube.parquet.
+    # No full-cube fallback and no detail-shard fallback.
     needed = set(["Party"])
     needed.update(active.keys())
-    # Include possible count column names. Parquet will error if missing, so we try in stages.
+
     possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
     last_error = None
+
     for count_col in possible_count_cols:
         cols = tuple(sorted(needed | {count_col}))
         try:
@@ -503,13 +504,7 @@ def quick_counts(active: dict):
             last_error = e
             continue
 
-    # Final fallback: full count cube read. If it fails, the app shows message but does not crash.
-    try:
-        cube = load_count_cube_columns(tuple())
-        filtered = apply_filters(cube, active)
-        return summarize_from_df(filtered, row_count_mode=False), None
-    except Exception as e:
-        return None, e
+    return None, last_error or RuntimeError("Quick count fields are not available for this filter combination.")
 
 
 def exact_counts(active: dict):
@@ -611,7 +606,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v13</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v14b</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, use_container_width=True)
@@ -633,7 +628,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v13")
+    st.caption("DEV final hybrid v14b")
 
     st.divider()
     st.markdown("### Geography")
@@ -720,7 +715,7 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports scan the detail shards, apply your current filters, and block overly broad statewide downloads for stability.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts stays fast and does not scan detail shards.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
