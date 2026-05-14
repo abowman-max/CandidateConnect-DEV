@@ -5,6 +5,7 @@
 import io
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -29,6 +30,15 @@ DISPLAY_LABELS = {
     "MIB_BALLOT": "Mail Ballot Status",
     "MB_PERM": "Permanent Mail Ballot",
 }
+
+LOGO_CANDIDATE_CONNECT = "candidate_connect_logo.png"
+LOGO_TPTC = "TSS_Logo_Transparent.png"
+
+def file_exists(path: str) -> bool:
+    try:
+        return Path(path).exists()
+    except Exception:
+        return False
 
 DEFAULT_EXPORT_COLUMNS = [
     "County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region",
@@ -133,6 +143,15 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 }
 [data-baseweb="tag"] { background: rgba(201,31,39,.30) !important; color: white !important; }
 .stAlert { background: rgba(15,23,42,.95) !important; color: #f8fafc !important; }
+
+.cc-powered {
+    border: 1px solid rgba(242,184,75,.35);
+    border-radius: 14px;
+    padding: 10px 16px;
+    background: rgba(0,0,0,.25);
+    text-align: center;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -314,6 +333,30 @@ def render_metrics(summary, label=""):
         st.markdown(f'<div class="cc-metric green"><div class="label">Other / Unaffiliated</div><div class="value">{summary["o"]:,}</div><div class="sub">{pct(summary["o"], summary["total"])}</div></div>', unsafe_allow_html=True)
 
 
+
+def render_party_chart(summary, title="Party Breakdown"):
+    chart_df = pd.DataFrame([
+        {"Group": "Republican", "Voters": int(summary.get("r", 0))},
+        {"Group": "Democrat", "Voters": int(summary.get("d", 0))},
+        {"Group": "Other / Unaffiliated", "Voters": int(summary.get("o", 0))},
+    ])
+    st.markdown(f"#### {title}")
+    st.bar_chart(chart_df.set_index("Group"), height=260)
+
+def render_quick_exact_comparison():
+    q = st.session_state.get("quick_summary")
+    e = st.session_state.get("exact_summary")
+    if not q or not e:
+        return
+    comp = pd.DataFrame([
+        {"Metric": "Total", "Quick": q["total"], "Exact": e["total"], "Difference": e["total"] - q["total"]},
+        {"Metric": "Republican", "Quick": q["r"], "Exact": e["r"], "Difference": e["r"] - q["r"]},
+        {"Metric": "Democrat", "Quick": q["d"], "Exact": e["d"], "Difference": e["d"] - q["d"]},
+        {"Metric": "Other", "Quick": q["o"], "Exact": e["o"], "Difference": e["o"] - q["o"]},
+    ])
+    st.markdown("### Quick vs Verified Comparison")
+    st.dataframe(comp, use_container_width=True, hide_index=True)
+
 def quick_counts(active: dict):
     needed = set(["Party"])
     needed.update(active.keys())
@@ -419,15 +462,22 @@ def build_export(active: dict, columns: list[str]):
     return pd.concat(parts, ignore_index=True)
 
 
-st.markdown(
-    """
-<div class="cc-header">
-  <div class="cc-title">Candidate Connect DEV</div>
-  <div class="cc-sub">Final hybrid cloud build • Quick counts + exact verification + guarded export</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="cc-header">', unsafe_allow_html=True)
+h_logo, h_mid, h_power = st.columns([1.1, 2.8, 1.2])
+with h_logo:
+    if file_exists(LOGO_CANDIDATE_CONNECT):
+        st.image(LOGO_CANDIDATE_CONNECT, use_container_width=True)
+    else:
+        st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
+with h_mid:
+    st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Final hybrid cloud build</div>', unsafe_allow_html=True)
+with h_power:
+    if file_exists(LOGO_TPTC):
+        st.image(LOGO_TPTC, use_container_width=True)
+    else:
+        st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 try:
     with st.spinner("Loading filters from R2..."):
@@ -514,13 +564,21 @@ with col_v:
 if st.session_state.get("quick_summary"):
     st.markdown("### Quick Counts")
     render_metrics(st.session_state["quick_summary"], label="Quick")
+    left_chart, right_blank = st.columns([1, 1])
+    with left_chart:
+        render_party_chart(st.session_state["quick_summary"], "Quick Party Breakdown")
 
 if st.session_state.get("exact_summary"):
     st.markdown("### Verified Exact Counts")
     render_metrics(st.session_state["exact_summary"], label="Exact")
+    left_chart, right_blank = st.columns([1, 1])
+    with left_chart:
+        render_party_chart(st.session_state["exact_summary"], "Verified Party Breakdown")
+
+render_quick_exact_comparison()
 
 st.markdown("## Output Center")
-st.caption("Exports scan all detail shards, apply filters, and block overly broad exports.")
+st.caption("Exports scan the verified detail shards, apply your current filters, and block overly broad statewide downloads for stability.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
