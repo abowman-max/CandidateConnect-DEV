@@ -13,7 +13,8 @@ import requests
 import streamlit as st
 import boto3
 
-# CLOUD LANDING SAFE v5 - no statewide opening queries on startup
+# STARTUP SPEED FIX v2 - app must not download all index shards on startup
+# CLOUD SPEED APPLY FIX v7 - query_metrics/query_chart never require DuckDB voters table in speed mode
 
 from io import BytesIO
 from datetime import datetime
@@ -89,13 +90,6 @@ try:
     USE_LOCAL_DATA = _truthy(st.secrets.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
 except Exception:
     USE_LOCAL_DATA = _truthy(os.environ.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
-
-# Streamlit Cloud must never try to use local DEV shard folders.
-# It should start from the small R2 speed tables and only touch index/detail shards
-# after a user action that truly needs them.
-IS_STREAMLIT_CLOUD = Path("/mount/src").exists() or bool(os.environ.get("STREAMLIT_SHARING") or os.environ.get("STREAMLIT_SERVER_PORT"))
-if IS_STREAMLIT_CLOUD:
-    USE_LOCAL_DATA = False
 
 ATHENIX_OUTPUT_PATH = Path.home() / "Desktop" / "Athenix_Data_Pipeline" / "07_outputs"
 LOCAL_DEV_SHARDS_DIR = Path("data/shards")
@@ -669,15 +663,6 @@ def get_conn():
     except Exception:
         pass
     return con
-
-def voters_table_ready() -> bool:
-    """True only after DuckDB has been prepared with the voters table.
-    Streamlit Cloud must not crash or try to query voters before that."""
-    try:
-        get_conn().execute("SELECT 1 FROM voters LIMIT 1").fetchone()
-        return True
-    except Exception:
-        return False
 
 def first_existing(columns, candidates):
     lower_map = {str(c).strip().lower(): c for c in columns}
@@ -1301,13 +1286,60 @@ def speed_option_values(field: str) -> list[str]:
 
 
 def _speed_active_has_unsupported_filters(active: dict) -> bool:
-    unsupported_keys = [
-        "hh_party_pick", "calc_party_pick", "tag_pick",
-        "new_reg_months",
-        "election_years_pick", "election_types_pick", "vote_methods_pick",
-    ]
-    return any(bool(active.get(k)) for k in unsupported_keys)
+    """Return True only for filters the speed cube truly cannot handle.
 
+    The sidebar creates default filter values even when the user did not change
+    anything. Those defaults must NOT force the app into the DuckDB/detail path
+    on Streamlit Cloud, because the cloud startup intentionally does not create
+    the full `voters` table.
+    """
+    active = active or {}
+
+    def has_values(key):
+        val = active.get(key)
+        if val is None:
+            return False
+        if isinstance(val, (list, tuple, set)):
+            return any(str(x).strip() for x in val)
+        return bool(str(val).strip()) and str(val).strip().lower() not in {"all", "0", "none", "null"}
+
+    # These require detail/tag/election columns that are not in the count cube yet.
+    for key in ["hh_party_pick", "calc_party_pick", "tag_pick", "election_years_pick", "election_types_pick", "vote_methods_pick"]:
+        if has_values(key):
+            return True
+
+    # Default full-range sliders should remain speed-compatible.
+    if active.get("new_reg_months", 0):
+        try:
+            if int(active.get("new_reg_months", 0)) > 0:
+                return True
+        except Exception:
+            return True
+
+    vh_range = active.get("vote_history_range")
+    if vh_range is not None:
+        try:
+            if tuple(map(int, vh_range)) != (0, 4):
+                # Non-default vote-history ranges are still handled by _speed_filter_cube.
+                return False
+        except Exception:
+            return True
+
+    # Age range is not yet in count_cube as a numeric range filter. Only a narrowed
+    # age slider should require detail mode.
+    age_slider = active.get("age_slider")
+    if age_slider is not None:
+        try:
+            ranges = load_speed_ranges()
+            age_range = ranges.get("Age") or ranges.get("Age_Calc") or {}
+            amin, amax = age_range.get("min"), age_range.get("max")
+            if amin is not None and amax is not None:
+                if (int(age_slider[0]), int(age_slider[1])) != (int(amin), int(amax)):
+                    return True
+        except Exception:
+            return True
+
+    return False
 
 def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
     if not speed_tables_available() or _speed_active_has_unsupported_filters(active):
@@ -1320,9 +1352,8 @@ def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
     def apply_in(field, values):
         nonlocal df
         if values and field in df.columns:
-            vals = {str(v).strip().lower() for v in values if str(v).strip()}
-            if vals:
-                df = df[df[field].astype(str).str.strip().str.lower().isin(vals)]
+            vals = [str(v) for v in values]
+            df = df[df[field].astype(str).isin(vals)]
 
     for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
         apply_in(col, active.get(col, []))
@@ -1361,26 +1392,6 @@ def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
     if mb_score is not None and "MB_Prob_Score" in df.columns:
         vals = pd.to_numeric(df["MB_Prob_Score"].replace("(Blank)", "0"), errors="coerce").fillna(0)
         df = df[(vals >= float(mb_score[0])) & (vals <= float(mb_score[1]))]
-
-    # The sidebar Age slider defaults to the full range. If unchanged, ignore it
-    # so speed-table mode remains active. If narrowed, speed mode only applies
-    # when a numeric Age column exists in the cube.
-    age_slider = active.get("age_slider")
-    if age_slider is not None:
-        try:
-            ranges = load_speed_ranges().get("Age", {})
-            full_min = int(float(ranges.get("min"))) if ranges.get("min") is not None else None
-            full_max = int(float(ranges.get("max"))) if ranges.get("max") is not None else None
-            low, high = int(age_slider[0]), int(age_slider[1])
-            if full_min is not None and full_max is not None and (low, high) == (full_min, full_max):
-                pass
-            elif "Age" in df.columns:
-                vals = pd.to_numeric(df["Age"].replace("(Blank)", "0"), errors="coerce")
-                df = df[(vals >= low) & (vals <= high)]
-            else:
-                return None
-        except Exception:
-            return None
 
     return df
 
@@ -1920,18 +1931,7 @@ def get_basic_options(columns):
     options["mb_perm_vals"] = _mb_clean_options(get_distinct_options("_MBPerm", "_MBPerm"), field="MB_PERM")
     options["mb_new_reg_vals"] = get_distinct_options("_MailBallotNewRegistrant", "_MailBallotNewRegistrant") if "_MailBallotNewRegistrant" in columns else []
 
-    # If speed tables are not available and the DuckDB voters table has not been prepared,
-    # do not crash or try to scan remote shards during startup.
-    try:
-        con = get_conn()
-        con.execute("SELECT 1 FROM voters LIMIT 1").fetchone()
-    except Exception:
-        options.setdefault("age_min", None)
-        options.setdefault("age_max", None)
-        options.setdefault("mb_score_min", None)
-        options.setdefault("mb_score_max", None)
-        return options
-
+    con = get_conn()
     age_min, age_max = con.execute(
         "SELECT min(_AgeNum), max(_AgeNum) FROM voters WHERE _Status = 'A' AND _AgeNum IS NOT NULL"
     ).fetchone()
@@ -1944,48 +1944,72 @@ def get_basic_options(columns):
     options["mb_score_max"] = float(score_max) if score_max is not None else None
     return options
 
+
+def voters_table_available() -> bool:
+    """True only when the full DuckDB voters view/table has been prepared."""
+    try:
+        con = get_conn()
+        con.execute("SELECT 1 FROM voters LIMIT 1").fetchone()
+        return True
+    except Exception:
+        return False
+
+
+def _metrics_from_speed_df(speed_df: pd.DataFrame) -> dict:
+    if speed_df is None or speed_df.empty or "Voters" not in speed_df.columns:
+        return {
+            "voters": 0, "households": None, "emails": 0, "landlines": 0,
+            "mobiles": 0, "unique_counties": 0, "unique_precincts": 0,
+            "speed_mode": True,
+        }
+    voters = safe_int(speed_df["Voters"].sum())
+    emails = safe_int(speed_df["Emails"].sum()) if "Emails" in speed_df.columns else 0
+    landlines = safe_int(speed_df["Landlines"].sum()) if "Landlines" in speed_df.columns else 0
+    mobiles = safe_int(speed_df["Mobiles"].sum()) if "Mobiles" in speed_df.columns else 0
+    if "County" in speed_df.columns:
+        county_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "County"].replace("(Blank)", "").astype(str).str.strip()
+        unique_counties = int(county_vals[county_vals.ne("")].nunique())
+    else:
+        unique_counties = 0
+    if "Precinct" in speed_df.columns:
+        precinct_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "Precinct"].replace("(Blank)", "").astype(str).str.strip()
+        unique_precincts = int(precinct_vals[precinct_vals.ne("")].nunique())
+    else:
+        unique_precincts = 0
+    return {
+        "voters": voters,
+        "households": None,
+        "emails": emails,
+        "landlines": landlines,
+        "mobiles": mobiles,
+        "unique_counties": unique_counties,
+        "unique_precincts": unique_precincts,
+        "speed_mode": True,
+    }
+
 def query_metrics(active, columns):
+    # Prefer the speed cube. On Streamlit Cloud the full DuckDB `voters` table is
+    # intentionally not created during startup/apply-filter, so this must not
+    # fall through to detail-mode unless the table actually exists.
+    if not has_global_followup_filters(active):
+        try:
+            speed_df = _speed_filter_cube(active)
+            if speed_df is not None:
+                return _metrics_from_speed_df(speed_df)
+        except Exception:
+            pass
+
+    if not voters_table_available():
+        # Cloud-safe fallback: do not crash if a detail-only filter is selected
+        # before the full voters table has been prepared. Use an empty speed result
+        # instead of throwing Catalog Error: table voters does not exist.
+        return _metrics_from_speed_df(pd.DataFrame())
+
     if has_global_followup_filters(active):
         return _query_metrics_from_detail(active, columns)
 
-    try:
-        speed_df = _speed_filter_cube(active)
-        if speed_df is not None and "Voters" in speed_df.columns:
-            voters = safe_int(speed_df["Voters"].sum())
-            emails = safe_int(speed_df["Emails"].sum()) if "Emails" in speed_df.columns else 0
-            landlines = safe_int(speed_df["Landlines"].sum()) if "Landlines" in speed_df.columns else 0
-            mobiles = safe_int(speed_df["Mobiles"].sum()) if "Mobiles" in speed_df.columns else 0
-            if "County" in speed_df.columns:
-                county_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "County"].replace("(Blank)", "").astype(str).str.strip()
-                unique_counties = int(county_vals[county_vals.ne("")].nunique())
-            else:
-                unique_counties = 0
-            if "Precinct" in speed_df.columns:
-                precinct_vals = speed_df.loc[speed_df["Voters"].fillna(0).astype(float) > 0, "Precinct"].replace("(Blank)", "").astype(str).str.strip()
-                unique_precincts = int(precinct_vals[precinct_vals.ne("")].nunique())
-            else:
-                unique_precincts = 0
-            return {
-                "voters": voters,
-                "households": None,
-                "emails": emails,
-                "landlines": landlines,
-                "mobiles": mobiles,
-                "unique_counties": unique_counties,
-                "unique_precincts": unique_precincts,
-                "speed_mode": True,
-            }
-    except Exception:
-        pass
-
-    if not voters_table_ready():
-        return {
-            "voters": 0, "households": None, "emails": 0, "landlines": 0, "mobiles": 0,
-            "unique_counties": 0, "unique_precincts": 0, "speed_mode": False, "data_not_loaded": True,
-        }
-
-    if not voters_table_ready():
-        return pd.DataFrame(columns=[area_col, "Individuals", "Households"])
+    if not voters_table_available():
+        return pd.DataFrame(columns=[label, "Count"])
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
@@ -2024,9 +2048,6 @@ def query_chart(active, columns, group_expr, label, not_blank=True):
             return out.sort_values(["Count", label], ascending=[False, True]).reset_index(drop=True)
     except Exception:
         pass
-
-    if not voters_table_ready():
-        return pd.DataFrame(columns=[label, "Count"])
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
@@ -5893,45 +5914,97 @@ def _cc_open_icon_html(kind: str) -> str:
     return '<span class="dletter">?</span>'
 
 def render_opening_dashboard_preview():
-    """Cloud-safe landing dashboard.
+    """Fast right-pane statewide opening dashboard shown before Apply Filters is clicked."""
+    active = st.session_state.get('active_filters', {}) or {}
+    columns = st.session_state.get('columns', []) or []
+    preview_active = dict(active)
 
-    This must not query DuckDB, count_cube, index shards, or detail shards.
-    Streamlit Cloud was reconnecting/crashing because the landing page still
-    calculated statewide preview metrics immediately after the sidebar rendered.
-    Keep first paint static; all real counts load after the user applies filters.
-    """
-    html = """
+    try:
+        metrics = query_metrics(preview_active, columns)
+    except Exception:
+        metrics = {'voters': 0, 'households': None, 'emails': 0, 'mobiles': 0, 'unique_precincts': 0}
+
+    try:
+        party_df = query_chart(preview_active, columns, '_PartyNorm', 'Party')
+    except Exception:
+        party_df = pd.DataFrame(columns=['Party', 'Count'])
+    try:
+        gender_df = query_chart(preview_active, columns, '_Gender', 'Gender')
+    except Exception:
+        gender_df = pd.DataFrame(columns=['Gender', 'Count'])
+    try:
+        age_df = query_chart(preview_active, columns, '_AgeRange', 'Age Range')
+    except Exception:
+        age_df = pd.DataFrame(columns=['Age Range', 'Count'])
+
+    voters = safe_int(metrics.get('voters'))
+    r_count = _cc_count_from_chart(party_df, 'Party', 'R')
+    d_count = _cc_count_from_chart(party_df, 'Party', 'D')
+    o_count = _cc_count_from_chart(party_df, 'Party', 'O')
+    unknown_count = max(0, voters - r_count - d_count - o_count)
+
+    f_count = _cc_count_from_chart(gender_df, 'Gender', 'F')
+    m_count = _cc_count_from_chart(gender_df, 'Gender', 'M')
+    u_count = max(0, safe_int(pd.to_numeric(gender_df.get('Count', pd.Series(dtype=float)), errors='coerce').fillna(0).sum()) - f_count - m_count)
+
+    party_donut = _cc_open_donut_html([
+        ('Republican', r_count, CC_THEME['rep_red']),
+        ('Democrat', d_count, CC_THEME['dem_blue']),
+        ('Other', o_count, CC_THEME['other_green']),
+        ('Unknown', unknown_count, CC_THEME['brand_gold']),
+    ], f'{voters:,}', 'Total')
+    gender_donut = _cc_open_donut_html([
+        ('Female', f_count, CC_THEME['rep_red']),
+        ('Male', m_count, CC_THEME['dem_blue']),
+        ('Other / Unknown', u_count, CC_THEME['other_green']),
+    ], f'{(f_count + m_count + u_count):,}', 'Total')
+
+    metric_cards = [
+        ('TOTAL VOTERS', f'{voters:,}', 'red', _cc_open_icon_html('people')),
+        ('REPUBLICAN', f'{r_count:,}', 'red', _cc_open_icon_html('elephant')),
+        ('DEMOCRAT', f'{d_count:,}', 'blue', _cc_open_icon_html('donkey')),
+        ('OTHER / UNAFFILIATED', f'{o_count:,}', 'green', _cc_open_icon_html('person')),
+    ]
+    metric_html = ''.join([
+        f'<div class="cc-open-metric {klass}"><div class="icon">{icon}</div><div><div class="label">{label}</div><div class="value">{value}</div><div class="sub">{fmt_pct(_cc_open_pct(int(value.replace(",", "")) if value.replace(",", "").isdigit() else 0, voters))} of universe</div></div></div>'
+        for label, value, klass, icon in metric_cards
+    ])
+
+    party_legend = ''.join([
+        f'<div class="cc-legend-row"><span><i class="cc-dot" style="background:{color}"></i>{label}</span><b>{count:,} ({fmt_pct(_cc_open_pct(count, voters))})</b></div>'
+        for label, count, color in [
+            ('Republican', r_count, CC_THEME['rep_red']),
+            ('Democrat', d_count, CC_THEME['dem_blue']),
+            ('Other / Unaffiliated', o_count, CC_THEME['other_green']),
+            ('Unknown', unknown_count, CC_THEME['brand_gold']),
+        ]
+    ])
+    gender_legend = ''.join([
+        f'<div class="cc-legend-row"><span><i class="cc-dot" style="background:{color}"></i>{label}</span><b>{count:,} ({fmt_pct(_cc_open_pct(count, max(1, f_count + m_count + u_count)))})</b></div>'
+        for label, count, color in [
+            ('Female', f_count, CC_THEME['rep_red']),
+            ('Male', m_count, CC_THEME['dem_blue']),
+            ('Other / Unknown', u_count, CC_THEME['other_green']),
+        ]
+    ])
+
+    geo_rows = ''.join([
+        f'<tr><td>{geo}</td><td>{voters:,}</td><td class="red">{r_count:,} ({fmt_pct(_cc_open_pct(r_count, voters))})</td><td class="blue">{d_count:,} ({fmt_pct(_cc_open_pct(d_count, voters))})</td><td class="green">{o_count:,} ({fmt_pct(_cc_open_pct(o_count, voters))})</td><td class="gold">{unknown_count:,} ({fmt_pct(_cc_open_pct(unknown_count, voters))})</td></tr>'
+        for geo in ['US Congress', 'State Senate', 'State House']
+    ])
+
+    html = f'''
     <div class="cc-opening-dashboard">
-      <div class="cc-open-metrics">
-        <div class="cc-open-metric red"><div class="icon">▦</div><div><div class="label">CREATE UNIVERSE</div><div class="value">Filters</div><div class="sub">Build a targeted voter universe</div></div></div>
-        <div class="cc-open-metric blue"><div class="icon">⌕</div><div><div class="label">VOTER LOOKUP</div><div class="value">Search</div><div class="sub">Find individual voter records</div></div></div>
-        <div class="cc-open-metric green"><div class="icon">✉</div><div><div class="label">MAIL BALLOT CENTER</div><div class="value">Chase</div><div class="sub">Analyze CURRENT mail ballot data</div></div></div>
-        <div class="cc-open-metric gold"><div class="icon">⌂</div><div><div class="label">AREA INTELLIGENCE</div><div class="value">Intel</div><div class="sub">Review area and precinct context</div></div></div>
-      </div>
+      <div class="cc-open-metrics">{metric_html}</div>
       <div class="cc-open-main-grid">
-        <div class="cc-open-card party-card">
-          <h3>CANDIDATE CONNECT <span>•••</span></h3>
-          <p style="font-size:15px;line-height:1.55;color:#CBD5E1;">
-            Select a workspace in the sidebar to begin. The cloud version now starts from lightweight speed tables and waits for your selection before loading heavier voter shards.
-          </p>
-          <p>Recommended start: Create Universe → choose geography → Apply Filters.</p>
-        </div>
-        <div class="cc-open-card geo-card">
-          <h3>DEV DATA STATUS <span>•••</span></h3>
-          <table class="cc-open-table">
-            <thead><tr><th>Layer</th><th>Status</th></tr></thead>
-            <tbody>
-              <tr><td>R2 Manifest</td><td class="green">Loaded</td></tr>
-              <tr><td>Speed Tables</td><td class="green">Available</td></tr>
-              <tr><td>Index / Detail Shards</td><td class="gold">Loaded only when needed</td></tr>
-            </tbody>
-          </table>
-          <p>Use the sidebar buttons to open a workspace.</p>
-        </div>
+        <div class="cc-open-card party-card"><h3>VOTERS BY PARTY <span>•••</span></h3><div class="cc-open-split"><div>{party_donut}</div><div>{party_legend}</div></div><p>Universe: All Voters</p></div>
+        <div class="cc-open-card age-card"><h3>VOTERS BY AGE RANGE <span>•••</span></h3>{_cc_open_bar_html(age_df)}<p>Universe: All Voters</p></div>
+        <div class="cc-open-card gender-card"><h3>VOTERS BY GENDER <span>•••</span></h3><div class="cc-open-split"><div>{gender_donut}</div><div>{gender_legend}</div></div><p>Universe: All Voters</p></div>
+        <div class="cc-open-card geo-card"><h3>VOTERS BY GEOGRAPHY <span>•••</span></h3><table class="cc-open-table"><thead><tr><th>Geography</th><th>Total Voters</th><th>Republican</th><th>Democrat</th><th>Other / Unaffiliated</th></tr></thead><tbody>{geo_rows}</tbody></table><p>Universe: All Voters</p></div>
       </div>
-      <div class="cc-open-note">Startup is intentionally lightweight to keep Streamlit Cloud stable.</div>
+      <div class="cc-open-note">Use the sidebar to build a campaign universe.</div>
     </div>
-    """
+    '''
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -7744,33 +7817,36 @@ if "data_loaded" not in st.session_state:
 if "filters_applied" not in st.session_state:
     st.session_state.filters_applied = False
 
-# Locked startup: load only tiny R2 speed metadata on app startup.
-# Never call ensure_index_shards() or prepare_db() here on Streamlit Cloud.
-# Full index/detail shards are loaded later only when lookup/export workflows need them.
+# Auto-load lightweight metadata/speed tables on app startup.
+# Do NOT download all R2 index shards on initial web load; that can be hundreds
+# of MB and can stall Streamlit Cloud. Index/detail shards are downloaded later
+# only when a workflow truly needs them.
 if not st.session_state.data_loaded:
     with st.spinner("Opening Candidate Connect data..."):
-        _manifest = ensure_speed_tables()
-        try:
-            st.session_state.data_source_label = _manifest.get("source", "R2 speed tables") if isinstance(_manifest, dict) else "R2 speed tables"
-        except Exception:
-            st.session_state.data_source_label = "R2 speed tables"
-        st.session_state.columns = (
-            (_manifest.get("index") or {}).get("columns")
-            or (_manifest.get("schema") or {}).get("index_columns")
-            or [
-                "County", "Municipality", "Precinct", "USC", "STS", "STH",
-                "School District", "School Region", "Party", "CalculatedParty", "HH-Party", "Gender",
-                "Age", "Age_Calc", "Age_Range", "V4A", "V4G", "V4P",
-                "MIB_Applied", "MIB_BALLOT", "MB_PERM", "MB_Prob_Score", "Tags",
-                "Email", "Landline", "Mobile", "MailBallotNewRegistrant",
-            ]
-            if isinstance(_manifest, dict) else [
-                "County", "Municipality", "Precinct", "USC", "STS", "STH",
-                "School District", "School Region", "Party", "Gender", "Age_Range",
-                "V4A", "V4G", "V4P", "MIB_Applied", "MIB_BALLOT", "MB_PERM",
-                "MB_Prob_Score", "Tags", "Email", "Landline", "Mobile", "MailBallotNewRegistrant",
-            ]
-        )
+        local_paths, _manifest = find_local_dataset_paths("index")
+        if local_paths:
+            try:
+                st.session_state.data_source_label = _manifest or "LOCAL INDEX SHARDS"
+            except Exception:
+                st.session_state.data_source_label = "LOCAL INDEX SHARDS"
+            st.session_state.columns = prepare_db(local_paths)
+        else:
+            _manifest = ensure_speed_tables()
+            try:
+                st.session_state.data_source_label = _manifest.get("source", "R2 manifest")
+            except Exception:
+                st.session_state.data_source_label = "R2 manifest"
+            st.session_state.columns = (
+                (_manifest.get("index") or {}).get("columns")
+                or (_manifest.get("schema") or {}).get("index_columns")
+                or [
+                    "County", "Municipality", "Precinct", "USC", "STS", "STH",
+                    "School District", "School Region", "Party", "Gender",
+                    "Age_Range", "V4A", "V4G", "V4P", "MIB_Applied",
+                    "MIB_BALLOT", "MB_PERM", "MB_Prob_Score", "Tags",
+                    "Email", "Landline", "Mobile", "MailBallotNewRegistrant",
+                ]
+            )
         st.session_state.options = get_basic_options(st.session_state.columns)
         st.session_state.data_loaded = True
         st.session_state.filters_applied = False
@@ -8648,10 +8724,8 @@ with st.sidebar:
 
             if clear_filters:
                 st.session_state.active_filters = {}
-                for _geo_col in GEO_FILTER_COLUMNS:
-                    _geo_key = f"geo_dep_{_norm_col_name(_geo_col)}"
-                    if _geo_key in st.session_state:
-                        st.session_state[_geo_key] = []
+                # Do not modify geo_dep_* widget keys after the widgets have been
+                # instantiated. Streamlit Cloud will raise an exception if we do.
                 st.session_state.filters_applied = False
                 st.session_state.workspace_mode = "landing"
                 st.session_state.lookup_view_active = False
@@ -8747,9 +8821,8 @@ with st.sidebar:
                         if st.button("Load Universe", width="stretch", key="load_sidebar_universe"):
                             loaded_filters = universe_info.get("filters", {}) or {}
                             st.session_state.active_filters = loaded_filters
-                            for _geo_col in GEO_FILTER_COLUMNS:
-                                _geo_key = f"geo_dep_{_norm_col_name(_geo_col)}"
-                                st.session_state[_geo_key] = loaded_filters.get(_geo_col, []) or []
+                            # Do not write geo_dep_* widget keys here; the next rerun
+                            # will read active_filters and populate defaults safely.
                             st.session_state.filters_applied = False
                             st.session_state.workspace_mode = "universe"
                             st.session_state.lookup_view_active = False
