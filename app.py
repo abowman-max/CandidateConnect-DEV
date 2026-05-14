@@ -670,6 +670,15 @@ def get_conn():
         pass
     return con
 
+def voters_table_ready() -> bool:
+    """True only after DuckDB has been prepared with the voters table.
+    Streamlit Cloud must not crash or try to query voters before that."""
+    try:
+        get_conn().execute("SELECT 1 FROM voters LIMIT 1").fetchone()
+        return True
+    except Exception:
+        return False
+
 def first_existing(columns, candidates):
     lower_map = {str(c).strip().lower(): c for c in columns}
     for col in candidates:
@@ -1294,7 +1303,7 @@ def speed_option_values(field: str) -> list[str]:
 def _speed_active_has_unsupported_filters(active: dict) -> bool:
     unsupported_keys = [
         "hh_party_pick", "calc_party_pick", "tag_pick",
-        "age_slider", "new_reg_months",
+        "new_reg_months",
         "election_years_pick", "election_types_pick", "vote_methods_pick",
     ]
     return any(bool(active.get(k)) for k in unsupported_keys)
@@ -1311,8 +1320,9 @@ def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
     def apply_in(field, values):
         nonlocal df
         if values and field in df.columns:
-            vals = [str(v) for v in values]
-            df = df[df[field].astype(str).isin(vals)]
+            vals = {str(v).strip().lower() for v in values if str(v).strip()}
+            if vals:
+                df = df[df[field].astype(str).str.strip().str.lower().isin(vals)]
 
     for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
         apply_in(col, active.get(col, []))
@@ -1351,6 +1361,26 @@ def _speed_filter_cube(active: dict) -> pd.DataFrame | None:
     if mb_score is not None and "MB_Prob_Score" in df.columns:
         vals = pd.to_numeric(df["MB_Prob_Score"].replace("(Blank)", "0"), errors="coerce").fillna(0)
         df = df[(vals >= float(mb_score[0])) & (vals <= float(mb_score[1]))]
+
+    # The sidebar Age slider defaults to the full range. If unchanged, ignore it
+    # so speed-table mode remains active. If narrowed, speed mode only applies
+    # when a numeric Age column exists in the cube.
+    age_slider = active.get("age_slider")
+    if age_slider is not None:
+        try:
+            ranges = load_speed_ranges().get("Age", {})
+            full_min = int(float(ranges.get("min"))) if ranges.get("min") is not None else None
+            full_max = int(float(ranges.get("max"))) if ranges.get("max") is not None else None
+            low, high = int(age_slider[0]), int(age_slider[1])
+            if full_min is not None and full_max is not None and (low, high) == (full_min, full_max):
+                pass
+            elif "Age" in df.columns:
+                vals = pd.to_numeric(df["Age"].replace("(Blank)", "0"), errors="coerce")
+                df = df[(vals >= low) & (vals <= high)]
+            else:
+                return None
+        except Exception:
+            return None
 
     return df
 
@@ -1948,6 +1978,15 @@ def query_metrics(active, columns):
     except Exception:
         pass
 
+    if not voters_table_ready():
+        return {
+            "voters": 0, "households": None, "emails": 0, "landlines": 0, "mobiles": 0,
+            "unique_counties": 0, "unique_precincts": 0, "speed_mode": False, "data_not_loaded": True,
+        }
+
+    if not voters_table_ready():
+        return pd.DataFrame(columns=[area_col, "Individuals", "Households"])
+
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
     return con.execute(
@@ -1985,6 +2024,9 @@ def query_chart(active, columns, group_expr, label, not_blank=True):
             return out.sort_values(["Count", label], ascending=[False, True]).reset_index(drop=True)
     except Exception:
         pass
+
+    if not voters_table_ready():
+        return pd.DataFrame(columns=[label, "Count"])
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
