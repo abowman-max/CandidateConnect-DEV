@@ -15,6 +15,7 @@ import boto3
 
 # STARTUP SPEED FIX v2 - app must not download all index shards on startup
 # CLOUD SPEED APPLY FIX v7 - query_metrics/query_chart never require DuckDB voters table in speed mode
+# CLOUD HARD SPEED METRICS v8 - Streamlit Cloud query_metrics never touches DuckDB voters table
 
 from io import BytesIO
 from datetime import datetime
@@ -1988,6 +1989,18 @@ def _metrics_from_speed_df(speed_df: pd.DataFrame) -> dict:
     }
 
 def query_metrics(active, columns):
+    # CLOUD HARD SPEED METRICS v8:
+    # On Streamlit Cloud / R2 mode, never touch DuckDB's full `voters` table
+    # during Apply Filters. The table is intentionally not created at startup.
+    if not USE_LOCAL_DATA:
+        try:
+            speed_df = _speed_filter_cube(active)
+            if speed_df is not None:
+                return _metrics_from_speed_df(speed_df)
+        except Exception:
+            pass
+        return _metrics_from_speed_df(pd.DataFrame())
+
     # Prefer the speed cube. On Streamlit Cloud the full DuckDB `voters` table is
     # intentionally not created during startup/apply-filter, so this must not
     # fall through to detail-mode unless the table actually exists.
