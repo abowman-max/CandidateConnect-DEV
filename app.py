@@ -438,33 +438,45 @@ def expand_filter_values(field, vals):
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
-    for field, vals in active.items():
-        if vals and field in out.columns:
-            expanded_vals = expand_filter_values(field, vals)
-            out = out[out[field].astype(str).isin([str(v) for v in expanded_vals])]
-    return out
-
+    try:
+        for field, vals in (active or {}).items():
+            if vals and field in out.columns:
+                expanded_vals = expand_filter_values(field, vals)
+                out = out[out[field].astype(str).isin([str(v) for v in expanded_vals])]
+        return out
+    except Exception:
+        return df
 
 def options_from_geo(df: pd.DataFrame, field: str, active: dict) -> list:
-    if field not in df.columns:
+    try:
+        if df is None or df.empty or field not in df.columns:
+            return []
+        hierarchy_order = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
+        relevant = {}
+        for f in hierarchy_order:
+            if f == field:
+                break
+            if active.get(f):
+                relevant[f] = active[f]
+        narrowed = apply_filters(df, relevant)
+        if field not in narrowed.columns:
+            return []
+        vals = narrowed[field].astype(str).map(clean_value)
+        return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+    except Exception:
         return []
-    hierarchy_order = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
-    relevant = {}
-    for f in hierarchy_order:
-        if f == field:
-            break
-        if active.get(f):
-            relevant[f] = active[f]
-    narrowed = apply_filters(df, relevant)
-    vals = narrowed[field].astype(str).map(clean_value)
-    return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
-
 
 def options_from_filter_table(filter_options: pd.DataFrame, field: str) -> list:
-    if "field" not in filter_options.columns or "value" not in filter_options.columns:
+    try:
+        if filter_options is None or filter_options.empty:
+            return []
+        if "field" not in filter_options.columns or "value" not in filter_options.columns:
+            return []
+        vals = filter_options.loc[filter_options["field"].astype(str).eq(str(field)), "value"].astype(str).map(clean_value)
+        out = sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+        return out
+    except Exception:
         return []
-    vals = filter_options.loc[filter_options["field"].astype(str).eq(field), "value"].astype(str).map(clean_value)
-    return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
 
 def clean_yes_no_all_options():
     return ["Y", "N"]
@@ -484,10 +496,13 @@ def clean_mail_options(field: str):
     return fixed.get(field, [])
 
 def field_options(filter_options: pd.DataFrame, field: str):
-    fixed = clean_mail_options(field)
-    if fixed:
-        return fixed
-    return options_from_filter_table(filter_options, field)
+    try:
+        fixed = clean_mail_options(field)
+        if fixed:
+            return fixed
+        return options_from_filter_table(filter_options, field)
+    except Exception:
+        return []
 
 def is_cube_safe(active: dict) -> bool:
     # Geography + Party/Gender/Age_Range usually live in the count cube.
@@ -496,27 +511,29 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v21: Update Counts uses the rebuilt full count cube.
-    safe_active = count_safe_filters(active)
-    special = active_special_filters()
+    try:
+        safe_active = count_safe_filters(active)
+        special = active_special_filters()
 
-    needed = set(["Party"])
-    needed.update(safe_active.keys())
-    needed.update(special.keys())
-    possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
-    last_error = None
+        needed = set(["Party"])
+        needed.update(safe_active.keys())
+        needed.update(special.keys())
+        possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
+        last_error = None
 
-    for count_col in possible_count_cols:
-        try:
-            cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
-            filtered = apply_filters(cube, safe_active)
-            filtered = apply_special_filters(filtered, special)
-            return summarize_from_df(filtered, row_count_mode=False), "quick", None
-        except Exception as e:
-            last_error = e
-            continue
+        for count_col in possible_count_cols:
+            try:
+                cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
+                filtered = apply_filters(cube, safe_active)
+                filtered = apply_special_filters(filtered, special)
+                return summarize_from_df(filtered, row_count_mode=False), "quick", None
+            except Exception as e:
+                last_error = e
+                continue
 
-    return None, "unavailable", last_error or RuntimeError("Quick count fields are not available for this filter combination.")
+        return None, "unavailable", last_error or RuntimeError("Quick count fields are not available for this filter combination.")
+    except Exception as e:
+        return None, "unavailable", e
 
 
 
@@ -776,7 +793,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21c</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21d</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -798,7 +815,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21c")
+    st.caption("DEV final hybrid v21d")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -847,7 +864,7 @@ with st.sidebar:
                 max_value=24,
                 value=0,
                 step=1,
-                help="0 = all voters. This is applied in exports/reports and detail-based tools.",
+                help="0 = all voters.",
                 key="new_reg_months",
             )
 
