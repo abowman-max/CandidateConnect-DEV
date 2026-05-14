@@ -13,7 +13,7 @@ import requests
 import streamlit as st
 import boto3
 
-# STARTUP SPEED FIX v2 - app must not download all index shards on startup
+# STARTUP LOCKDOWN v3 - Streamlit Cloud uses R2 speed tables first; no startup shard scan
 
 from io import BytesIO
 from datetime import datetime
@@ -79,6 +79,14 @@ except Exception:
 LOCAL_ROOT = Path("/tmp/candidate_connect_r2")
 LOCAL_MANIFEST = LOCAL_ROOT / "dataset_manifest.json"
 
+# STARTUP LOCKDOWN v3
+# Streamlit Cloud cannot use local DEV folders and must not load index/detail shards on startup.
+IS_STREAMLIT_CLOUD = (
+    str(Path.cwd()).startswith("/mount/src")
+    or str(Path(__file__).resolve()).startswith("/mount/src")
+    or os.environ.get("HOME", "").startswith("/home/adminuser")
+)
+
 # DEV data source setup
 # DEV first tries local Athenix/Candidate Connect files, then falls back to R2.
 def _truthy(value) -> bool:
@@ -89,6 +97,11 @@ try:
     USE_LOCAL_DATA = _truthy(st.secrets.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
 except Exception:
     USE_LOCAL_DATA = _truthy(os.environ.get("USE_LOCAL_DATA", USE_LOCAL_DATA))
+
+# Hard safety: deployed Streamlit Cloud must always use R2 speed/manifest first.
+# It should never scan repo-local data/shards or Desktop paths at startup.
+if IS_STREAMLIT_CLOUD:
+    USE_LOCAL_DATA = False
 
 ATHENIX_OUTPUT_PATH = Path.home() / "Desktop" / "Athenix_Data_Pipeline" / "07_outputs"
 LOCAL_DEV_SHARDS_DIR = Path("data/shards")
@@ -1835,6 +1848,28 @@ def _mb_clean_application_options(values):
 def _mb_clean_ballot_detail_options(values):
     return _mb_clean_options(values, field="MIB_BALLOT")
 
+def _safe_empty_options(columns):
+    options = {}
+    for col in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
+        if col in columns:
+            options[col] = []
+    options["party_vals"] = ["D", "R", "O"]
+    options["gender_vals"] = []
+    options["age_range_vals"] = []
+    options["hh_party_vals"] = []
+    options["calc_party_vals"] = []
+    options["tag_vals"] = []
+    options["vote_history_vals"] = []
+    options["mib_applied_vals"] = ["APP", "DNA"]
+    options["mib_ballot_vals"] = []
+    options["mb_perm_vals"] = []
+    options["mb_new_reg_vals"] = []
+    options["age_min"] = None
+    options["age_max"] = None
+    options["mb_score_min"] = None
+    options["mb_score_max"] = None
+    return options
+
 def get_basic_options(columns):
     options = {}
     geo_cols = [c for c in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"] if c in columns]
@@ -1862,6 +1897,11 @@ def get_basic_options(columns):
         options["mb_score_min"] = float(score_range.get("min")) if score_range.get("min") is not None else None
         options["mb_score_max"] = float(score_range.get("max")) if score_range.get("max") is not None else None
         return options
+
+    # Startup lockdown: if we did not intentionally prepare a DuckDB voters view,
+    # never fall back to scanning shards for option lists. This keeps Streamlit Cloud alive.
+    if not st.session_state.get("duckdb_ready", False):
+        return _safe_empty_options(columns)
 
     for col in geo_cols:
         if col in ["USC", "STS", "STH"]:
@@ -1929,6 +1969,12 @@ def query_metrics(active, columns):
             }
     except Exception:
         pass
+
+    if not st.session_state.get("duckdb_ready", False):
+        return {
+            "voters": 0, "households": None, "emails": 0, "landlines": 0, "mobiles": 0,
+            "unique_counties": 0, "unique_precincts": 0, "speed_mode": True,
+        }
 
     con = get_conn()
     where_sql, params = current_filter_clause(active, columns)
@@ -7743,13 +7789,15 @@ if "filters_applied" not in st.session_state:
 if not st.session_state.data_loaded:
     with st.spinner("Opening Candidate Connect data..."):
         local_paths, _manifest = find_local_dataset_paths("index")
-        if local_paths:
+        if local_paths and not IS_STREAMLIT_CLOUD:
             try:
                 st.session_state.data_source_label = _manifest or "LOCAL INDEX SHARDS"
             except Exception:
                 st.session_state.data_source_label = "LOCAL INDEX SHARDS"
             st.session_state.columns = prepare_db(local_paths)
+            st.session_state.duckdb_ready = True
         else:
+            st.session_state.duckdb_ready = False
             _manifest = ensure_speed_tables()
             try:
                 st.session_state.data_source_label = _manifest.get("source", "R2 manifest")
