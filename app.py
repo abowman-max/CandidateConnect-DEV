@@ -169,6 +169,19 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     font-size: 12px !important;
 }
 
+
+/* v12 fixes selected-option chip clipping */
+[data-baseweb="tag"] {
+    padding-left: 8px !important;
+    margin-left: 2px !important;
+}
+[data-baseweb="tag"] span {
+    padding-left: 2px !important;
+}
+[data-baseweb="select"] input {
+    padding-left: 6px !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -291,6 +304,45 @@ def options_from_filter_table(filter_options: pd.DataFrame, field: str) -> list:
         return []
     vals = filter_options.loc[filter_options["field"].astype(str).eq(field), "value"].astype(str).map(clean_value)
     return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+
+def clean_yes_no_all_options():
+    return ["Y", "N"]
+
+def clean_mail_options(field: str):
+    # v12: Do not trust generic filter_options for mail fields.
+    # Some builds polluted these with numeric/geography values. Keep user-facing options stable.
+    fixed = {
+        "MIB_Applied": ["Applied", "DNA", "Not Applied", "Y", "N"],
+        "MIB_BALLOT": ["Voted", "Not Voted", "Returned", "Not Returned", "Y", "N"],
+        "MB_PERM": ["Y", "N"],
+        "BallotSentStatus": ["Sent", "Not Sent", "Y", "N"],
+        "BallotReturnedStatus": ["Returned", "Not Returned", "Voted", "Not Voted", "Y", "N"],
+        "HasMobile": ["Y", "N"],
+        "HasLandline": ["Y", "N"],
+        "HasEmail": ["Y", "N"],
+        "HasApplicantPhone": ["Y", "N"],
+    }
+    return fixed.get(field, [])
+
+def field_options(filter_options: pd.DataFrame, field: str):
+    fixed = clean_mail_options(field)
+    if fixed:
+        return fixed
+    return options_from_filter_table(filter_options, field)
+
+def is_cube_safe(active: dict) -> bool:
+    # Geography + Party/Gender/Age_Range usually live in the count cube.
+    # Anything else uses exact shard scan through the same Update Counts button.
+    cube_safe = set(GEO_FIELDS + ["Party", "Gender", "Age_Range"])
+    return all(k in cube_safe for k in active.keys())
+
+def update_counts(active: dict):
+    if is_cube_safe(active):
+        summary, err = quick_counts(active)
+        if err is None:
+            return summary, "quick", None
+    # Fallback for mail ballot/contact/tags/vote-history fields.
+    return exact_counts(active), "exact", None
 
 
 def pct(n, d):
@@ -505,7 +557,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v12</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, use_container_width=True)
@@ -536,7 +588,7 @@ with st.sidebar:
     st.markdown("### Party / Voter Profile")
     for field in ["Party", "Gender", "Age_Range"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = options_from_filter_table(filter_options, field)
+        opts = field_options(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
 
@@ -544,24 +596,24 @@ with st.sidebar:
     st.markdown("### Vote History")
     for field in ["V4A", "V4G", "V4P"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = options_from_filter_table(filter_options, field)
+        opts = field_options(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
     st.divider()
     st.markdown("### Mail Ballot")
     for field in ["MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = options_from_filter_table(filter_options, field)
+        opts = field_options(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
     st.divider()
     st.markdown("### Contact Filters")
     for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = options_from_filter_table(filter_options, field)
+        opts = field_options(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
-    tag_opts = options_from_filter_table(filter_options, "Tags")
+    tag_opts = field_options(filter_options, "Tags")
     if tag_opts:
         st.divider()
         st.markdown("### Tags")
@@ -586,12 +638,13 @@ action_left, action_mid, action_spacer = st.columns([0.85, 0.85, 4.3])
 with action_left:
     if st.button("Update Counts", use_container_width=True):
         with st.spinner("Updating counts..."):
-            summary, err = quick_counts(active)
+            summary, mode, err = update_counts(active)
         if err:
             st.warning("Counts are unavailable for this filter combination.")
             st.caption(str(err)[:500])
         else:
             st.session_state["quick_summary"] = summary
+            st.session_state["count_mode"] = mode
 
 with action_mid:
     if st.button("Clear Filters", use_container_width=True):
@@ -599,10 +652,12 @@ with action_mid:
             if key.startswith("filter_"):
                 del st.session_state[key]
         st.session_state.pop("quick_summary", None)
+        st.session_state.pop("count_mode", None)
         st.rerun()
 
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
+    st.caption("Updated using fast count tables." if st.session_state.get("count_mode") == "quick" else "Updated using exact detail scan for this filter combination.")
     render_metrics(st.session_state["quick_summary"], label="")
     left_chart, right_blank = st.columns([1, 1])
     with left_chart:
