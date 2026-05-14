@@ -1181,11 +1181,60 @@ def find_local_dataset_paths(kind: str):
     return [], "R2"
 
 def local_speed_path(filename: str) -> Path:
-    return LOCAL_DEV_SPEED_DIR / filename
+    """Local cache path for speed tables.
+
+    In local DEV, prefer the app's data/shards/speed folder.
+    In deployed Streamlit/R2 mode, use /tmp cache under LOCAL_ROOT/speed.
+    """
+    local_candidate = LOCAL_DEV_SPEED_DIR / filename
+    if USE_LOCAL_DATA and local_candidate.exists():
+        return local_candidate
+    return LOCAL_ROOT / "speed" / filename
+
+
+@st.cache_data(show_spinner=False)
+def ensure_speed_tables():
+    """Download small R2 speed tables and manifest so startup does not scan index shards."""
+    LOCAL_ROOT.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest()
+
+    # Local speed tables already exist.
+    if (LOCAL_DEV_SPEED_DIR / "filter_options.parquet").exists() and (LOCAL_DEV_SPEED_DIR / "count_cube.parquet").exists():
+        return manifest
+
+    speed_tables = (manifest.get("speed") or {}).get("tables") or {}
+    if not speed_tables:
+        speed_tables = {
+            "filter_options": "filter_options.parquet",
+            "filter_ranges": "filter_ranges.json",
+            "geo_hierarchy": "geo_hierarchy.parquet",
+            "count_cube": "count_cube.parquet",
+            "mail_ballot_counts": "mail_ballot_counts.parquet",
+            "speed_manifest": "speed_manifest.json",
+        }
+
+    for _, rel in speed_tables.items():
+        if not rel:
+            continue
+        key = str(rel)
+        if not key.startswith("speed/"):
+            key = "speed/" + key
+        local_path = LOCAL_ROOT / key
+        if not local_path.exists():
+            try:
+                download_public_object(key, local_path)
+            except Exception:
+                # Keep startup resilient if a non-critical speed table is missing.
+                pass
+    return manifest
 
 
 def speed_tables_available() -> bool:
-    return USE_LOCAL_DATA and local_speed_path("filter_options.parquet").exists() and local_speed_path("count_cube.parquet").exists()
+    try:
+        ensure_speed_tables()
+    except Exception:
+        pass
+    return local_speed_path("filter_options.parquet").exists() and local_speed_path("count_cube.parquet").exists()
 
 
 @st.cache_data(show_spinner=False)
@@ -7685,17 +7734,36 @@ if "data_loaded" not in st.session_state:
 if "filters_applied" not in st.session_state:
     st.session_state.filters_applied = False
 
-# Auto-load the fast index/speed tables on app startup.
-# The old manual Load Voter Data button was useful when shard scans were slow,
-# but speed tables now make startup light enough to do safely.
+# Auto-load lightweight metadata/speed tables on app startup.
+# Do NOT download all R2 index shards on initial web load; that can be hundreds
+# of MB and can stall Streamlit Cloud. Index/detail shards are downloaded later
+# only when a workflow truly needs them.
 if not st.session_state.data_loaded:
     with st.spinner("Opening Candidate Connect data..."):
-        local_paths, _manifest = ensure_index_shards()
-        try:
-            st.session_state.data_source_label = _manifest.get("source", "unknown") if isinstance(_manifest, dict) else "unknown"
-        except Exception:
-            st.session_state.data_source_label = "unknown"
-        st.session_state.columns = prepare_db(local_paths)
+        local_paths, _manifest = find_local_dataset_paths("index")
+        if local_paths:
+            try:
+                st.session_state.data_source_label = _manifest or "LOCAL INDEX SHARDS"
+            except Exception:
+                st.session_state.data_source_label = "LOCAL INDEX SHARDS"
+            st.session_state.columns = prepare_db(local_paths)
+        else:
+            _manifest = ensure_speed_tables()
+            try:
+                st.session_state.data_source_label = _manifest.get("source", "R2 manifest")
+            except Exception:
+                st.session_state.data_source_label = "R2 manifest"
+            st.session_state.columns = (
+                (_manifest.get("index") or {}).get("columns")
+                or (_manifest.get("schema") or {}).get("index_columns")
+                or [
+                    "County", "Municipality", "Precinct", "USC", "STS", "STH",
+                    "School District", "School Region", "Party", "Gender",
+                    "Age_Range", "V4A", "V4G", "V4P", "MIB_Applied",
+                    "MIB_BALLOT", "MB_PERM", "MB_Prob_Score", "Tags",
+                    "Email", "Landline", "Mobile", "MailBallotNewRegistrant",
+                ]
+            )
         st.session_state.options = get_basic_options(st.session_state.columns)
         st.session_state.data_loaded = True
         st.session_state.filters_applied = False
