@@ -431,6 +431,11 @@ def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
                 out = out[vals <= float(rule["max"])]
     return out
 
+def expand_filter_values(field, vals):
+    # v21c: speed tables now use clean canonical labels, so no expansion is needed.
+    # Kept as a safe helper because filtering code calls it.
+    return vals
+
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
     for field, vals in active.items():
@@ -771,7 +776,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21b</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21c</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -793,7 +798,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21b")
+    st.caption("DEV final hybrid v21c")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
