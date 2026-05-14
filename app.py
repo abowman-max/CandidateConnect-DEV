@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v10
+# Candidate Connect DEV — Final Hybrid Cloud App v10b
 # Full safe filters + update counts + guarded export.
 # Designed after R2/manifest/filter-layer diagnostics passed.
 
@@ -250,7 +250,7 @@ def active_geo_filters() -> dict:
 
 
 def active_special_filters() -> dict:
-    # v10: row-level sliders removed. Age stays as Age_Range buckets.
+    # v10b: row-level sliders removed. Age is handled through Age_Range buckets.
     return {}
 
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
@@ -568,6 +568,9 @@ with st.sidebar:
         st.multiselect("Tags", options=tag_opts, key="filter_Tags")
 
 
+
+active = active_filters()
+
 st.markdown("### Current Universe")
 if active:
     chips = []
@@ -577,13 +580,11 @@ if active:
 else:
     st.info("No filters selected. Choose filters in the left pane.")
 
-level, note = confidence_level(active)
 st.markdown(
     '<div class="cc-note"><b>Counts update from the current data tables.</b> '
     'Downloaded files and reports are the final source for delivery lists.</div>',
     unsafe_allow_html=True,
 )
-
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown(f'<div class="cc-metric"><div class="label">Dataset Rows</div><div class="value">{int(manifest.get("total_rows", 0)):,}</div></div>', unsafe_allow_html=True)
