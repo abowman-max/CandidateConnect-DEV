@@ -270,7 +270,7 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 }
 
 
-/* v20d force dark sidebar expander headers */
+/* v20e force dark sidebar expander headers */
 [data-testid="stSidebar"] details > summary,
 [data-testid="stSidebar"] details > summary:hover,
 [data-testid="stSidebar"] details > summary:focus,
@@ -541,34 +541,14 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v20: Update Counts uses quick-count tables plus supported range filters.
+    # v20e: Update Counts only uses the quick-count-safe categorical filters.
+    # Sliders like MB Probability and Newly Registered stay visible and apply to exports/reports,
+    # but they do not touch count updates so they cannot crash the count screen.
     safe_active = count_safe_filters(active) if "count_safe_filters" in globals() else active
-    special = active_special_filters()
-    try:
-        needed_special = {k: v for k, v in special.items() if k != "RegistrationDate"}
-        summary, err = quick_counts({**safe_active})
-        if err is not None:
-            return None, "unavailable", err
-
-        # If range sliders are active and available, recalculate directly from count cube.
-        if needed_special:
-            needed = set(["Party"])
-            needed.update(safe_active.keys())
-            needed.update(needed_special.keys())
-            possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
-            last_error = None
-            for count_col in possible_count_cols:
-                try:
-                    cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
-                    filtered = apply_filters(cube, safe_active)
-                    filtered = apply_special_filters(filtered, needed_special)
-                    return summarize_from_df(filtered, row_count_mode=False), "quick", None
-                except Exception as e:
-                    last_error = e
-            return summary, "quick", last_error
+    summary, err = quick_counts(safe_active)
+    if err is None:
         return summary, "quick", None
-    except Exception as e:
-        return None, "unavailable", e
+    return None, "unavailable", err
 
 
 
@@ -828,7 +808,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20d</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20e</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -850,7 +830,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v20d")
+    st.caption("DEV final hybrid v20e")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -984,7 +964,10 @@ else:
     st.markdown("## Create Universe")
 
 st.markdown("### Current Universe")
-special_active = active_special_filters()
+try:
+    special_active = active_special_filters()
+except Exception:
+    special_active = {}
 if active or special_active:
     chips = []
     for k, vals in active.items():
