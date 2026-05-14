@@ -771,7 +771,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21b</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -793,7 +793,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21")
+    st.caption("DEV final hybrid v21b")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -861,12 +861,9 @@ with st.sidebar:
                 key="vote_history_score_range",
             )
 
-            years = election_years_from_columns()
-            if years:
-                st.multiselect("Election Year", options=years, key=f"filter_ElectionYear_{_filter_suffix}")
-                st.multiselect("Election Type", options=["General", "Primary"], key=f"filter_ElectionType_{_filter_suffix}")
-                st.multiselect("Vote Method", options=["Voted", "Mail Ballot", "Polls / In Person", "Did Not Vote"], key=f"filter_ElectionMethod_{_filter_suffix}")
-                st.caption("Election year/type/method controls are being restored carefully. They will be wired to detail exports/reports before being added to quick counts.")
+            # Temporarily disabled for DEV stabilization.
+            # Must be restored before LIVE.
+            st.caption("Election year/type/method filters are temporarily disabled in DEV stabilization and must be restored before LIVE.")
 
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
