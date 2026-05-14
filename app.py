@@ -269,6 +269,30 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     padding-left: 4px !important;
 }
 
+
+/* v20c force dark sidebar expander headers */
+[data-testid="stSidebar"] details > summary,
+[data-testid="stSidebar"] details > summary:hover,
+[data-testid="stSidebar"] details > summary:focus,
+[data-testid="stSidebar"] details > summary:active {
+    background-color: #0f172a !important;
+    background: #0f172a !important;
+    color: #f8fafc !important;
+    border-radius: 8px !important;
+    min-height: 34px !important;
+    padding: 8px 10px !important;
+}
+[data-testid="stSidebar"] details > summary *,
+[data-testid="stSidebar"] details > summary svg {
+    color: #f8fafc !important;
+    fill: #f8fafc !important;
+}
+[data-testid="stSidebar"] details[open] > summary {
+    background-color: #111827 !important;
+    background: #111827 !important;
+    border: 1px solid rgba(201,31,39,.65) !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -798,7 +822,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20b</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20c</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -820,7 +844,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v20b")
+    st.caption("DEV final hybrid v20c")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
