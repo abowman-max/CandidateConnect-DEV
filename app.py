@@ -368,17 +368,16 @@ def clean_yes_no_all_options():
     return ["Y", "N"]
 
 def clean_mail_options(field: str):
-    # v16: canonical mail ballot fields are produced by Step 8.
     fixed = {
         "MB_App": ["Applied", "Not Applied"],
         "MB_App_Status": ["Approved", "Declined"],
         "MB_Sent": ["Sent", "Not Sent"],
         "MB_Status": ["Voted", "Not Voted"],
         "MB_PERM": ["Y", "N"],
-        "HasMobile": ["Has Mobile", "No Mobile"],
-        "HasLandline": ["Has Landline", "No Landline"],
-        "HasEmail": ["Has Email", "No Email"],
-        "HasApplicantPhone": ["Has Applicant Phone", "No Applicant Phone"],
+        "HasMobile": ["Y", "N"],
+        "HasLandline": ["Y", "N"],
+        "HasEmail": ["Y", "N"],
+        "HasApplicantPhone": ["Y", "N"],
     }
     return fixed.get(field, [])
 
@@ -659,7 +658,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v17</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v18</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -681,56 +680,93 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v17")
+    st.caption("DEV final hybrid v18")
+
+    if "left_section" not in st.session_state:
+        st.session_state["left_section"] = None
+
+    if st.button("🎯 Create Universe", width="stretch"):
+        st.session_state["left_section"] = "create_universe"
+        st.session_state["view"] = "targeting"
+        st.rerun()
+
+    if st.button("📬 Mail Ballot Center", width="stretch"):
+        st.session_state["left_section"] = "mail_ballot_center"
+        st.session_state["view"] = "dashboard"
+        st.rerun()
+
+    if st.button("🔎 Voter Lookup", width="stretch"):
+        st.session_state["left_section"] = "voter_lookup"
+        st.session_state["view"] = "dashboard"
+        st.rerun()
+
+    if st.button("⌂ Area Intelligence", width="stretch"):
+        st.session_state["left_section"] = "area_intelligence"
+        st.session_state["view"] = "dashboard"
+        st.rerun()
 
     st.divider()
-    st.markdown("### Geography")
-    for field in GEO_FIELDS:
-        label = DISPLAY_LABELS.get(field, field)
-        opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
-        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-    st.divider()
-    st.markdown("### Party / Voter Profile")
-    for field in ["Party", "Gender", "Age_Range"]:
-        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+    if st.session_state.get("left_section") == "create_universe":
+        st.markdown("### Create Universe")
 
+        st.markdown("#### Geography")
+        for field in GEO_FIELDS:
+            label = DISPLAY_LABELS.get(field, field)
+            opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
+            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-    st.divider()
-    st.markdown("### Vote History")
-    for field in ["V4A", "V4G", "V4P"]:
-        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
-
-    st.divider()
-    st.markdown("### Mail Ballot")
-    for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM"]:
-        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
-
-    st.divider()
-    st.markdown("### Contact Filters")
-    for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
-        label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-        opts = field_options(filter_options, field)
-        st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
-
-    tag_opts = field_options(filter_options, "Tags")
-    if tag_opts:
         st.divider()
-        st.markdown("### Tags")
-        st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
+        st.markdown("#### Party / Voter Profile")
+        for field in ["Party", "Gender", "Age_Range"]:
+            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+            opts = field_options(filter_options, field)
+            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
+        st.divider()
+        st.markdown("#### Vote History")
+        for field in ["V4A", "V4G", "V4P"]:
+            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+            opts = field_options(filter_options, field)
+            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
+        st.divider()
+        st.markdown("#### Mail Ballot")
+        for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
+            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+            opts = field_options(filter_options, field)
+            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-render_top_nav()
+        st.divider()
+        st.markdown("#### Contact Filters")
+        for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
+            label = DISPLAY_LABELS.get(field, field.replace("_", " "))
+            opts = field_options(filter_options, field)
+            st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+
+        tag_opts = field_options(filter_options, "Tags")
+        if tag_opts:
+            st.divider()
+            st.markdown("#### Tags")
+            st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
+
+    elif st.session_state.get("left_section") == "mail_ballot_center":
+        st.markdown("### Mail Ballot Center")
+        st.info("Mail Ballot Center will be restored next. Use Create Universe for mail ballot filtering and exports for now.")
+
+    elif st.session_state.get("left_section") == "voter_lookup":
+        st.markdown("### Voter Lookup")
+        st.info("Voter Lookup will be restored after the Create Universe workflow is stable.")
+
+    elif st.session_state.get("left_section") == "area_intelligence":
+        st.markdown("### Area Intelligence")
+        st.info("Area Intelligence will be restored after the core targeting/export tools are stable.")
 
 
 active = active_filters()
+
+if st.session_state.get("left_section") == "create_universe":
+    st.session_state["view"] = "targeting"
 
 if st.session_state.get("view", "dashboard") == "dashboard":
     render_statewide_snapshot()
@@ -741,8 +777,11 @@ if st.session_state.get("view") == "analysis":
     st.info("Analysis dashboards are next. The stable targeting and export engine is already in place.")
     st.stop()
 
+if st.session_state.get("view") == "export":
+    st.markdown("## Export")
+else:
+    st.markdown("## Create Universe")
 
-st.markdown("## Targeting" if st.session_state.get("view") == "targeting" else "## Export")
 st.markdown("### Current Universe")
 if active:
     chips = []
