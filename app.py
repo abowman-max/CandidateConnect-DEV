@@ -24,6 +24,21 @@ DISPLAY_LABELS = {
     "MB_PERM": "Permanent Mail Ballot",
 }
 
+DEFAULT_EXPORT_COLUMNS = [
+    "County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region",
+    "voter_id", "FirstName", "MiddleName", "LastName", "Name", "FullName",
+    "Party", "CalculatedParty", "Gender", "Age", "Age_Range", "RegistrationDate",
+    "House Number", "Street Name", "Apartment Number", "City", "State", "Zip",
+    "res_address", "res_city", "res_state", "res_zip",
+    "Email", "Mobile", "Landline", "Current_ApplicantPhone",
+    "MIB_Applied", "MIB_BALLOT", "MB_PERM", "MB_Prob_Score",
+    "Current_App_Return_Date", "Current_Ballot_Sent_Date", "Current_Ballot_Returned_Date",
+    "Tags",
+]
+
+EXPORT_ROW_LIMIT = 250_000
+DETAIL_SHARD_COUNT = 36
+
 st.markdown(
     """
 <style>
@@ -83,7 +98,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
     font-size: 11px;
     margin-top: 4px;
 }
-.stButton > button {
+.stButton > button, div[data-testid="stDownloadButton"] > button {
     border-radius: 10px !important;
     font-weight: 850 !important;
     background: linear-gradient(180deg, #9f151c, #6e0f14) !important;
@@ -116,7 +131,7 @@ def fetch_text(key: str) -> str:
     return fetch_bytes(key).decode("utf-8")
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_manifest():
+def fetch_manifest() -> dict:
     return json.loads(fetch_text("dataset_manifest.json"))
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -124,13 +139,18 @@ def fetch_parquet(key: str) -> pd.DataFrame:
     return pd.read_parquet(io.BytesIO(fetch_bytes(key)))
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load_app_layer():
+def load_filter_layer():
     manifest = fetch_manifest()
     speed = manifest.get("speed", {}).get("tables", {})
     filter_options = fetch_parquet(speed.get("filter_options", "speed/filter_options.parquet"))
     geo_hierarchy = fetch_parquet(speed.get("geo_hierarchy", "speed/geo_hierarchy.parquet"))
-    count_cube = fetch_parquet(speed.get("count_cube", "speed/count_cube.parquet"))
-    return manifest, filter_options, geo_hierarchy, count_cube
+    return manifest, filter_options, geo_hierarchy
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_count_cube():
+    manifest = fetch_manifest()
+    speed = manifest.get("speed", {}).get("tables", {})
+    return fetch_parquet(speed.get("count_cube", "speed/count_cube.parquet"))
 
 def clean_value(value) -> str:
     if value is None:
@@ -189,22 +209,19 @@ def options_from_filter_table(filter_options: pd.DataFrame, field: str) -> list:
     return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
 
 def find_count_col(df: pd.DataFrame) -> str | None:
-    candidates = ["Voters", "voters", "count", "Count", "Total", "total"]
-    for c in candidates:
+    for c in ["Voters", "voters", "count", "Count", "Total", "total"]:
         if c in df.columns:
             return c
-    # fallback: first numeric column
     nums = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     return nums[0] if nums else None
 
-def summarize_counts(count_cube: pd.DataFrame, active: dict) -> tuple[dict, pd.DataFrame]:
+def summarize_counts(count_cube: pd.DataFrame, active: dict):
     df = apply_filters(count_cube, active)
     count_col = find_count_col(df)
     if count_col is None or df.empty:
         return {"voters": 0, "r": 0, "d": 0, "o": 0, "emails": 0, "mobiles": 0}, df
 
     voters = int(df[count_col].fillna(0).sum())
-
     party_counts = {"R": 0, "D": 0, "O": 0}
     if "Party" in df.columns:
         p = df.groupby("Party", dropna=False)[count_col].sum().to_dict()
@@ -214,18 +231,9 @@ def summarize_counts(count_cube: pd.DataFrame, active: dict) -> tuple[dict, pd.D
                 party_counts[k] += int(val)
             elif k:
                 party_counts["O"] += int(val)
-
     emails = int(df["Emails"].fillna(0).sum()) if "Emails" in df.columns else 0
     mobiles = int(df["Mobiles"].fillna(0).sum()) if "Mobiles" in df.columns else 0
-
-    return {
-        "voters": voters,
-        "r": party_counts["R"],
-        "d": party_counts["D"],
-        "o": party_counts["O"],
-        "emails": emails,
-        "mobiles": mobiles,
-    }, df
+    return {"voters": voters, "r": party_counts["R"], "d": party_counts["D"], "o": party_counts["O"], "emails": emails, "mobiles": mobiles}, df
 
 def pct(n, d):
     return "0.0%" if not d else f"{(n / d) * 100:.1f}%"
@@ -241,27 +249,69 @@ def group_table(df: pd.DataFrame, field: str) -> pd.DataFrame:
     g["Share"] = g["Voters"].map(lambda x: pct(int(x), total))
     return g.sort_values("Voters", ascending=False)
 
+def get_detail_keys(manifest: dict):
+    shards = manifest.get("detail", {}).get("shards", [])
+    keys = []
+    for item in shards:
+        if isinstance(item, dict) and item.get("key"):
+            keys.append(item["key"])
+        elif isinstance(item, str):
+            keys.append(item)
+    if not keys:
+        keys = [f"detail/voters_detail_{i:03d}.parquet" for i in range(DETAIL_SHARD_COUNT)]
+    return keys[:DETAIL_SHARD_COUNT]
+
+def filter_detail_df(df: pd.DataFrame, active: dict) -> pd.DataFrame:
+    out = df
+    for field, vals in active.items():
+        if vals and field in out.columns:
+            out = out[out[field].astype(str).isin([str(v) for v in vals])]
+    return out
+
+@st.cache_data(ttl=180, show_spinner=False)
+def build_export(active_json: str, columns_json: str):
+    active = json.loads(active_json)
+    selected_cols = json.loads(columns_json)
+    manifest = fetch_manifest()
+    parts = []
+    total = 0
+    for key in get_detail_keys(manifest):
+        df = fetch_parquet(key)
+        df = filter_detail_df(df, active)
+        if df.empty:
+            continue
+        cols = [c for c in selected_cols if c in df.columns]
+        if cols:
+            df = df[cols]
+        parts.append(df)
+        total += len(df)
+        if total > EXPORT_ROW_LIMIT:
+            raise RuntimeError(f"Export is over {EXPORT_ROW_LIMIT:,} rows. Please narrow filters.")
+    if not parts:
+        return pd.DataFrame(columns=selected_cols)
+    return pd.concat(parts, ignore_index=True)
+
 st.markdown(
     """
 <div class="cc-header">
   <div class="cc-title">Candidate Connect DEV</div>
-  <div class="cc-sub">Cloud-safe rebuild • Auto filters + count cube</div>
+  <div class="cc-sub">Cloud-safe rescue build • Stable filters • On-demand counts/export</div>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
 try:
-    with st.spinner("Loading filters and count cube from R2..."):
-        manifest, filter_options, geo_hierarchy, count_cube = load_app_layer()
+    with st.spinner("Loading safe filter layer from R2..."):
+        manifest, filter_options, geo_hierarchy = load_filter_layer()
 except Exception as e:
-    st.error("App layer failed to load.")
+    st.error("Filter layer failed to load.")
     st.exception(e)
     st.stop()
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV count-layer test")
+    st.caption("DEV rescue build")
 
     if st.button("Clear Filters", use_container_width=True):
         for key in list(st.session_state.keys()):
@@ -284,57 +334,88 @@ with st.sidebar:
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
 active = active_filters()
-summary, filtered_cube = summarize_counts(count_cube, active)
 
-st.markdown("### Active Universe")
+st.markdown("### Current Universe")
 if active:
     chips = []
     for k, vals in active.items():
         chips.append(f"**{DISPLAY_LABELS.get(k, k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals) > 6 else ''}")
     st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
 else:
-    st.info("No filters selected. Showing statewide count cube summary.")
+    st.info("No filters selected yet. Select filters in the left pane.")
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.markdown(f'<div class="cc-metric"><div class="label">Total Voters</div><div class="value">{summary["voters"]:,}</div><div class="sub">Selected universe</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cc-metric"><div class="label">Dataset Rows</div><div class="value">{int(manifest.get("total_rows", 0)):,}</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="cc-metric"><div class="label">Republican</div><div class="value">{summary["r"]:,}</div><div class="sub">{pct(summary["r"], summary["voters"])}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cc-metric"><div class="label">Filter Options</div><div class="value">{len(filter_options):,}</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f'<div class="cc-metric blue"><div class="label">Democrat</div><div class="value">{summary["d"]:,}</div><div class="sub">{pct(summary["d"], summary["voters"])}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cc-metric"><div class="label">Geo Rows</div><div class="value">{len(geo_hierarchy):,}</div></div>', unsafe_allow_html=True)
 with c4:
-    st.markdown(f'<div class="cc-metric green"><div class="label">Other / Unaffiliated</div><div class="value">{summary["o"]:,}</div><div class="sub">{pct(summary["o"], summary["voters"])}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cc-metric"><div class="label">Built</div><div class="value" style="font-size:16px;">{manifest.get("built_at", "unknown")}</div></div>', unsafe_allow_html=True)
 
-st.markdown("")
+st.markdown("## Counts")
+st.caption("Counts are on-demand for cloud stability.")
 
-left, mid, right = st.columns(3)
-with left:
-    st.markdown('<div class="cc-card">', unsafe_allow_html=True)
-    st.markdown("#### Party Breakdown")
-    st.dataframe(group_table(filtered_cube, "Party"), use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+if st.button("Calculate Counts", use_container_width=True):
+    try:
+        with st.spinner("Loading count cube and calculating selected universe..."):
+            count_cube = load_count_cube()
+            summary, filtered_cube = summarize_counts(count_cube, active)
+    except Exception as e:
+        st.error("Could not calculate counts from count cube.")
+        st.exception(e)
+        st.stop()
 
-with mid:
-    st.markdown('<div class="cc-card">', unsafe_allow_html=True)
-    st.markdown("#### Gender Breakdown")
-    st.dataframe(group_table(filtered_cube, "Gender"), use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f'<div class="cc-metric"><div class="label">Voters</div><div class="value">{summary["voters"]:,}</div></div>', unsafe_allow_html=True)
+    with k2:
+        st.markdown(f'<div class="cc-metric"><div class="label">Republican</div><div class="value">{summary["r"]:,}</div><div class="sub">{pct(summary["r"], summary["voters"])}</div></div>', unsafe_allow_html=True)
+    with k3:
+        st.markdown(f'<div class="cc-metric blue"><div class="label">Democrat</div><div class="value">{summary["d"]:,}</div><div class="sub">{pct(summary["d"], summary["voters"])}</div></div>', unsafe_allow_html=True)
+    with k4:
+        st.markdown(f'<div class="cc-metric green"><div class="label">Other / Unaffiliated</div><div class="value">{summary["o"]:,}</div><div class="sub">{pct(summary["o"], summary["voters"])}</div></div>', unsafe_allow_html=True)
 
-with right:
-    st.markdown('<div class="cc-card">', unsafe_allow_html=True)
-    st.markdown("#### Mail Ballot Application")
-    st.dataframe(group_table(filtered_cube, "MIB_Applied"), use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    left, mid, right = st.columns(3)
+    with left:
+        st.markdown("#### Party")
+        st.dataframe(group_table(filtered_cube, "Party"), use_container_width=True, hide_index=True)
+    with mid:
+        st.markdown("#### Gender")
+        st.dataframe(group_table(filtered_cube, "Gender"), use_container_width=True, hide_index=True)
+    with right:
+        st.markdown("#### Mail Ballot Application")
+        st.dataframe(group_table(filtered_cube, "MIB_Applied"), use_container_width=True, hide_index=True)
 
-st.markdown("### Debug / Health")
-h1, h2, h3, h4 = st.columns(4)
-with h1:
-    st.metric("Dataset rows", f"{int(manifest.get('total_rows', 0)):,}")
-with h2:
-    st.metric("Filter options", f"{len(filter_options):,}")
-with h3:
-    st.metric("Geo rows", f"{len(geo_hierarchy):,}")
-with h4:
-    st.metric("Count cube rows", f"{len(count_cube):,}")
+st.markdown("## Output Center")
+st.caption("Build export loads detail/voters_detail_000.parquet through voters_detail_035.parquet only after click.")
+
+selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
+
+if st.button("Build Export File", use_container_width=True):
+    if not active:
+        st.error("Please select at least one filter before exporting. Statewide export is blocked.")
+        st.stop()
+
+    try:
+        with st.spinner("Loading filtered detail shards for export..."):
+            export_df = build_export(json.dumps(active, sort_keys=True), json.dumps(selected_cols))
+    except Exception as e:
+        st.error("Could not build export.")
+        st.exception(e)
+        st.stop()
+
+    st.success(f"Export built: {len(export_df):,} rows")
+    st.dataframe(export_df.head(250), use_container_width=True)
+
+    csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download CSV",
+        data=csv_bytes,
+        file_name=f"candidate_connect_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
