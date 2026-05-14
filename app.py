@@ -162,6 +162,13 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
     text-align: center;
 }
 
+
+div[data-testid="stHorizontalBlock"] .stButton > button {
+    min-height: 34px !important;
+    padding: 0.25rem 0.75rem !important;
+    font-size: 12px !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -518,13 +525,6 @@ with st.sidebar:
     st.markdown("## Candidate Connect")
     st.caption("DEV final hybrid")
 
-    if st.button("Clear Filters", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            if key.startswith("filter_"):
-                del st.session_state[key]
-        st.session_state.pop("quick_summary", None)
-        st.rerun()
-
     st.divider()
     st.markdown("### Geography")
     for field in GEO_FIELDS:
@@ -580,25 +580,10 @@ if active:
 else:
     st.info("No filters selected. Choose filters in the left pane.")
 
-st.markdown(
-    '<div class="cc-note"><b>Counts update from the current data tables.</b> '
-    'Downloaded files and reports are the final source for delivery lists.</div>',
-    unsafe_allow_html=True,
-)
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.markdown(f'<div class="cc-metric"><div class="label">Dataset Rows</div><div class="value">{int(manifest.get("total_rows", 0)):,}</div></div>', unsafe_allow_html=True)
-with c2:
-    st.markdown(f'<div class="cc-metric"><div class="label">Filter Options</div><div class="value">{len(filter_options):,}</div></div>', unsafe_allow_html=True)
-with c3:
-    st.markdown(f'<div class="cc-metric"><div class="label">Geo Rows</div><div class="value">{len(geo_hierarchy):,}</div></div>', unsafe_allow_html=True)
-with c4:
-    st.markdown(f'<div class="cc-metric"><div class="label">Built</div><div class="value" style="font-size:16px;">{manifest.get("built_at", "unknown")}</div></div>', unsafe_allow_html=True)
-
 st.markdown("## Counts")
 
-count_col, spacer_col = st.columns([1, 4])
-with count_col:
+action_left, action_mid, action_spacer = st.columns([0.85, 0.85, 4.3])
+with action_left:
     if st.button("Update Counts", use_container_width=True):
         with st.spinner("Updating counts..."):
             summary, err = quick_counts(active)
@@ -608,6 +593,14 @@ with count_col:
         else:
             st.session_state["quick_summary"] = summary
 
+with action_mid:
+    if st.button("Clear Filters", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            if key.startswith("filter_"):
+                del st.session_state[key]
+        st.session_state.pop("quick_summary", None)
+        st.rerun()
+
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
     render_metrics(st.session_state["quick_summary"], label="")
@@ -616,7 +609,7 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports scan the verified detail shards, apply your current filters, and block overly broad statewide downloads for stability.")
+st.caption("Exports scan the detail shards, apply your current filters, and block overly broad statewide downloads for stability.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
