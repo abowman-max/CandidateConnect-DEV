@@ -13,6 +13,8 @@ import requests
 import streamlit as st
 import boto3
 
+# STARTUP SPEED FIX v2 - app must not download all index shards on startup
+
 from io import BytesIO
 from datetime import datetime
 from reportlab.lib.pagesizes import letter, landscape
