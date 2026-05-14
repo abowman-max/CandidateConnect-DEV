@@ -31,6 +31,9 @@ DISPLAY_LABELS = {
     "MB_Sent": "Ballot Sent",
     "MB_Status": "Ballot Status",
     "MB_PERM": "Permanent Mail Ballot",
+    "MailBallotNewRegistrant": "Newly Registered / Current Only",
+    "CalculatedParty": "Calculated Party",
+    "HH-Party": "Household Party",
     "V4A": "Vote History - All Elections",
     "V4G": "Vote History - General Elections",
     "V4P": "Vote History - Primary Elections",
@@ -234,6 +237,37 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     color: #f8fafc !important;
 }
 
+
+/* v20 sidebar readability fixes */
+[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details[open] {
+    background: rgba(15,23,42,.55) !important;
+    border: 1px solid rgba(148,163,184,.30) !important;
+    border-radius: 10px !important;
+    margin-bottom: 9px !important;
+}
+[data-testid="stSidebar"] summary,
+[data-testid="stSidebar"] summary * {
+    color: #f8fafc !important;
+    font-weight: 900 !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] label *,
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] p {
+    color: #f8fafc !important;
+    opacity: 1 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+    padding-left: 18px !important;
+    margin-left: 8px !important;
+    max-width: none !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] span,
+[data-testid="stSidebar"] [data-baseweb="tag"] div {
+    padding-left: 4px !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -337,16 +371,84 @@ def non_count_filters(active: dict) -> dict:
     ])
     return {k: v for k, v in active.items() if k not in safe}
 
+def manifest_columns() -> list[str]:
+    try:
+        return (
+            (manifest.get("schema") or {}).get("index_columns")
+            or (manifest.get("index") or {}).get("columns")
+            or []
+        )
+    except Exception:
+        return []
+
+def election_filter_columns() -> list[str]:
+    cols = []
+    for c in manifest_columns():
+        s = str(c)
+        u = re.sub(r"[^A-Z0-9]+", "_", s.upper()).strip("_")
+        if re.search(r"(^|_)(G|GENERAL|GEN|P|PRIMARY|PRI|PRIM)_?((?:20)?\d{2})(_|$)", u) or re.search(r"(^|_)((?:20)?\d{2})_?(G|GENERAL|GEN|P|PRIMARY|PRI|PRIM)(_|$)", u):
+            cols.append(s)
+    return cols
+
+def election_years_from_columns() -> list[str]:
+    years = set()
+    for c in election_filter_columns():
+        u = re.sub(r"[^A-Z0-9]+", "_", str(c).upper()).strip("_")
+        for m in re.finditer(r"(20\d{2}|\d{2})", u):
+            y = m.group(1)
+            if len(y) == 2:
+                y = "20" + y
+            try:
+                yi = int(y)
+                if 2000 <= yi <= 2030:
+                    years.add(str(yi))
+            except Exception:
+                pass
+    return sorted(years, reverse=True)
+
+def vote_score_field_from_selection() -> str:
+    choice = st.session_state.get("vote_score_type", "All Elections")
+    if choice == "General Elections":
+        return "V4G"
+    if choice == "Primary Elections":
+        return "V4P"
+    return "V4A"
+
+
 def active_special_filters() -> dict:
-    # v10b: row-level sliders removed. Age is handled through Age_Range buckets.
-    return {}
+    special = {}
+
+    # Newly registered slider: export/report detail-shard filter.
+    new_reg_months = st.session_state.get("new_reg_months", 0)
+    if new_reg_months and int(new_reg_months) > 0:
+        special["RegistrationDate"] = {"months": int(new_reg_months)}
+
+    # Vote history score slider: can apply to count cube and export/detail if selected.
+    vh_range = st.session_state.get("vote_history_score_range", (0, 4))
+    vh_field = vote_score_field_from_selection()
+    if vh_range != (0, 4):
+        special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
+
+    # MB probability score slider.
+    mb_prob = st.session_state.get("mb_prob_score_range", (0, 4))
+    if mb_prob != (0, 4):
+        special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
+
+    return special
 
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
-    return df
-
-def expand_filter_values(field: str, vals):
-    # v16: Step 8 now creates canonical UI fields, so filters match directly.
-    return [str(v) for v in vals]
+    out = df
+    for field, rule in (special or {}).items():
+        if field == "RegistrationDate" and field in out.columns:
+            months = int(rule.get("months", 0))
+            if months > 0:
+                cutoff = pd.Timestamp.now().normalize() - pd.DateOffset(months=months)
+                dates = pd.to_datetime(out[field], errors="coerce")
+                out = out[dates >= cutoff]
+        elif field in out.columns and isinstance(rule, dict) and "min" in rule and "max" in rule:
+            vals = pd.to_numeric(out[field], errors="coerce")
+            out = out[(vals >= float(rule["min"])) & (vals <= float(rule["max"]))]
+    return out
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
@@ -408,12 +510,35 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v15: Update Counts uses only safe count-table filters.
-    safe_active = count_safe_filters(active)
-    summary, err = quick_counts(safe_active)
-    if err is None:
+    # v20: Update Counts uses quick-count tables plus supported range filters.
+    safe_active = count_safe_filters(active) if "count_safe_filters" in globals() else active
+    special = active_special_filters()
+    try:
+        needed_special = {k: v for k, v in special.items() if k != "RegistrationDate"}
+        summary, err = quick_counts({**safe_active})
+        if err is not None:
+            return None, "unavailable", err
+
+        # If range sliders are active and available, recalculate directly from count cube.
+        if needed_special:
+            needed = set(["Party"])
+            needed.update(safe_active.keys())
+            needed.update(needed_special.keys())
+            possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
+            last_error = None
+            for count_col in possible_count_cols:
+                try:
+                    cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
+                    filtered = apply_filters(cube, safe_active)
+                    filtered = apply_special_filters(filtered, needed_special)
+                    return summarize_from_df(filtered, row_count_mode=False), "quick", None
+                except Exception as e:
+                    last_error = e
+            return summary, "quick", last_error
         return summary, "quick", None
-    return None, "unavailable", err
+    except Exception as e:
+        return None, "unavailable", e
+
 
 
 def pct(n, d):
@@ -672,7 +797,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v19</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -694,7 +819,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v19")
+    st.caption("DEV final hybrid v20")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -730,23 +855,59 @@ with st.sidebar:
                 opts = options_from_geo(geo_hierarchy, field, active_geo_filters())
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        with st.expander("Party / Voter Profile", expanded=False):
-            for field in ["Party", "Gender", "Age_Range"]:
+        with st.expander("Voter Details", expanded=False):
+            for field in ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field)
-                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+                if opts:
+                    st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+
+            st.slider(
+                "Newly Registered Within Last N Months",
+                min_value=0,
+                max_value=24,
+                value=0,
+                step=1,
+                help="0 = all voters. This is applied in exports/reports and detail-based tools.",
+                key="new_reg_months",
+            )
 
         with st.expander("Vote History", expanded=False):
-            for field in ["V4A", "V4G", "V4P"]:
-                label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-                opts = field_options(filter_options, field)
-                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+            st.selectbox(
+                "Vote History Type",
+                options=["All Elections", "General Elections", "Primary Elections"],
+                key="vote_score_type",
+            )
+            st.slider(
+                "Vote History Score Range",
+                min_value=0,
+                max_value=4,
+                value=(0, 4),
+                step=1,
+                key="vote_history_score_range",
+            )
+
+            years = election_years_from_columns()
+            if years:
+                st.multiselect("Election Year", options=years, key=f"filter_ElectionYear_{_filter_suffix}")
+                st.multiselect("Election Type", options=["General", "Primary"], key=f"filter_ElectionType_{_filter_suffix}")
+                st.multiselect("Vote Method", options=["Voted", "Mail Ballot", "Polls / In Person", "Did Not Vote"], key=f"filter_ElectionMethod_{_filter_suffix}")
+                st.caption("Election year/type/method controls are being restored carefully. They will be wired to detail exports/reports before being added to quick counts.")
 
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field)
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+
+            st.slider(
+                "Mail Ballot Probability Score",
+                min_value=0,
+                max_value=4,
+                value=(0, 4),
+                step=1,
+                key="mb_prob_score_range",
+            )
 
         with st.expander("Contact Filters", expanded=False):
             for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
@@ -792,10 +953,16 @@ else:
     st.markdown("## Create Universe")
 
 st.markdown("### Current Universe")
-if active:
+special_active = active_special_filters()
+if active or special_active:
     chips = []
     for k, vals in active.items():
         chips.append(f"**{DISPLAY_LABELS.get(k, k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals) > 6 else ''}")
+    if "RegistrationDate" in special_active:
+        chips.append(f"**Newly Registered:** last {special_active['RegistrationDate']['months']} months")
+    for _score_field in ["V4A", "V4G", "V4P", "MB_Prob_Score"]:
+        if _score_field in special_active:
+            chips.append(f"**{DISPLAY_LABELS.get(_score_field, _score_field)}:** {special_active[_score_field]['min']}–{special_active[_score_field]['max']}")
     st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
 else:
     st.info("No filters selected. Choose filters in the left pane.")
