@@ -270,7 +270,7 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 }
 
 
-/* v20c force dark sidebar expander headers */
+/* v20d force dark sidebar expander headers */
 [data-testid="stSidebar"] details > summary,
 [data-testid="stSidebar"] details > summary:hover,
 [data-testid="stSidebar"] details > summary:focus,
@@ -474,6 +474,12 @@ def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
             vals = pd.to_numeric(out[field], errors="coerce")
             out = out[(vals >= float(rule["min"])) & (vals <= float(rule["max"]))]
     return out
+
+
+def expand_filter_values(field, vals):
+    # simple pass-through for now (fixes crash)
+    # future: handle grouped / normalized values
+    return vals
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
@@ -822,7 +828,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20c</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20d</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -844,7 +850,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v20c")
+    st.caption("DEV final hybrid v20d")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
