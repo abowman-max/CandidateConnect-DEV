@@ -1,5 +1,5 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v9
-# Full safe filters + fast counts + exact verification + guarded export.
+# Candidate Connect DEV — Final Hybrid Cloud App v10
+# Full safe filters + update counts + guarded export.
 # Designed after R2/manifest/filter-layer diagnostics passed.
 
 import io
@@ -250,44 +250,11 @@ def active_geo_filters() -> dict:
 
 
 def active_special_filters() -> dict:
-    special = {}
-
-    age_range = st.session_state.get("age_slider", (18, 100))
-    if age_range != (18, 100):
-        special["Age"] = {"min": int(age_range[0]), "max": int(age_range[1])}
-
-    mb_prob = st.session_state.get("mb_prob_slider", (0, 4))
-    if mb_prob != (0, 4):
-        special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
-
-    new_reg_days = st.session_state.get("new_reg_days", 0)
-    if new_reg_days and int(new_reg_days) > 0:
-        special["RegistrationDate"] = {"days": int(new_reg_days)}
-
-    return special
-
+    # v10: row-level sliders removed. Age stays as Age_Range buckets.
+    return {}
 
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
-    out = df
-
-    if "Age" in special and "Age" in out.columns:
-        rule = special["Age"]
-        ages = pd.to_numeric(out["Age"], errors="coerce")
-        out = out[(ages >= rule["min"]) & (ages <= rule["max"])]
-
-    if "MB_Prob_Score" in special and "MB_Prob_Score" in out.columns:
-        rule = special["MB_Prob_Score"]
-        scores = pd.to_numeric(out["MB_Prob_Score"], errors="coerce")
-        out = out[(scores >= rule["min"]) & (scores <= rule["max"])]
-
-    if "RegistrationDate" in special and "RegistrationDate" in out.columns:
-        days = int(special["RegistrationDate"]["days"])
-        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
-        regs = pd.to_datetime(out["RegistrationDate"], errors="coerce")
-        out = out[regs >= cutoff]
-
-    return out
-
+    return df
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
@@ -329,8 +296,8 @@ def confidence_level(active: dict) -> tuple[str, str]:
     if count <= 2 and voter_count == 0:
         return "High confidence", "Quick counts are expected to match final counts for simple geography filters."
     if count <= 4 and voter_count <= 1:
-        return "High confidence", "Quick counts are built from the current dataset and are suitable for exploration. Verify before final export."
-    return "Verify recommended", "Many filters are combined. Use Verify Exact Counts before final targeting or export."
+        return "High confidence", "Quick counts are built from the current dataset and are suitable for exploration. Export/download files are the final source for delivery lists."
+    return "Advanced filters selected", "Many filters are combined. Export/download files are the final source for delivery lists."
 
 
 def find_count_col(df: pd.DataFrame) -> str | None:
@@ -374,7 +341,7 @@ def summarize_from_df(df: pd.DataFrame, row_count_mode=False):
 def render_metrics(summary, label=""):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown(f'<div class="cc-metric"><div class="label">Total {label}</div><div class="value">{summary["total"]:,}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cc-metric"><div class="label">Total Voters</div><div class="value">{summary["total"]:,}</div></div>', unsafe_allow_html=True)
     with c2:
         st.markdown(f'<div class="cc-metric"><div class="label">Republican</div><div class="value">{summary["r"]:,}</div><div class="sub">{pct(summary["r"], summary["total"])}</div></div>', unsafe_allow_html=True)
     with c3:
@@ -531,7 +498,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Final hybrid cloud build</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, use_container_width=True)
@@ -556,7 +523,6 @@ with st.sidebar:
             if key.startswith("filter_"):
                 del st.session_state[key]
         st.session_state.pop("quick_summary", None)
-        st.session_state.pop("exact_summary", None)
         st.rerun()
 
     st.divider()
@@ -573,7 +539,6 @@ with st.sidebar:
         opts = options_from_filter_table(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
 
-    st.slider("Age Slider", min_value=18, max_value=100, value=(18, 100), key="age_slider")
 
     st.divider()
     st.markdown("### Vote History")
@@ -588,7 +553,6 @@ with st.sidebar:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = options_from_filter_table(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}")
-    st.slider("MB Probability Score", min_value=0, max_value=4, value=(0, 4), key="mb_prob_slider")
 
     st.divider()
     st.markdown("### Contact Filters")
@@ -603,39 +567,22 @@ with st.sidebar:
         st.markdown("### Tags")
         st.multiselect("Tags", options=tag_opts, key="filter_Tags")
 
-    st.divider()
-    st.markdown("### Newly Registered")
-    st.selectbox(
-        "Registered within",
-        options=[0, 30, 60, 90, 180, 365],
-        format_func=lambda x: "All voters" if x == 0 else f"Last {x} days",
-        key="new_reg_days",
-    )
-
-active = active_filters()
 
 st.markdown("### Current Universe")
-special_active = active_special_filters()
-
-if active or special_active:
+if active:
     chips = []
     for k, vals in active.items():
         chips.append(f"**{DISPLAY_LABELS.get(k, k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals) > 6 else ''}")
-    if "Age" in special_active:
-        chips.append(f"**Age Slider:** {special_active['Age']['min']}–{special_active['Age']['max']}")
-    if "MB_Prob_Score" in special_active:
-        chips.append(f"**MB Probability:** {special_active['MB_Prob_Score']['min']}–{special_active['MB_Prob_Score']['max']}")
-    if "RegistrationDate" in special_active:
-        chips.append(f"**Newly Registered:** last {special_active['RegistrationDate']['days']} days")
     st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
 else:
     st.info("No filters selected. Choose filters in the left pane.")
 
-level, note = confidence_level({**active, **{k: [v] for k, v in special_active.items()}})
-if level == "High confidence":
-    st.markdown(f'<div class="cc-note"><b>{level} quick counts.</b> {note}</div>', unsafe_allow_html=True)
-else:
-    st.markdown(f'<div class="cc-verify"><b>{level}.</b> {note}</div>', unsafe_allow_html=True)
+level, note = confidence_level(active)
+st.markdown(
+    '<div class="cc-note"><b>Counts update from the current data tables.</b> '
+    'Downloaded files and reports are the final source for delivery lists.</div>',
+    unsafe_allow_html=True,
+)
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
@@ -649,40 +596,23 @@ with c4:
 
 st.markdown("## Counts")
 
-col_q, col_v = st.columns(2)
-with col_q:
-    if st.button("Quick Counts", use_container_width=True):
-        with st.spinner("Loading quick count table..."):
+count_col, spacer_col = st.columns([1, 4])
+with count_col:
+    if st.button("Update Counts", use_container_width=True):
+        with st.spinner("Updating counts..."):
             summary, err = quick_counts(active)
         if err:
-            st.warning("Quick counts are unavailable for this build. Use Verify Exact Counts.")
+            st.warning("Counts are unavailable for this filter combination.")
             st.caption(str(err)[:500])
         else:
             st.session_state["quick_summary"] = summary
-            st.success("Quick counts loaded.")
-
-with col_v:
-    if st.button("Verify Exact Counts", use_container_width=True):
-        with st.spinner("Scanning all detail shards for exact counts..."):
-            summary = exact_counts(active)
-        st.session_state["exact_summary"] = summary
-        st.success("Exact counts verified.")
 
 if st.session_state.get("quick_summary"):
-    st.markdown("### Quick Counts")
-    render_metrics(st.session_state["quick_summary"], label="Quick")
+    st.markdown("### Current Counts")
+    render_metrics(st.session_state["quick_summary"], label="")
     left_chart, right_blank = st.columns([1, 1])
     with left_chart:
-        render_party_chart(st.session_state["quick_summary"], "Quick Party Breakdown")
-
-if st.session_state.get("exact_summary"):
-    st.markdown("### Verified Exact Counts")
-    render_metrics(st.session_state["exact_summary"], label="Exact")
-    left_chart, right_blank = st.columns([1, 1])
-    with left_chart:
-        render_party_chart(st.session_state["exact_summary"], "Verified Party Breakdown")
-
-render_quick_exact_comparison()
+        render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
 st.caption("Exports scan the verified detail shards, apply your current filters, and block overly broad statewide downloads for stability.")
