@@ -18,7 +18,7 @@ EXPORT_ROW_LIMIT = 250_000
 st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
 
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
-VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
+VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
 
 DISPLAY_LABELS = {
@@ -26,14 +26,15 @@ DISPLAY_LABELS = {
     "STS": "State Senate District",
     "STH": "State House District",
     "Age_Range": "Age Range",
-    "MIB_Applied": "Mail Ballot Application",
-    "MIB_BALLOT": "Application Status",
+    "MB_App": "Mail Ballot Application",
+    "MB_App_Status": "Application Status",
+    "MB_Sent": "Ballot Sent",
+    "MB_Status": "Ballot Status",
     "MB_PERM": "Permanent Mail Ballot",
     "V4A": "Vote History - All Elections",
     "V4G": "Vote History - General Elections",
     "V4P": "Vote History - Primary Elections",
-    "BallotSentStatus": "Ballot Sent",
-    "BallotReturnedStatus": "Ballot Status",
+
     "HasMobile": "Mobile Phone",
     "HasLandline": "Landline",
     "HasEmail": "Email",
@@ -57,7 +58,7 @@ DEFAULT_EXPORT_COLUMNS = [
     "House Number", "Street Name", "Apartment Number", "City", "State", "Zip",
     "res_address", "res_city", "res_state", "res_zip",
     "Email", "Mobile", "Landline", "Current_ApplicantPhone",
-    "MIB_Applied", "MIB_BALLOT", "MB_PERM", "MB_Prob_Score",
+    "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MIB_Applied", "MIB_BALLOT", "MB_PERM", "MB_Prob_Score",
     "Current_App_Return_Date", "Current_Ballot_Sent_Date", "Current_Ballot_Returned_Date",
     "Tags",
 ]
@@ -199,6 +200,18 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     padding-left: 10px !important;
 }
 
+
+/* v15 stronger chip visibility */
+[data-baseweb="tag"] {
+    padding-left: 18px !important;
+    margin-left: 8px !important;
+    max-width: none !important;
+}
+[data-baseweb="tag"] span,
+[data-baseweb="tag"] div {
+    padding-left: 4px !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -285,6 +298,22 @@ def active_filters() -> dict:
 def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
+def count_safe_filters(active: dict) -> dict:
+    # v16: quick counts use the rebuilt speed/count_cube fields.
+    safe = set(GEO_FIELDS + [
+        "Party", "Gender", "Age_Range", "V4A", "V4G", "V4P",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM",
+        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
+    ])
+    return {k: v for k, v in active.items() if k in safe}
+
+def non_count_filters(active: dict) -> dict:
+    safe = set(GEO_FIELDS + [
+        "Party", "Gender", "Age_Range", "V4A", "V4G", "V4P",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM",
+        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
+    ])
+    return {k: v for k, v in active.items() if k not in safe}
 
 def active_special_filters() -> dict:
     # v10b: row-level sliders removed. Age is handled through Age_Range buckets.
@@ -294,38 +323,8 @@ def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
     return df
 
 def expand_filter_values(field: str, vals):
-    # User-facing mail ballot labels need to match several possible stored values.
-    expansions = {
-        "MIB_Applied": {
-            "Applied": ["Applied", "Y", "Yes", "1", "True", "TRUE"],
-            "Not Applied": ["Not Applied", "DNA", "N", "No", "0", "False", "FALSE", ""],
-        },
-        "MIB_BALLOT": {
-            "Approved": ["Approved", "APPROVED", "Y", "Yes", "1", "True", "TRUE"],
-            "Declined": ["Declined", "DECLINED", "Rejected", "REJECTED", "Denied", "DENIED", "N", "No", "0", "False", "FALSE"],
-        },
-        "BallotSentStatus": {
-            "Sent": ["Sent", "SENT", "Y", "Yes", "1", "True", "TRUE"],
-            "Not Sent": ["Not Sent", "NOT SENT", "N", "No", "0", "False", "FALSE", ""],
-        },
-        "BallotReturnedStatus": {
-            "Voted": ["Voted", "Returned", "VOTED", "RETURNED", "Y", "Yes", "1", "True", "TRUE"],
-            "Not Voted": ["Not Voted", "Not Returned", "NOT VOTED", "NOT RETURNED", "N", "No", "0", "False", "FALSE", ""],
-        },
-    }
-    out = []
-    mapping = expansions.get(field, {})
-    for v in vals:
-        sv = str(v)
-        out.extend(mapping.get(sv, [sv]))
-    # Deduplicate but preserve order
-    seen = set()
-    final = []
-    for v in out:
-        if v not in seen:
-            seen.add(v)
-            final.append(v)
-    return final
+    # v16: Step 8 now creates canonical UI fields, so filters match directly.
+    return [str(v) for v in vals]
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
@@ -361,18 +360,17 @@ def clean_yes_no_all_options():
     return ["Y", "N"]
 
 def clean_mail_options(field: str):
-    # v13: clean user-facing mail ballot options only.
-    # Actual data may store Y/N or alternate wording; apply_filters expands these.
+    # v16: canonical mail ballot fields are produced by Step 8.
     fixed = {
-        "MIB_Applied": ["Applied", "Not Applied"],
-        "MIB_BALLOT": ["Approved", "Declined"],
-        "BallotSentStatus": ["Sent", "Not Sent"],
-        "BallotReturnedStatus": ["Voted", "Not Voted"],
+        "MB_App": ["Applied", "Not Applied"],
+        "MB_App_Status": ["Approved", "Declined"],
+        "MB_Sent": ["Sent", "Not Sent"],
+        "MB_Status": ["Voted", "Not Voted"],
         "MB_PERM": ["Y", "N"],
-        "HasMobile": ["Y", "N"],
-        "HasLandline": ["Y", "N"],
-        "HasEmail": ["Y", "N"],
-        "HasApplicantPhone": ["Y", "N"],
+        "HasMobile": ["Has Mobile", "No Mobile"],
+        "HasLandline": ["Has Landline", "No Landline"],
+        "HasEmail": ["Has Email", "No Email"],
+        "HasApplicantPhone": ["Has Applicant Phone", "No Applicant Phone"],
     }
     return fixed.get(field, [])
 
@@ -389,9 +387,9 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v14b: Update Counts NEVER scans detail shards.
-    # It uses the quick count table only. Detail shards are for exports/reports.
-    summary, err = quick_counts(active)
+    # v15: Update Counts uses only safe count-table filters.
+    safe_active = count_safe_filters(active)
+    summary, err = quick_counts(safe_active)
     if err is None:
         return summary, "quick", None
     return None, "unavailable", err
@@ -483,7 +481,7 @@ def render_quick_exact_comparison():
         {"Metric": "Other", "Quick": q["o"], "Exact": e["o"], "Difference": e["o"] - q["o"]},
     ])
     st.markdown("### Quick vs Verified Comparison")
-    st.dataframe(comp, use_container_width=True, hide_index=True)
+    st.dataframe(comp, width="stretch", hide_index=True)
 
 def quick_counts(active: dict):
     # v14b: quick counts only use selected columns from speed/count_cube.parquet.
@@ -601,15 +599,15 @@ st.markdown('<div class="cc-header">', unsafe_allow_html=True)
 h_logo, h_mid, h_power = st.columns([1.1, 2.8, 1.2])
 with h_logo:
     if file_exists(LOGO_CANDIDATE_CONNECT):
-        st.image(LOGO_CANDIDATE_CONNECT, use_container_width=True)
+        st.image(LOGO_CANDIDATE_CONNECT, width="stretch")
     else:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v14b</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v16</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
-        st.image(LOGO_TPTC, use_container_width=True)
+        st.image(LOGO_TPTC, width="stretch")
     else:
         st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
@@ -628,7 +626,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v14b")
+    st.caption("DEV final hybrid v16")
 
     st.divider()
     st.markdown("### Geography")
@@ -654,7 +652,7 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### Mail Ballot")
-    for field in ["MIB_Applied", "MIB_BALLOT", "MB_PERM", "BallotSentStatus", "BallotReturnedStatus"]:
+    for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM"]:
         label = DISPLAY_LABELS.get(field, field.replace("_", " "))
         opts = field_options(filter_options, field)
         st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
@@ -685,11 +683,20 @@ if active:
 else:
     st.info("No filters selected. Choose filters in the left pane.")
 
+st.markdown(
+    '<div class="cc-note"><b>Update Counts uses the rebuilt quick-count tables.</b> '
+    'Tags are applied in exports and reports.</div>',
+    unsafe_allow_html=True,
+)
+extra_filters = non_count_filters(active)
+if extra_filters:
+    st.info("Some selected tag filters are export/report filters and are not included in the quick count total yet.")
+
 st.markdown("## Counts")
 
 action_left, action_mid, action_spacer = st.columns([0.85, 0.85, 4.3])
 with action_left:
-    if st.button("Update Counts", use_container_width=True):
+    if st.button("Update Counts", width="stretch"):
         with st.spinner("Updating counts..."):
             summary, mode, err = update_counts(active)
         if err:
@@ -700,7 +707,7 @@ with action_left:
             st.session_state["count_mode"] = mode
 
 with action_mid:
-    if st.button("Clear Filters", use_container_width=True):
+    if st.button("Clear Filters", width="stretch"):
         st.session_state["filter_reset_token"] = st.session_state.get("filter_reset_token", 0) + 1
         st.session_state.pop("quick_summary", None)
         st.session_state.pop("count_mode", None)
@@ -715,11 +722,11 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts stays fast and does not scan detail shards.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses rebuilt quick-count tables and does not scan detail shards.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
-if st.button("Build Export File", use_container_width=True):
+if st.button("Build Export File", width="stretch"):
     try:
         with st.spinner("Building filtered export from detail shards..."):
             df_export = build_export(active, selected_cols)
@@ -729,13 +736,13 @@ if st.button("Build Export File", use_container_width=True):
         st.stop()
 
     st.success(f"Export built: {len(df_export):,} rows")
-    st.dataframe(df_export.head(250), use_container_width=True)
+    st.dataframe(df_export.head(250), width="stretch")
     st.download_button(
         "Download CSV",
         data=df_export.to_csv(index=False).encode("utf-8"),
         file_name=f"candidate_connect_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
 st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
