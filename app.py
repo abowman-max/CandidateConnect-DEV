@@ -380,31 +380,39 @@ def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
 def count_safe_filters(active: dict) -> dict:
-    # v20f: Update Counts uses only the proven-safe speed/count fields.
-    # Contact, mail ballot, tags, and sliders remain export/report filters for now.
-    safe = set(GEO_FIELDS + ["Party", "Gender", "Age_Range"])
+    # v21: after Step 8 v18 rebuild, Update Counts supports the full targeting count cube.
+    safe = set(GEO_FIELDS + [
+        "Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party",
+        "V4A", "V4G", "V4P",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "MB_Prob_Score",
+        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
+        "RegistrationMonthsAgo",
+    ])
     return {k: v for k, v in active.items() if k in safe}
 
 def non_count_filters(active: dict) -> dict:
-    safe = set(GEO_FIELDS + ["Party", "Gender", "Age_Range"])
+    safe = set(GEO_FIELDS + [
+        "Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party",
+        "V4A", "V4G", "V4P",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "MB_Prob_Score",
+        "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
+        "RegistrationMonthsAgo",
+    ])
     return {k: v for k, v in active.items() if k not in safe}
-
 
 def active_special_filters() -> dict:
     special = {}
 
-    # Newly registered slider: export/report detail-shard filter.
+    # Newly registered slider, expressed against RegistrationMonthsAgo from Step 8 v18.
     new_reg_months = st.session_state.get("new_reg_months", 0)
     if new_reg_months and int(new_reg_months) > 0:
-        special["RegistrationDate"] = {"months": int(new_reg_months)}
+        special["RegistrationMonthsAgo"] = {"max": int(new_reg_months)}
 
-    # Vote history score slider: can apply to count cube and export/detail if selected.
     vh_range = st.session_state.get("vote_history_score_range", (0, 4))
-    vh_field = vote_score_field_from_selection()
+    vh_field = vote_score_field_from_selection() if "vote_score_field_from_selection" in globals() else "V4A"
     if vh_range != (0, 4):
         special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
 
-    # MB probability score slider.
     mb_prob = st.session_state.get("mb_prob_score_range", (0, 4))
     if mb_prob != (0, 4):
         special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
@@ -414,22 +422,14 @@ def active_special_filters() -> dict:
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
     out = df
     for field, rule in (special or {}).items():
-        if field == "RegistrationDate" and field in out.columns:
-            months = int(rule.get("months", 0))
-            if months > 0:
-                cutoff = pd.Timestamp.now().normalize() - pd.DateOffset(months=months)
-                dates = pd.to_datetime(out[field], errors="coerce")
-                out = out[dates >= cutoff]
-        elif field in out.columns and isinstance(rule, dict) and "min" in rule and "max" in rule:
+        if field in out.columns and isinstance(rule, dict):
             vals = pd.to_numeric(out[field], errors="coerce")
-            out = out[(vals >= float(rule["min"])) & (vals <= float(rule["max"]))]
+            if "min" in rule:
+                out = out[vals >= float(rule["min"])]
+                vals = pd.to_numeric(out[field], errors="coerce")
+            if "max" in rule:
+                out = out[vals <= float(rule["max"])]
     return out
-
-
-def expand_filter_values(field, vals):
-    # simple pass-through for now (fixes crash)
-    # future: handle grouped / normalized values
-    return vals
 
 def apply_filters(df: pd.DataFrame, active: dict) -> pd.DataFrame:
     out = df
@@ -471,10 +471,10 @@ def clean_mail_options(field: str):
         "MB_Sent": ["Sent", "Not Sent"],
         "MB_Status": ["Voted", "Not Voted"],
         "MB_PERM": ["Y", "N"],
-        "HasMobile": ["Y", "N"],
-        "HasLandline": ["Y", "N"],
-        "HasEmail": ["Y", "N"],
-        "HasApplicantPhone": ["Y", "N"],
+        "HasMobile": ["Yes", "No"],
+        "HasLandline": ["Yes", "No"],
+        "HasEmail": ["Yes", "No"],
+        "HasApplicantPhone": ["Yes", "No"],
     }
     return fixed.get(field, [])
 
@@ -491,14 +491,27 @@ def is_cube_safe(active: dict) -> bool:
     return all(k in cube_safe for k in active.keys())
 
 def update_counts(active: dict):
-    # v20f: Update Counts only uses the quick-count-safe categorical filters.
-    # Sliders like MB Probability and Newly Registered stay visible and apply to exports/reports,
-    # but they do not touch count updates so they cannot crash the count screen.
-    safe_active = count_safe_filters(active) if "count_safe_filters" in globals() else active
-    summary, err = quick_counts(safe_active)
-    if err is None:
-        return summary, "quick", None
-    return None, "unavailable", err
+    # v21: Update Counts uses the rebuilt full count cube.
+    safe_active = count_safe_filters(active)
+    special = active_special_filters()
+
+    needed = set(["Party"])
+    needed.update(safe_active.keys())
+    needed.update(special.keys())
+    possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
+    last_error = None
+
+    for count_col in possible_count_cols:
+        try:
+            cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
+            filtered = apply_filters(cube, safe_active)
+            filtered = apply_special_filters(filtered, special)
+            return summarize_from_df(filtered, row_count_mode=False), "quick", None
+        except Exception as e:
+            last_error = e
+            continue
+
+    return None, "unavailable", last_error or RuntimeError("Quick count fields are not available for this filter combination.")
 
 
 
@@ -758,7 +771,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v20f</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -780,7 +793,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v20f")
+    st.caption("DEV final hybrid v21")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
