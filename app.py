@@ -64,13 +64,15 @@ def file_exists(path: str) -> bool:
         return False
 
 DEFAULT_EXPORT_COLUMNS = [
+    # Keep voter_id in every CSV/Excel output so street/walk/contact results can be matched later.
+    "voter_id",
     "County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region",
-    "voter_id", "FirstName", "MiddleName", "LastName", "Name", "FullName",
-    "Party", "CalculatedParty", "Gender", "Age", "Age_Range", "RegistrationDate",
-    "House Number", "Street Name", "Apartment Number", "City", "State", "Zip",
+    "FirstName", "MiddleName", "LastName", "NameSuffix", "FullName",
+    "Party", "CalculatedParty", "Gender", "DOB", "Age", "Age_Range", "RegistrationDate",
+    "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2", "City", "State", "Zip",
     "res_address", "res_city", "res_state", "res_zip",
     "Email", "Mobile", "Landline", "Current_ApplicantPhone",
-    "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MIB_Applied", "MIB_BALLOT", "MB_PERM", "MB_Prob_Score",
+    "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "MB_Prob_Score",
     "Current_App_Return_Date", "Current_Ballot_Sent_Date", "Current_Ballot_Returned_Date",
     "Tags",
 ]
@@ -582,7 +584,7 @@ def dataframe_to_excel_bytes(df: pd.DataFrame, area_level: str = "Municipality")
         df = pd.DataFrame()
     area_col = area_level if area_level in df.columns else ("Precinct" if "Precinct" in df.columns else ("Municipality" if "Municipality" in df.columns else None))
     if area_col and not df.empty:
-        counts = df.groupby(area_col, dropna=False).size().reset_index(name="Voters").sort_values("Voters", ascending=False)
+        counts = df.groupby(area_col, dropna=False).size().reset_index(name="Voters").sort_values(area_col, ascending=True)
     else:
         counts = pd.DataFrame(columns=[area_level, "Voters"])
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
@@ -1667,7 +1669,7 @@ def render_home_geo_table(summary: dict):
     for c in ["Total","Republican","Democrat","Other"]:
         if c in show.columns:
             show[c] = show[c].fillna(0).astype(int).map(lambda x: f"{x:,}")
-    st.markdown('<div class="cc-home-card"><h3>County Breakdown by Party</h3><div style="color:#94a3b8;font-size:12px;margin-bottom:8px;">Sorted alphabetically. Scroll to view all counties.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-home-card"><h3>County Breakdown by Party</h3>', unsafe_allow_html=True)
     st.dataframe(show, hide_index=True, width="stretch", height=235)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1876,13 +1878,104 @@ def phone_label(row):
     if app and app not in {mobile, land}: vals.append(f"{app} (u)")
     return " / ".join(vals)
 
-def report_columns():
-    cols = []
+def first_existing_col(df: pd.DataFrame, candidates: list[str]):
+    if df is None or df.empty:
+        return None
+    norm_map = {re.sub(r"[^a-z0-9]+", "", str(c).lower()): c for c in df.columns}
+    for cand in candidates:
+        hit = norm_map.get(re.sub(r"[^a-z0-9]+", "", str(cand).lower()))
+        if hit is not None:
+            return hit
+    return None
+
+def coalesce_columns(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
+    out = pd.Series([""] * len(df), index=df.index, dtype="object")
+    for cand in candidates:
+        col = first_existing_col(df, [cand])
+        if col is None:
+            continue
+        vals = df[col].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
+        mask = out.astype(str).str.strip().eq("") & vals.ne("")
+        out.loc[mask] = vals.loc[mask]
+    return out
+
+def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Repair/standardize downloaded fields from whatever column naming the current detail shards contain.
+
+    This prevents blank FirstName/Party/Gender/address columns when a shard uses an
+    alternate source name, and removes legacy duplicate empty columns from user downloads.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
+    df = df.copy()
+    aliases = {
+        "voter_id": ["voter_id", "VoterID", "Voter ID", "IDNumber", "ID Number", "PA ID Number", "PA_ID_Number", "SURE_ID", "StateVoterID"],
+        "County": ["County", "county", "CountyName"],
+        "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
+        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
+        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName"],
+        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial"],
+        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix"],
+        "FullName": ["FullName", "Full Name", "Name", "name"],
+        "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
+        "Gender": ["Gender", "gender", "Sex", "sex"],
+        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "dob"],
+        "Age": ["Age", "age", "Age_Calc"],
+        "Age_Range": ["Age_Range", "age_group", "Age Group"],
+        "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
+        "House Number": ["House Number", "HouseNumber", "house_number", "res_house_number"],
+        "House Number Suffix": ["House Number Suffix", "HouseNumberSuffix", "house_number_suffix"],
+        "Street Name": ["Street Name", "StreetName", "street_name", "res_street_name"],
+        "Apartment Number": ["Apartment Number", "ApartmentNumber", "Unit", "Apt", "apartment_number"],
+        "Address Line 2": ["Address Line 2", "AddressLine2", "Address2", "address_line_2"],
+        "City": ["City", "city", "res_city", "Mail City"],
+        "State": ["State", "state", "res_state", "Mail State"],
+        "Zip": ["Zip", "ZIP", "ZipCode", "zipcode", "res_zip", "Mail Zip"],
+        "Email": ["Email", "EMAIL", "Current_Email", "email"],
+        "Mobile": ["Mobile", "MobilePhone", "mobile_phone", "Cell", "CellPhone"],
+        "Landline": ["Landline", "Phone", "phone", "HomePhone"],
+        "Current_ApplicantPhone": ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"],
+    }
+    for out_col, cands in aliases.items():
+        if out_col not in df.columns or df[out_col].astype(str).replace({"nan":""}).str.strip().eq("").mean() > .95:
+            df[out_col] = coalesce_columns(df, cands)
+
+    # Build FullName if the separate SURE name fields exist.
+    if "FullName" not in df.columns or df["FullName"].astype(str).replace({"nan":""}).str.strip().eq("").mean() > .95:
+        parts = []
+        for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]:
+            parts.append(df.get(c, pd.Series([""]*len(df), index=df.index)).astype(str).replace({"nan":""}).str.strip())
+        df["FullName"] = (parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3]).str.replace(r"\s+", " ", regex=True).str.strip()
+
+    # Normalize party/gender display values if present.
+    if "Party" in df.columns:
+        df["Party"] = df["Party"].map(lambda x: "R" if str(x).strip().upper() in {"R","REP","REPUBLICAN"} else ("D" if str(x).strip().upper() in {"D","DEM","DEMOCRAT","DEMOCRATIC"} else ("O" if str(x).strip() else "")))
+    if "Gender" in df.columns:
+        df["Gender"] = df["Gender"].map(lambda x: "M" if str(x).strip().upper() in {"M","MALE"} else ("F" if str(x).strip().upper() in {"F","FEMALE"} else ("U" if str(x).strip() else "")))
+
     for c in DEFAULT_EXPORT_COLUMNS:
-        if c not in cols: cols.append(c)
-    for c in ["DOB", "NameSuffix", "Phone", "MobilePhone", "ApplicantPhone", "Current_ApplicantPhone"]:
-        if c not in cols: cols.append(c)
-    return cols
+        if c not in df.columns:
+            df[c] = ""
+    # Keep the clean user-facing columns, plus any election vote-method columns needed for audit.
+    election_cols = [c for c in df.columns if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c)) or re.match(r"^[GPS]\d{2}(?:_\d+)?_method$", str(c))]
+    ordered = DEFAULT_EXPORT_COLUMNS + [c for c in election_cols if c not in DEFAULT_EXPORT_COLUMNS]
+    return df[ordered]
+
+def drop_all_blank_optional_columns(df: pd.DataFrame, required: list[str] | None = None) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    required = required or ["voter_id"]
+    keep = []
+    for c in df.columns:
+        nonblank = df[c].astype(str).replace({"nan":"", "None":""}).str.strip().ne("").any()
+        if nonblank or c in required:
+            keep.append(c)
+    return df[keep]
+
+
+def report_columns():
+    return list(DEFAULT_EXPORT_COLUMNS)
 
 def remote_search_voters(term, max_rows=25):
     urls = index_urls_from_manifest()
@@ -1904,18 +1997,15 @@ def remote_search_voters(term, max_rows=25):
         con.close()
 
 def safe_filtered_df(active, max_rows=5000):
-    cols = report_columns()
     try:
         df = duckdb_detail_filtered_df(active or {}, active_special_filters(), max_rows)
         if df is None or df.empty:
-            return pd.DataFrame(columns=cols)
-        for c in cols:
-            if c not in df.columns:
-                df[c] = ""
-        return df[cols].head(max_rows)
+            return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
+        df = normalize_download_df(df).head(max_rows)
+        return drop_all_blank_optional_columns(df, required=["voter_id", "County", "Municipality", "Precinct", "FirstName", "LastName", "House Number", "Street Name", "City", "State", "Zip"])
     except Exception as e:
         st.warning(f"Export query returned no rows or failed: {str(e)[:250]}")
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
 
 def make_simple_pdf(title, rows, headers):
     if canvas is None:
@@ -2095,7 +2185,7 @@ def render_output_buttons(active):
             if st.button("Prepare Mail CSV", width="stretch"):
                 with st.spinner("Building mail CSV..."):
                     df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    mail_cols = [c for c in ["FirstName","MiddleName","LastName","NameSuffix","House Number","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
                     st.session_state["prepared_mail_df"] = df[mail_cols] if mail_cols else df
             if "prepared_mail_df" in st.session_state:
                 df = st.session_state["prepared_mail_df"]
@@ -2122,7 +2212,7 @@ def render_output_buttons(active):
             if st.button("Prepare Mail Excel", width="stretch"):
                 with st.spinner("Building mail Excel workbook..."):
                     df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    mail_cols = [c for c in ["FirstName","MiddleName","LastName","NameSuffix","House Number","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
                     df = df[mail_cols] if mail_cols else df
                     st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_mail_xlsx" in st.session_state:
@@ -2131,6 +2221,15 @@ def render_output_buttons(active):
         st.markdown("### Reports")
         st.caption("Prepare builds the PDF and then shows a download button.")
         r1, r2, r3, r4 = st.columns(4)
+        st.markdown("### Tracking Templates")
+        t1, t2 = st.columns(2)
+        with t1:
+            tmpl = pd.DataFrame(columns=["voter_id","FullName","Address","Phone","F","A","U","NH","Yard Sign","Notes"]).to_csv(index=False).encode()
+            st.download_button("Download Street Results CSV Template", tmpl, "street_results_template.csv", "text/csv", width="stretch")
+        with t2:
+            tmpl2 = pd.DataFrame(columns=["voter_id","FullName","Phone","Contacted","Result","Support Level","Follow-Up","Notes"]).to_csv(index=False).encode()
+            st.download_button("Download Walk/Call Tracking CSV Template", tmpl2, "walk_call_tracking_template.csv", "text/csv", width="stretch")
+        st.markdown("---")
         with r1:
             if st.button("Prepare Summary PDF", width="stretch"):
                 with st.spinner("Building summary PDF..."):
@@ -2164,7 +2263,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21u</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21v</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
