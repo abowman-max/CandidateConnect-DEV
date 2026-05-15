@@ -1857,6 +1857,55 @@ def cc_text(v):
     return re.sub(r"\s+", " ", s)
 
 
+def smart_title(value, keep_upper: set[str] | None = None) -> str:
+    s = cc_text(value)
+    if not s:
+        return ""
+    keep_upper = keep_upper or {"PA","USA","US","PO","P.O.","LLC","III","IV","II","JR","SR","MDJ","SD","TWP","USC","STS","STH"}
+    def one_token(tok: str) -> str:
+        raw = tok
+        lead = re.match(r"^([^A-Za-z0-9#]*)(.*?)([^A-Za-z0-9]*)$", raw)
+        if not lead:
+            return raw
+        pre, core, post = lead.groups()
+        if not core:
+            return raw
+        up = core.upper().replace('.', '')
+        if up in keep_upper or re.fullmatch(r"[IVXLCM]+", up):
+            return pre + up + post
+        if re.fullmatch(r"\d+[A-Z]?", core):
+            return pre + core.upper() + post
+        if "-" in core:
+            return pre + "-".join(one_token(part) for part in core.split("-")) + post
+        if "'" in core:
+            return pre + "'".join(one_token(part) for part in core.split("'")) + post
+        return pre + core[:1].upper() + core[1:].lower() + post
+    return " ".join(one_token(t) for t in re.sub(r"\s+", " ", s).split(" ")).strip()
+
+
+def normalize_name_suffix(value) -> str:
+    s = cc_text(value).replace('.', '')
+    if not s:
+        return ""
+    up = s.upper()
+    if up in {"JR","SR","II","III","IV","V","VI"}:
+        return up
+    return smart_title(s)
+
+
+def normalize_phone_digits(value) -> str:
+    s = cc_text(value)
+    digits = re.sub(r"\D+", "", s)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits or s
+
+
+def mark_downloaded(*keys):
+    for k in keys:
+        st.session_state.pop(k, None)
+
+
 def canonical_precinct_display(value, municipality=""):
     """Normalize obvious duplicate precinct labels for display/export.
     Example: YORK 1ST WARD - 2ND PRECINCT -> York Township Precinct 540102.
@@ -1878,39 +1927,59 @@ def canonical_precinct_display(value, municipality=""):
 
 
 def clean_apartment_and_address2(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep Apartment Number to real unit/apartment values only; move street-type junk to Address Line 2.
-    SURE address pieces can be messy; this makes vendor exports safer without deleting extra info.
-    """
+    """Keep Apartment Number to true unit values only; move other extra address text to Address Line 2."""
     if df is None or df.empty:
         return df
     df = df.copy()
     for c in ["Apartment Number", "Address Line 2"]:
         if c not in df.columns:
             df[c] = ""
-    apt = df["Apartment Number"].astype(str).replace({"nan":"", "None":""}).str.strip()
-    line2 = df["Address Line 2"].astype(str).replace({"nan":"", "None":""}).str.strip()
-    good_pat = re.compile(r"^(APT|APARTMENT|UNIT|STE|SUITE|#|NO\.?|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)\b|^#?[A-Z0-9-]{1,8}$", re.I)
-    bad_words = re.compile(r"\b(ST|STREET|RD|ROAD|DR|DRIVE|AVE|AVENUE|LN|LANE|CT|COURT|CIR|CIRCLE|BLVD|WAY|PIKE|HWY|HIGHWAY)\b", re.I)
+    apt = df["Apartment Number"].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
+    line2 = df["Address Line 2"].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
+    explicit_unit = re.compile(r"^(APT|APARTMENT|UNIT|STE|SUITE|#|NO\.?|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)\b", re.I)
+    simple_unit = re.compile(r"^#?[A-Z0-9][A-Z0-9\-]{0,7}$", re.I)
+    street_words = re.compile(r"\b(ST|STREET|RD|ROAD|DR|DRIVE|AVE|AVENUE|LN|LANE|CT|COURT|CIR|CIRCLE|BLVD|WAY|PIKE|HWY|HIGHWAY|PKWY|PARKWAY|TER|TERRACE|PL|PLACE)\b", re.I)
     new_apt=[]; new_line2=[]
     for a,l in zip(apt, line2):
         aa=a.strip(); ll=l.strip()
         if not aa:
             new_apt.append(""); new_line2.append(ll); continue
-        if bad_words.search(aa) and not good_pat.search(aa):
+        if street_words.search(aa) and not explicit_unit.search(aa):
+            combined = (ll + " " + aa).strip() if ll else aa
+            new_apt.append(""); new_line2.append(combined); continue
+        if explicit_unit.search(aa) or simple_unit.fullmatch(aa):
+            new_apt.append(smart_title(aa, keep_upper={"APT","UNIT","STE","BLDG","RM","FL","PO","PA","JR","SR","III","IV"}))
+            new_line2.append(ll)
+        else:
             combined = (ll + " " + aa).strip() if ll else aa
             new_apt.append(""); new_line2.append(combined)
-        else:
-            new_apt.append(aa); new_line2.append(ll)
     df["Apartment Number"] = new_apt
-    df["Address Line 2"] = new_line2
+    df["Address Line 2"] = [smart_title(x) for x in new_line2]
     return df
+
+def household_display_name(group: pd.DataFrame) -> str:
+    voters = group.copy()
+    voters["_fn"] = voters.apply(full_name, axis=1).map(smart_title)
+    voters["_last"] = voters.get("LastName", pd.Series([""]*len(voters), index=voters.index)).map(lambda x: smart_title(x).strip())
+    names = [x for x in voters["_fn"].tolist() if x]
+    lasts = [x for x in voters["_last"].tolist() if x]
+    uniq_lasts = sorted({x for x in lasts if x})
+    if len(names) == 0:
+        return "Current Resident"
+    if len(names) == 1:
+        return names[0]
+    if len(uniq_lasts) == 1:
+        return f"{uniq_lasts[0]} Household"
+    if len(names) <= 3:
+        return " & ".join(names)
+    return f"{names[0]} & Family"
 
 
 def household_for_mail(df: pd.DataFrame) -> pd.DataFrame:
-    """One mail row per household/address when householding is selected."""
+    """One mail row per household/address using the local app household naming logic."""
     if df is None or df.empty:
         return df
-    df = df.copy()
+    df = normalize_download_df(df).copy()
     for c in ["County","Municipality","House Number","Street Name","Apartment Number","City","State","Zip"]:
         if c not in df.columns: df[c] = ""
     key = (df["County"].astype(str).str.upper().str.strip()+"|"+
@@ -1922,10 +1991,16 @@ def household_for_mail(df: pd.DataFrame) -> pd.DataFrame:
            df["State"].astype(str).str.upper().str.strip()+"|"+
            df["Zip"].astype(str).str.upper().str.strip())
     df["_HH_KEY"] = key
-    # Keep first voter_id as household anchor and add household count.
     df["HouseholdCount"] = df.groupby("_HH_KEY")["_HH_KEY"].transform("size")
-    out = df.sort_values(["Street Name","House Number","LastName","FirstName"], kind="stable").drop_duplicates("_HH_KEY", keep="first").drop(columns=["_HH_KEY"], errors="ignore")
-    return out
+    hh_names = df.groupby("_HH_KEY", sort=False).apply(household_display_name).to_dict()
+    out = df.sort_values(["Street Name","House Number","LastName","FirstName"], kind="stable").drop_duplicates("_HH_KEY", keep="first").copy()
+    out["HouseholdName"] = out["_HH_KEY"].map(hh_names).fillna("")
+    out["FullName"] = out["HouseholdName"]
+    out["FirstName"] = out["HouseholdName"]
+    out["MiddleName"] = ""
+    out["LastName"] = ""
+    out["NameSuffix"] = ""
+    return out.drop(columns=["_HH_KEY"], errors="ignore")
 
 def full_name(row):
     parts = [cc_text(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
@@ -1984,11 +2059,7 @@ def coalesce_columns(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
     return out
 
 def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Repair/standardize downloaded fields from whatever column naming the current detail shards contain.
-
-    This prevents blank FirstName/Party/Gender/address columns when a shard uses an
-    alternate source name, and removes legacy duplicate empty columns from user downloads.
-    """
+    """Repair/standardize downloaded fields from current detail shards, with vendor-friendly casing."""
     if df is None or df.empty:
         return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
     df = df.copy()
@@ -2022,17 +2093,26 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "Current_ApplicantPhone": ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"],
     }
     for out_col, cands in aliases.items():
-        if out_col not in df.columns or df[out_col].astype(str).replace({"nan":""}).str.strip().eq("").mean() > .95:
+        if out_col not in df.columns or df[out_col].astype(str).replace({"nan":""}).str.strip().eq("").mean() > .80:
             df[out_col] = coalesce_columns(df, cands)
 
-    # Build FullName if the separate SURE name fields exist.
-    if "FullName" not in df.columns or df["FullName"].astype(str).replace({"nan":""}).str.strip().eq("").mean() > .95:
-        parts = []
-        for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]:
-            parts.append(df.get(c, pd.Series([""]*len(df), index=df.index)).astype(str).replace({"nan":""}).str.strip())
-        df["FullName"] = (parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3]).str.replace(r"\s+", " ", regex=True).str.strip()
+    for c in ["County","Municipality","FirstName","MiddleName","LastName","Street Name","Apartment Number","Address Line 2","City","School District","School Region"]:
+        if c in df.columns:
+            df[c] = df[c].map(smart_title)
+    if "NameSuffix" in df.columns:
+        df["NameSuffix"] = df["NameSuffix"].map(normalize_name_suffix)
+    if "State" in df.columns:
+        df["State"] = df["State"].map(lambda x: cc_text(x).upper())
+    for c in ["Mobile","Landline","Current_ApplicantPhone"]:
+        if c in df.columns:
+            df[c] = df[c].map(normalize_phone_digits)
 
-    # Normalize party/gender display values if present.
+    parts = []
+    for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]:
+        parts.append(df.get(c, pd.Series([""]*len(df), index=df.index)).astype(str).replace({"nan":""}).str.strip())
+    built_full = (parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3]).str.replace(r"\s+", " ", regex=True).str.strip()
+    df["FullName"] = built_full.where(built_full.str.strip().ne(""), df.get("FullName", pd.Series([""]*len(df), index=df.index)).map(smart_title))
+
     if "Party" in df.columns:
         df["Party"] = df["Party"].map(lambda x: "R" if str(x).strip().upper() in {"R","REP","REPUBLICAN"} else ("D" if str(x).strip().upper() in {"D","DEM","DEMOCRAT","DEMOCRATIC"} else ("O" if str(x).strip() else "")))
     if "Gender" in df.columns:
@@ -2041,14 +2121,10 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
     for c in DEFAULT_EXPORT_COLUMNS:
         if c not in df.columns:
             df[c] = ""
-
-    # Canonical app-side cleanup for duplicate-looking precinct labels and messy address pieces.
     if "Precinct" in df.columns:
         muni_series = df["Municipality"] if "Municipality" in df.columns else pd.Series([""]*len(df), index=df.index)
         df["Precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df["Precinct"], muni_series)]
     df = clean_apartment_and_address2(df)
-
-    # Keep the clean user-facing columns, plus any election vote-method columns needed for audit.
     election_cols = [c for c in df.columns if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c)) or re.match(r"^[GPS]\d{2}(?:_\d+)?_method$", str(c))]
     ordered = DEFAULT_EXPORT_COLUMNS + [c for c in election_cols if c not in DEFAULT_EXPORT_COLUMNS]
     return df[ordered]
@@ -2234,6 +2310,45 @@ def render_area_intelligence_workspace():
     if summary: render_metrics(summary)
     st.info("Area Intelligence profile restored for DEV testing. More profile details/charts can be layered back after live-safe export/report testing.")
 
+
+def filtered_export_columns(df: pd.DataFrame) -> list[str]:
+    base = ["voter_id","County","Municipality","Precinct","USC","STS","STH","School District","School Region",
+            "FirstName","MiddleName","LastName","NameSuffix","FullName","Party","CalculatedParty","Gender","DOB","Age","Age_Range","RegistrationDate",
+            "House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip",
+            "Email","Mobile","Landline","Current_ApplicantPhone","MB_App","MB_App_Status","MB_Sent","MB_Status","MB_PERM","MB_Prob_Score","Tags"]
+    return [c for c in base if c in df.columns]
+
+
+def texting_export_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","Precinct","Mobile"])
+    df = normalize_download_df(df)
+    df = df[df.get("Mobile", pd.Series([""]*len(df), index=df.index)).astype(str).str.strip().ne("")]
+    cols = ["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","Precinct","Mobile"]
+    return df[[c for c in cols if c in df.columns]].copy()
+
+
+def mail_export_df(df: pd.DataFrame, mailing_mode: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = normalize_download_df(df)
+    if mailing_mode == "Householded":
+        df = household_for_mail(df)
+    cols = ["voter_id","HouseholdName","FirstName","MiddleName","LastName","NameSuffix","FullName","HouseholdCount",
+            "House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip",
+            "County","Municipality","Precinct","Party","Gender","Age"]
+    return df[[c for c in cols if c in df.columns]].copy()
+
+
+def zip_bytes(files: dict[str, bytes]) -> bytes:
+    bio = io.BytesIO()
+    import zipfile
+    with zipfile.ZipFile(bio, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    bio.seek(0)
+    return bio.getvalue()
+
 def render_output_buttons(active):
     tabs = st.tabs(["Overview", "Exports", "Reports"])
     with tabs[0]:
@@ -2259,14 +2374,38 @@ def render_output_buttons(active):
         st.caption("Prepare builds the filtered file from the remote detail shards. Download appears after the prepare step finishes.")
         mailing_mode = st.radio("Mailing Mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"))
         area_level = st.selectbox("First Excel sheet area count", ["Municipality", "Precinct", "County", "School District", "School Region"], key=special_key("excel_area_level"))
+        with st.expander("Cleaner export workflow", expanded=False):
+            selected_types = st.multiselect("Report/File types to prepare", ["Full CSV", "Text CSV", "Mail CSV", "Full Excel", "Text Excel", "Mail Excel"], default=[], key=special_key("bulk_export_types"))
+            if st.button("Prepare Selected Export Zip", width="stretch"):
+                with st.spinner("Building selected exports..."):
+                    base_df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    files = {}
+                    if "Full CSV" in selected_types:
+                        fdf = base_df[[c for c in filtered_export_columns(base_df) if c in base_df.columns]]
+                        files["candidate_connect_filtered.csv"] = fdf.to_csv(index=False).encode()
+                    if "Text CSV" in selected_types:
+                        files["candidate_connect_texting.csv"] = texting_export_df(base_df).to_csv(index=False).encode()
+                    if "Mail CSV" in selected_types:
+                        files["candidate_connect_mail.csv"] = mail_export_df(base_df, mailing_mode).to_csv(index=False).encode()
+                    if "Full Excel" in selected_types:
+                        fdf = base_df[[c for c in filtered_export_columns(base_df) if c in base_df.columns]]
+                        files["candidate_connect_filtered.xlsx"] = dataframe_to_excel_bytes(fdf, area_level)
+                    if "Text Excel" in selected_types:
+                        files["candidate_connect_texting.xlsx"] = dataframe_to_excel_bytes(texting_export_df(base_df), area_level)
+                    if "Mail Excel" in selected_types:
+                        files["candidate_connect_mail.xlsx"] = dataframe_to_excel_bytes(mail_export_df(base_df, mailing_mode), area_level)
+                    st.session_state["prepared_export_zip"] = zip_bytes(files) if files else b""
+            if st.session_state.get("prepared_export_zip"):
+                st.download_button("Download Selected Export Zip", st.session_state["prepared_export_zip"], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=("prepared_export_zip",))
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("Prepare Filtered CSV", width="stretch"):
                 with st.spinner("Building filtered CSV..."):
-                    st.session_state["prepared_filtered_df"] = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    st.session_state["prepared_filtered_df"] = df[[c for c in filtered_export_columns(df) if c in df.columns]]
             if "prepared_filtered_df" in st.session_state:
                 df = st.session_state["prepared_filtered_df"]
-                st.download_button(f"Download Filtered CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch")
+                st.download_button(f"Download Filtered CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_filtered_df",))
         with c2:
             if st.button("Prepare Texting CSV", width="stretch"):
                 with st.spinner("Building texting CSV..."):
@@ -2276,27 +2415,25 @@ def render_output_buttons(active):
                     st.session_state["prepared_texting_df"] = df
             if "prepared_texting_df" in st.session_state:
                 df = st.session_state["prepared_texting_df"]
-                st.download_button(f"Download Texting CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch")
+                st.download_button(f"Download Texting CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_texting_df",))
         with c3:
             if st.button("Prepare Mail CSV", width="stretch"):
                 with st.spinner("Building mail CSV..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    if mailing_mode == "Householded":
-                        df = household_for_mail(df)
-                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","HouseholdCount","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
-                    st.session_state["prepared_mail_df"] = df[mail_cols] if mail_cols else df
+                    df = mail_export_df(safe_filtered_df(active, EXPORT_ROW_LIMIT), mailing_mode)
+                    st.session_state["prepared_mail_df"] = df
             if "prepared_mail_df" in st.session_state:
                 df = st.session_state["prepared_mail_df"]
-                st.download_button(f"Download Mail CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch")
+                st.download_button(f"Download Mail CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_mail_df",))
         st.markdown("---")
         e1, e2, e3 = st.columns(3)
         with e1:
             if st.button("Prepare Filtered Excel", width="stretch"):
                 with st.spinner("Building filtered Excel workbook..."):
                     df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    df = df[[c for c in filtered_export_columns(df) if c in df.columns]]
                     st.session_state["prepared_filtered_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_filtered_xlsx" in st.session_state:
-                st.download_button("Download Filtered Excel", st.session_state["prepared_filtered_xlsx"], "candidate_connect_filtered.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+                st.download_button("Download Filtered Excel", st.session_state["prepared_filtered_xlsx"], "candidate_connect_filtered.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_filtered_xlsx",))
         with e2:
             if st.button("Prepare Texting Excel", width="stretch"):
                 with st.spinner("Building texting Excel workbook..."):
@@ -2305,22 +2442,18 @@ def render_output_buttons(active):
                         df = df[df.apply(phone_label, axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)]
                     st.session_state["prepared_texting_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_texting_xlsx" in st.session_state:
-                st.download_button("Download Texting Excel", st.session_state["prepared_texting_xlsx"], "candidate_connect_texting.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+                st.download_button("Download Texting Excel", st.session_state["prepared_texting_xlsx"], "candidate_connect_texting.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_texting_xlsx",))
         with e3:
             if st.button("Prepare Mail Excel", width="stretch"):
                 with st.spinner("Building mail Excel workbook..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    if mailing_mode == "Householded":
-                        df = household_for_mail(df)
-                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","HouseholdCount","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
-                    df = df[mail_cols] if mail_cols else df
+                    df = mail_export_df(safe_filtered_df(active, EXPORT_ROW_LIMIT), mailing_mode)
                     st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_mail_xlsx" in st.session_state:
-                st.download_button("Download Mail Excel", st.session_state["prepared_mail_xlsx"], "candidate_connect_mail.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+                st.download_button("Download Mail Excel", st.session_state["prepared_mail_xlsx"], "candidate_connect_mail.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_mail_xlsx",))
     with tabs[2]:
         st.markdown("### Reports")
         st.caption("Prepare builds the PDF and then shows a download button.")
-        r1, r2, r3, r4 = st.columns(4)
+        r2, r3, r4 = st.columns(3)
         st.markdown("### Tracking Templates")
         t1, t2 = st.columns(2)
         with t1:
@@ -2330,30 +2463,24 @@ def render_output_buttons(active):
             tmpl2 = pd.DataFrame(columns=["voter_id","FullName","Phone","Contacted","Result","Support Level","Follow-Up","Notes"]).to_csv(index=False).encode()
             st.download_button("Download Walk/Call Tracking CSV Template", tmpl2, "walk_call_tracking_template.csv", "text/csv", width="stretch")
         st.markdown("---")
-        with r1:
-            if st.button("Prepare Summary PDF", width="stretch"):
-                with st.spinner("Building summary PDF..."):
-                    st.session_state["prepared_summary_pdf"] = summary_pdf(active)
-            if "prepared_summary_pdf" in st.session_state:
-                st.download_button("Download Summary PDF", st.session_state["prepared_summary_pdf"], "candidate_connect_summary.pdf", "application/pdf", width="stretch")
         with r2:
             if st.button("Prepare Street List PDF", width="stretch"):
                 with st.spinner("Building street list PDF..."):
                     st.session_state["prepared_street_pdf"] = street_list_pdf(active)
             if "prepared_street_pdf" in st.session_state:
-                st.download_button("Download Street List PDF", st.session_state["prepared_street_pdf"], "candidate_connect_street_list.pdf", "application/pdf", width="stretch")
+                st.download_button("Download Street List PDF", st.session_state["prepared_street_pdf"], "candidate_connect_street_list.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_street_pdf",))
         with r3:
             if st.button("Prepare Call List PDF", width="stretch"):
                 with st.spinner("Building call list PDF..."):
                     st.session_state["prepared_call_pdf"] = call_list_pdf(active)
             if "prepared_call_pdf" in st.session_state:
-                st.download_button("Download Call List PDF", st.session_state["prepared_call_pdf"], "candidate_connect_call_list.pdf", "application/pdf", width="stretch")
+                st.download_button("Download Call List PDF", st.session_state["prepared_call_pdf"], "candidate_connect_call_list.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_call_pdf",))
         with r4:
             if st.button("Prepare Mailing Labels PDF", width="stretch"):
                 with st.spinner("Building mailing labels PDF..."):
                     st.session_state["prepared_labels_pdf"] = labels_pdf(active)
             if "prepared_labels_pdf" in st.session_state:
-                st.download_button("Download Mailing Labels PDF", st.session_state["prepared_labels_pdf"], "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch")
+                st.download_button("Download Mailing Labels PDF", st.session_state["prepared_labels_pdf"], "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_labels_pdf",))
 
 
 st.markdown('<div class="cc-header">', unsafe_allow_html=True)
@@ -2363,7 +2490,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21w</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21x</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
