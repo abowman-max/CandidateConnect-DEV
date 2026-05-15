@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import duckdb
 import requests
 import streamlit as st
 
@@ -303,6 +304,92 @@ def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
 
+def sql_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def sql_lit(value) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def count_cube_url() -> str:
+    manifest = load_manifest()
+    speed = manifest.get("speed", {}).get("tables", {})
+    key = speed.get("count_cube", "speed/count_cube.parquet")
+    return r2_url(key)
+
+
+def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
+    clauses = []
+    for field, vals in (active or {}).items():
+        if not vals:
+            continue
+        if field == "Tags":
+            continue
+        cleaned = [str(v) for v in vals if str(v).strip()]
+        if not cleaned:
+            continue
+        clauses.append(f"CAST({sql_ident(field)} AS VARCHAR) IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
+
+    special = special or {}
+    for field, rule in special.items():
+        if field == "__PhoneReach":
+            mobile = "LOWER(CAST(\"HasMobile\" AS VARCHAR)) = 'yes'"
+            landline = "LOWER(CAST(\"HasLandline\" AS VARCHAR)) = 'yes'"
+            mode = str(rule)
+            if mode == "Mobile only":
+                clauses.append(f"({mobile})")
+            elif mode == "Landline only":
+                clauses.append(f"({landline})")
+            elif mode == "Mobile OR landline":
+                clauses.append(f"(({mobile}) OR ({landline}))")
+            elif mode == "Mobile AND landline":
+                clauses.append(f"(({mobile}) AND ({landline}))")
+            elif mode == "No mobile or landline":
+                clauses.append(f"(NOT (({mobile}) OR ({landline})))")
+            continue
+        if str(field).startswith("__"):
+            continue
+        if isinstance(rule, dict):
+            expr = f"TRY_CAST({sql_ident(field)} AS DOUBLE)"
+            if "min" in rule:
+                clauses.append(f"{expr} >= {float(rule['min'])}")
+            if "max" in rule:
+                clauses.append(f"{expr} <= {float(rule['max'])}")
+
+    return " WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def duckdb_count_cube_summary(active_json: str, special_json: str) -> dict:
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    url = count_cube_url()
+    where = count_cube_where_sql(active, special)
+    query = f"""
+        SELECT CAST(Party AS VARCHAR) AS Party, SUM(Voters) AS Voters
+        FROM read_parquet({sql_lit(url)})
+        {where}
+        GROUP BY CAST(Party AS VARCHAR)
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
+        df = con.execute(query).df()
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    return summarize_from_df(df, row_count_mode=False)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_bytes(key: str) -> bytes:
     r = requests.get(r2_url(key), timeout=120)
@@ -369,7 +456,7 @@ def load_geo_hierarchy_safe(max_bytes: int = 90_000_000) -> pd.DataFrame:
 def load_count_cube_columns(cols_tuple):
     """Read only requested columns from the quick-count cube.
 
-    v21h: never fall back to a full count_cube read. A full read can exceed
+    v21i: never fall back to a full count_cube read. A full read can exceed
     Streamlit Cloud memory and kill the app health check when a selected field
     is missing/mismatched. Callers can catch the exception and choose a safer
     fallback.
@@ -766,35 +853,27 @@ def update_counts(active: dict):
         safe_active = count_safe_filters(active)
         special = active_special_filters()
 
-        # OR/contact-combo and specific-election filters are not represented as a
-        # single row in the count cube. Use index shards, which are much lighter
-        # than detail shards and retain the election vote-method columns.
-        if "__PhoneReach" in special or "__ElectionFilters" in special:
+        # Specific-election filters are not in the count cube. Only those use the
+        # lightweight index shards. Normal voter filters including Gender stay on
+        # the quick-count cube.
+        if "__ElectionFilters" in special:
             return exact_counts(safe_active), "index", None
-
-        needed = set(["Party"])
-        needed.update(safe_active.keys())
-        needed.update([k for k in special.keys() if not str(k).startswith("__")])
-        possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
-        last_error = None
-
-        for count_col in possible_count_cols:
-            try:
-                cube = load_count_cube_columns(tuple(sorted(needed | {count_col})))
-                filtered = apply_filters(cube, safe_active)
-                filtered = apply_special_filters(filtered, special)
-                return summarize_from_df(filtered, row_count_mode=False), "quick", None
-            except Exception as e:
-                last_error = e
-                continue
 
         try:
-            return exact_counts(safe_active), "index", None
-        except Exception as exact_error:
-            return None, "unavailable", exact_error or last_error
+            summary = duckdb_count_cube_summary(
+                json.dumps(safe_active, sort_keys=True),
+                json.dumps(special, sort_keys=True),
+            )
+            return summary, "quick", None
+        except Exception as cube_error:
+            # Do not crash Streamlit. If the remote quick-count query fails, fall
+            # back to index shards so the user can keep working.
+            try:
+                return exact_counts(safe_active), "index", None
+            except Exception:
+                return None, "unavailable", cube_error
     except Exception as e:
         return None, "unavailable", e
-
 
 
 def pct(n, d):
@@ -939,25 +1018,17 @@ def render_statewide_snapshot():
     st.info("Use **Create Universe** in the left pane. Counts use the rebuilt quick-count cube; geography dropdowns use the safe dependent geo table when available.")
 
 def quick_counts(active: dict):
-    # v14b: quick counts only use selected columns from speed/count_cube.parquet.
-    # No full-cube fallback and no detail-shard fallback.
-    needed = set(["Party"])
-    needed.update(active.keys())
-
-    possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
-    last_error = None
-
-    for count_col in possible_count_cols:
-        cols = tuple(sorted(needed | {count_col}))
-        try:
-            cube = load_count_cube_columns(cols)
-            filtered = apply_filters(cube, active)
-            return summarize_from_df(filtered, row_count_mode=False), None
-        except Exception as e:
-            last_error = e
-            continue
-
-    return None, last_error or RuntimeError("Quick count fields are not available for this filter combination.")
+    # v21i: use DuckDB against the remote quick-count parquet so Streamlit does
+    # not download the entire count_cube into memory when Gender or other voter
+    # filters are selected.
+    try:
+        summary = duckdb_count_cube_summary(
+            json.dumps(count_safe_filters(active or {}), sort_keys=True),
+            json.dumps({}, sort_keys=True),
+        )
+        return summary, None
+    except Exception as e:
+        return None, e
 
 
 
@@ -1075,7 +1146,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21h</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21i</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -1097,7 +1168,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21h — gender/election/contact fix")
+    st.caption("DEV final hybrid v21i — duckdb quick-count gender fix")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1263,7 +1334,7 @@ else:
     st.info("No filters selected. Choose filters in the left pane.")
 
 st.markdown(
-    '<div class="cc-note"><b>Update Counts uses the rebuilt quick-count cube.</b> '
+    '<div class="cc-note"><b>Update Counts uses the rebuilt quick-count cube without scanning detail shards.</b> '
     'Tags are applied in exports and reports.</div>',
     unsafe_allow_html=True,
 )
@@ -1301,7 +1372,7 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts and dependent dropdowns use the rebuilt quick-count cube and do not scan detail shards.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses the rebuilt quick-count cube through a remote DuckDB query; only geography dropdowns are interdependent.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
