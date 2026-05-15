@@ -870,29 +870,33 @@ def is_cube_safe(active: dict) -> bool:
 
 def update_counts(active: dict):
     try:
+        # v21l: Update Counts must NEVER scan index/detail shards. The app only
+        # uses the rebuilt quick-count cube through DuckDB remote parquet reads.
+        # Tags and exact specific-election filters are intentionally excluded from
+        # live counts because Step 8 v18 does not put them in count_cube.parquet.
+        # They still apply to exports/downloads, where exact row-level filtering is required.
         safe_active = count_safe_filters(active)
         special = active_special_filters()
 
-        # Specific-election filters and Tags are not in the count cube. Only those use the
-        # lightweight index shards. Normal voter filters including Gender stay on
-        # the remote quick-count cube.
-        if "__ElectionFilters" in special or active.get("Tags"):
-            return exact_counts(active), "index", None
+        # Do not send unsupported special filters into the quick-count query.
+        # Supported: numeric score/range filters + phone reach, because these
+        # columns exist in Step 8 v18 count_cube.parquet.
+        special_for_counts = {
+            k: v for k, v in (special or {}).items()
+            if k != "__ElectionFilters"
+        }
 
-        try:
-            summary = duckdb_count_cube_summary(
-                json.dumps(safe_active, sort_keys=True),
-                json.dumps(special, sort_keys=True),
-            )
-            return summary, "quick", None
-        except Exception as cube_error:
-            # Do not crash Streamlit. If the remote quick-count query fails, fall
-            # back to index shards so the user can keep working.
-            try:
-                return exact_counts(safe_active), "index", None
-            except Exception:
-                return None, "unavailable", cube_error
+        # Tags are not a count_cube dimension in Step 8 v18, so they cannot be
+        # included in fast live counts without scanning shards or rebuilding a tag cube.
+        safe_active.pop("Tags", None)
+
+        summary = duckdb_count_cube_summary(
+            json.dumps(safe_active, sort_keys=True),
+            json.dumps(special_for_counts, sort_keys=True),
+        )
+        return summary, "quick", None
     except Exception as e:
+        # No shard fallback here. Fallback scans are what caused the crashes/loops.
         return None, "unavailable", e
 
 
@@ -1192,7 +1196,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21k — clear filters state fix")
+    st.caption("DEV final hybrid v21l — quick-count only targeting")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1264,7 +1268,7 @@ with st.sidebar:
             st.multiselect("Election Year", options=years, key="election_years")
             st.multiselect("Election Type", options=etypes, key="election_types")
             st.multiselect("Vote Method", options=methods, key="election_methods")
-            st.caption("Specific election filters count through lightweight index shards; normal counts stay on the rebuilt quick-count cube.")
+            st.caption("Specific election filters are kept for exports/downloads. Live counts stay on the quick-count cube and do not scan shards.")
 
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
@@ -1363,8 +1367,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 extra_filters = non_count_filters(active)
-if extra_filters:
-    st.info("Some selected tag filters are export/report filters and are not included in the quick count total yet.")
+special_notice = active_special_filters() if 'active_special_filters' in globals() else {}
+notice_bits = []
+if active.get("Tags"):
+    notice_bits.append("Tags")
+if "__ElectionFilters" in special_notice:
+    notice_bits.append("specific election year/type/method filters")
+if notice_bits:
+    st.info("Fast counts do not scan shards. " + ", ".join(notice_bits) + " will be applied to exports/downloads, but are not included in the live quick-count total until we add those fields to a future speed cube.")
 
 st.markdown("## Counts")
 
@@ -1414,14 +1424,14 @@ with action_mid:
 
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
-    st.caption("Updated using fast count tables." if st.session_state.get("count_mode") == "quick" else "Updated using lightweight index shards for this filter combination.")
+    st.caption("Updated using the rebuilt quick-count cube. No index/detail shard scan was used." if st.session_state.get("count_mode") == "quick" else "Counts unavailable.")
     render_metrics(st.session_state["quick_summary"], label="")
     left_chart, right_blank = st.columns([1, 1])
     with left_chart:
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses the rebuilt quick-count cube through a remote DuckDB query; Tags and specific election filters use lightweight index counts; only geography dropdowns are interdependent.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses only the rebuilt quick-count cube through a remote DuckDB query; it does not scan index/detail shards. Tags and specific election filters are exact in exports/downloads.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
