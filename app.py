@@ -1,6 +1,6 @@
 # Candidate Connect DEV — Final Hybrid Cloud App v21j TAG_CONTACT_FIX
 # Full safe filters + guarded export.
-# v21j: preserves v21i remote DuckDB quick counts; routes Tags to exact index counts and removes duplicate phone fields.
+# v21n: remote DuckDB exact counts for Tags/elections when needed; robust clear filters; session saved universes.
 
 import io
 import json
@@ -410,6 +410,113 @@ def duckdb_count_cube_summary(active_json: str, special_json: str) -> dict:
     return summarize_from_df(df, row_count_mode=False)
 
 
+def index_urls_from_manifest() -> list[str]:
+    """Remote index shard URLs for DuckDB. Keeps counting out of Streamlit memory."""
+    m = load_manifest()
+    count = int(((m.get("index", {}) or {}).get("count", DETAIL_SHARDS)) or DETAIL_SHARDS)
+    return [r2_url(f"index/voters_index_{i:03d}.parquet") for i in range(count)]
+
+
+def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
+    if not selected_cols:
+        return "(FALSE)"
+    method_vals = [str(m).strip().upper() for m in (methods or []) if str(m).strip()]
+    col_checks = []
+    for c in selected_cols:
+        expr = f"UPPER(CAST({sql_ident(c)} AS VARCHAR))"
+        if not method_vals:
+            col_checks.append(f"({expr} NOT IN ('', 'NAN', 'NONE', 'NULL', '0', 'N', 'NO'))")
+            continue
+        tests = []
+        for m in method_vals:
+            if m == "VOTED":
+                tests.append(f"({expr} NOT IN ('', 'NAN', 'NONE', 'NULL', '0', 'N', 'NO'))")
+            elif m == "MAIL":
+                tests.append(f"({expr} LIKE '%MAIL%' OR {expr} IN ('M','MB'))")
+            elif m == "ABSENTEE":
+                tests.append(f"({expr} LIKE '%ABS%' OR {expr} = 'A')")
+            elif m == "POLLS":
+                tests.append(f"({expr} LIKE '%POLL%' OR {expr} LIKE '%PERSON%' OR {expr} = 'P')")
+            elif m == "PROVISIONAL":
+                tests.append(f"({expr} LIKE '%PROV%')")
+            else:
+                tests.append(f"({expr} = {sql_lit(m)})")
+        col_checks.append("(" + " OR ".join(tests) + ")")
+    return "(" + " OR ".join(col_checks) + ")"
+
+
+def index_where_sql(active: dict, special: dict | None = None) -> str:
+    clauses = []
+    for field, vals in (active or {}).items():
+        if not vals:
+            continue
+        cleaned = [str(v) for v in vals if str(v).strip()]
+        if not cleaned:
+            continue
+        if field == "Tags":
+            tag_expr = f"LOWER(CAST({sql_ident(field)} AS VARCHAR))"
+            tag_clauses = [f"{tag_expr} LIKE {sql_lit('%' + v.lower().replace("'", "''") + '%')}" for v in cleaned]
+            clauses.append("(" + " OR ".join(tag_clauses) + ")")
+        else:
+            clauses.append(f"CAST({sql_ident(field)} AS VARCHAR) IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
+
+    special = special or {}
+    # Reuse regular special numeric/phone logic where possible.
+    base_special = {k: v for k, v in special.items() if k != "__ElectionFilters"}
+    base_where = count_cube_where_sql({}, base_special).strip()
+    if base_where.upper().startswith("WHERE "):
+        clauses.append("(" + base_where[6:] + ")")
+
+    ef = special.get("__ElectionFilters")
+    if isinstance(ef, dict):
+        cols = selected_election_columns(ef.get("years") or [], ef.get("types") or [])
+        if cols:
+            clauses.append(election_method_sql(cols, ef.get("methods") or []))
+        elif ef.get("years") or ef.get("types") or ef.get("methods"):
+            clauses.append("(FALSE)")
+
+    return " WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def duckdb_index_summary(active_json: str, special_json: str) -> dict:
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    urls = index_urls_from_manifest()
+    where = index_where_sql(active, special)
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    query = f"""
+        SELECT CAST(Party AS VARCHAR) AS Party, COUNT(*) AS Voters
+        FROM read_parquet({url_list})
+        {where}
+        GROUP BY CAST(Party AS VARCHAR)
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
+        df = con.execute(query).df()
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    return summarize_from_df(df, row_count_mode=False)
+
+
+def requires_remote_index_count(active: dict, special: dict) -> bool:
+    if active.get("Tags"):
+        return True
+    if (special or {}).get("__ElectionFilters"):
+        return True
+    return False
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_bytes(key: str) -> bytes:
     r = requests.get(r2_url(key), timeout=120)
@@ -528,6 +635,27 @@ def special_key(name: str) -> str:
 
 def selected(field: str):
     return st.session_state.get(filter_key(field), [])
+
+def clear_filter_state():
+    """Reset all Create Universe widgets, saved count output, and force fresh widget keys."""
+    old_token = int(st.session_state.get("filter_reset_token", 0))
+    prefixes = (
+        "filter_",
+        "new_reg_months_",
+        "vote_score_type_",
+        "vote_history_score_range_",
+        "election_years_",
+        "election_types_",
+        "election_methods_",
+        "mb_prob_score_range_",
+        "phone_reach_mode_",
+    )
+    for key in list(st.session_state.keys()):
+        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"}:
+            st.session_state.pop(key, None)
+    st.session_state["filter_reset_token"] = old_token + 1
+    st.session_state["left_section"] = "create_universe"
+    st.session_state["view"] = "targeting"
 
 def active_filters() -> dict:
     out = {}
@@ -890,33 +1018,24 @@ def is_cube_safe(active: dict) -> bool:
 
 def update_counts(active: dict):
     try:
-        # v21m: Update Counts must NEVER scan index/detail shards. The app only
-        # uses the rebuilt quick-count cube through DuckDB remote parquet reads.
-        # Tags and exact specific-election filters are intentionally excluded from
-        # live counts because Step 8 v18 does not put them in count_cube.parquet.
-        # They still apply to exports/downloads, where exact row-level filtering is required.
-        safe_active = count_safe_filters(active)
         special = active_special_filters()
+        if requires_remote_index_count(active or {}, special or {}):
+            # Tags and specific-election filters are row-level filters. Count them
+            # remotely with DuckDB over R2 index shards so Streamlit does not
+            # download shards or loop through them in Python.
+            summary = duckdb_index_summary(
+                json.dumps(active or {}, sort_keys=True),
+                json.dumps(special or {}, sort_keys=True),
+            )
+            return summary, "remote-index", None
 
-        # Do not send unsupported special filters into the quick-count query.
-        # Supported: numeric score/range filters + phone reach, because these
-        # columns exist in Step 8 v18 count_cube.parquet.
-        special_for_counts = {
-            k: v for k, v in (special or {}).items()
-            if k != "__ElectionFilters"
-        }
-
-        # Tags are not a count_cube dimension in Step 8 v18, so they cannot be
-        # included in fast live counts without scanning shards or rebuilding a tag cube.
-        safe_active.pop("Tags", None)
-
+        safe_active = count_safe_filters(active)
         summary = duckdb_count_cube_summary(
             json.dumps(safe_active, sort_keys=True),
-            json.dumps(special_for_counts, sort_keys=True),
+            json.dumps(special or {}, sort_keys=True),
         )
         return summary, "quick", None
     except Exception as e:
-        # No shard fallback here. Fallback scans are what caused the crashes/loops.
         return None, "unavailable", e
 
 
@@ -1216,7 +1335,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21m — quick-count only targeting")
+    st.caption("DEV final hybrid v21n — remote exact counts + reset + saved universes")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1322,6 +1441,54 @@ with st.sidebar:
             with st.expander("Tags", expanded=False):
                 st.multiselect("Tags", options=tag_opts, key=filter_key("Tags"))
 
+        with st.expander("Saved Universes", expanded=False):
+            saved = st.session_state.setdefault("saved_universes", {})
+            save_name = st.text_input("Save current filters as", key=special_key("save_universe_name"), placeholder="Example: York teacher MB targets")
+            if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
+                name = str(save_name or "").strip()
+                if not name:
+                    st.warning("Enter a universe name first.")
+                else:
+                    saved[name] = {
+                        "filters": active_filters(),
+                        "special": active_special_filters(),
+                    }
+                    st.success(f"Saved: {name}")
+            if saved:
+                names = sorted(saved.keys())
+                choice = st.selectbox("Load saved universe", options=[""] + names, key=special_key("load_universe_choice"))
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice:
+                        clear_filter_state()
+                        # After reset token changes, write the saved values into the fresh keys.
+                        data = saved.get(choice, {})
+                        for f, vals in (data.get("filters") or {}).items():
+                            st.session_state[filter_key(f)] = vals
+                        sp = data.get("special") or {}
+                        for k, v in sp.items():
+                            if k == "__PhoneReach":
+                                st.session_state[special_key("phone_reach_mode")] = v
+                            elif k == "__ElectionFilters" and isinstance(v, dict):
+                                st.session_state[special_key("election_years")] = v.get("years", [])
+                                st.session_state[special_key("election_types")] = v.get("types", [])
+                                st.session_state[special_key("election_methods")] = v.get("methods", [])
+                            elif k == "RegistrationMonthsAgo" and isinstance(v, dict):
+                                st.session_state[special_key("new_reg_months")] = int(v.get("max", 0) or 0)
+                            elif k == "MB_Prob_Score" and isinstance(v, dict):
+                                st.session_state[special_key("mb_prob_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
+                            elif k in {"V4A", "V4G", "V4P"} and isinstance(v, dict):
+                                label = "All Elections" if k == "V4A" else ("General Elections" if k == "V4G" else "Primary Elections")
+                                st.session_state[special_key("vote_score_type")] = label
+                                st.session_state[special_key("vote_history_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
+                        st.rerun()
+                with col_b:
+                    if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
+                        saved.pop(choice, None)
+                        st.rerun()
+            else:
+                st.caption("No saved universes in this browser session yet.")
+
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
         st.info("Mail Ballot Center will be restored next. Use Create Universe for mail ballot filtering and exports for now.")
@@ -1394,7 +1561,7 @@ if active.get("Tags"):
 if "__ElectionFilters" in special_notice:
     notice_bits.append("specific election year/type/method filters")
 if notice_bits:
-    st.info("Fast counts do not scan shards. " + ", ".join(notice_bits) + " will be applied to exports/downloads, but are not included in the live quick-count total until we add those fields to a future speed cube.")
+    st.info("Tags and specific election filters are counted remotely with DuckDB against the lightweight index shards; Streamlit does not download or loop through the shards.")
 
 st.markdown("## Counts")
 
@@ -1411,47 +1578,18 @@ with action_left:
             st.session_state["count_mode"] = mode
 
 with action_mid:
-    if st.button("Clear Filters", width="stretch"):
-        # Clear both the app's active filter snapshot AND Streamlit widget state.
-        # v21k: this fixes the right-panel clear button resetting counts but
-        # leaving the left-sidebar multiselects/sliders visually selected.
-        st.session_state["filter_reset_token"] = st.session_state.get("filter_reset_token", 0) + 1
-
-        keys_to_clear = []
-        filter_prefixes = ("filter_",)
-        special_prefixes = (
-            "new_reg_months_",
-            "vote_score_type_",
-            "vote_history_score_range_",
-            "election_years_",
-            "election_types_",
-            "election_methods_",
-            "mb_prob_score_range_",
-            "phone_reach_mode_",
-        )
-        exact_filter_keys = {"quick_summary", "count_mode", "exact_summary"}
-        for key in list(st.session_state.keys()):
-            if key.startswith(filter_prefixes) or key.startswith(special_prefixes) or key in exact_filter_keys:
-                keys_to_clear.append(key)
-
-        for key in keys_to_clear:
-            st.session_state.pop(key, None)
-
-        # Keep the user in Create Universe, but force every filter widget to rebuild with a fresh key.
-        st.session_state["left_section"] = "create_universe"
-        st.session_state["view"] = "targeting"
-        st.rerun()
+    st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
 
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
-    st.caption("Updated using the rebuilt quick-count cube. No index/detail shard scan was used." if st.session_state.get("count_mode") == "quick" else "Counts unavailable.")
+    st.caption("Updated using the rebuilt quick-count cube." if st.session_state.get("count_mode") == "quick" else ("Updated with remote DuckDB index counts for Tags/specific elections." if st.session_state.get("count_mode") == "remote-index" else "Counts unavailable."))
     render_metrics(st.session_state["quick_summary"], label="")
     left_chart, right_blank = st.columns([1, 1])
     with left_chart:
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses only the rebuilt quick-count cube through a remote DuckDB query; it does not scan index/detail shards. Tags and specific election filters are exact in exports/downloads.")
+st.caption("Exports and reports apply the current filters against detail shards. Update Counts uses remote DuckDB: quick-count cube for normal filters, lightweight index counts for Tags/specific elections.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
