@@ -1,6 +1,6 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21q RESTORED_WORKSPACES_OUTPUTS
+# Candidate Connect DEV — Final Hybrid Cloud App v21p PERSISTENT_SAVED_UNIVERSES
 # Full safe filters + guarded export.
-# v21q: restores landing screen, voter lookup, mail ballot center, area intel, and output reports while keeping v21p quick-count stability.
+# v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
 import io
 import json
@@ -13,15 +13,12 @@ import pandas as pd
 import duckdb
 import requests
 import streamlit as st
-import altair as alt
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.lib.utils import ImageReader
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, PatternFill, Alignment
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch
+except Exception:
+    letter = canvas = inch = None
 
 R2 = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
 DETAIL_SHARDS = 36
@@ -1482,329 +1479,364 @@ def build_export(active: dict, columns: list[str]):
 
 
 # -----------------------------------------------------------------------------
-# v21q restored workspaces / reports / lightweight remote helpers
+# Restored workspace helpers v21r (safe, remote-query-first)
 # -----------------------------------------------------------------------------
-
-def cc_clean_text(v):
-    if v is None:
-        return ""
+def cc_text(v):
+    try:
+        if pd.isna(v): return ""
+    except Exception:
+        pass
     s = str(v).strip()
-    if s.lower() in {"nan", "none", "null"}:
-        return ""
-    return s
+    if s.lower() in {"nan", "none", "null"}: return ""
+    return re.sub(r"\s+", " ", s)
 
+def full_name(row):
+    parts = [cc_text(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
+    name = " ".join([p for p in parts if p])
+    return name or cc_text(row.get("FullName", "")) or cc_text(row.get("Name", "")) or "Unnamed voter"
 
-def cc_full_name(row):
-    for c in ["FullName", "Name"]:
-        v = cc_clean_text(row.get(c, ""))
-        if v:
-            return v
-    parts = [cc_clean_text(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
-    return " ".join([p for p in parts if p]).strip() or "Unnamed voter"
+def address_line(row):
+    hn = cc_text(row.get("House Number", ""))
+    stn = cc_text(row.get("Street Name", ""))
+    apt = cc_text(row.get("Apartment Number", ""))
+    line = " ".join([x for x in [hn, stn] if x])
+    return (line + (f" Apt {apt}" if apt else "")).strip() or cc_text(row.get("res_address", ""))
 
-
-def cc_format_phone(raw):
-    s = re.sub(r"\D+", "", cc_clean_text(raw))
-    if len(s) == 11 and s.startswith("1"):
-        s = s[1:]
-    if len(s) == 10:
-        return f"({s[:3]}) {s[3:6]}-{s[6:]}"
-    return cc_clean_text(raw)
-
-
-def cc_phone_list(row):
+def phone_label(row):
     vals = []
-    m = cc_format_phone(row.get("Mobile", ""))
-    l = cc_format_phone(row.get("Landline", ""))
-    u = cc_format_phone(row.get("Current_ApplicantPhone", ""))
-    if m:
-        vals.append(f"{m} (m)")
-    if l and l not in {m}:
-        vals.append(f"{l} (l)")
-    if u and u not in {m, l}:
-        vals.append(f"{u} (u)")
+    mobile = cc_text(row.get("Mobile", "")) or cc_text(row.get("MobilePhone", ""))
+    land = cc_text(row.get("Landline", "")) or cc_text(row.get("Phone", ""))
+    app = cc_text(row.get("Current_ApplicantPhone", "")) or cc_text(row.get("ApplicantPhone", ""))
+    if mobile: vals.append(f"{mobile} (m)")
+    if land: vals.append(f"{land} (l)")
+    if app and app not in {mobile, land}: vals.append(f"{app} (u)")
     return " / ".join(vals)
 
+def report_columns():
+    cols = []
+    for c in DEFAULT_EXPORT_COLUMNS:
+        if c not in cols: cols.append(c)
+    for c in ["DOB", "NameSuffix", "Phone", "MobilePhone", "ApplicantPhone", "Current_ApplicantPhone"]:
+        if c not in cols: cols.append(c)
+    return cols
 
-def cc_address_line(row):
-    house = cc_clean_text(row.get("House Number", ""))
-    street = cc_clean_text(row.get("Street Name", ""))
-    apt = cc_clean_text(row.get("Apartment Number", ""))
-    if house or street:
-        line = f"{house} {street}".strip()
-        if apt:
-            line += f" Apt {apt}"
-        return line
-    return cc_clean_text(row.get("res_address", ""))
-
-
-def dataframe_to_csv_bytes(df):
-    return (df if df is not None else pd.DataFrame()).to_csv(index=False).encode("utf-8")
-
-
-def dataframe_to_xlsx_bytes(df, sheet_name="Data"):
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        (df if df is not None else pd.DataFrame()).to_excel(writer, sheet_name=sheet_name[:31], index=False)
-        ws = writer.sheets[sheet_name[:31]]
-        for idx, col in enumerate(df.columns if df is not None else [], 1):
-            ws.column_dimensions[get_column_letter(idx)].width = min(max(len(str(col)) + 2, 12), 32)
-    bio.seek(0)
-    return bio.getvalue()
-
-
-def detail_report_columns(extra=None):
-    base = [
-        "County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region",
-        "voter_id", "FirstName", "MiddleName", "LastName", "Name", "FullName", "Party", "Gender", "Age", "Age_Range",
-        "House Number", "Street Name", "Apartment Number", "City", "State", "Zip", "res_address", "res_city", "res_state", "res_zip",
-        "Email", "Mobile", "Landline", "Current_ApplicantPhone", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "MB_Prob_Score", "Tags",
-    ]
-    for c in extra or []:
-        if c not in base:
-            base.append(c)
-    return base
-
-
-def build_report_dataframe(active, max_rows=5000):
-    cols = detail_report_columns()
-    df = build_export(active or {}, cols)
-    if len(df) > max_rows:
-        return df.head(max_rows).copy()
-    return df
-
-
-def pdf_header(c, title, subtitle=""):
-    w, h = landscape(letter)
-    c.setFillColor(colors.HexColor("#111827"))
-    c.rect(0, h-62, w, 62, fill=1, stroke=0)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(28, h-35, title)
-    c.setFont("Helvetica", 9)
-    c.drawRightString(w-28, h-24, "Candidate Connect")
-    if subtitle:
-        c.drawString(28, h-52, subtitle[:150])
-    c.setStrokeColor(colors.HexColor("#c91f27"))
-    c.setLineWidth(2)
-    c.line(28, h-66, w-28, h-66)
-
-
-def simple_table_pdf(title, subtitle, rows, headers, file_note=None, landscape_mode=True):
-    pagesize = landscape(letter) if landscape_mode else letter
-    bio = io.BytesIO()
-    c = canvas.Canvas(bio, pagesize=pagesize)
-    w, h = pagesize
-    pdf_header(c, title, subtitle)
-    y = h - 86
-    if file_note:
-        c.setFont("Helvetica-Oblique", 8)
-        c.setFillColor(colors.HexColor("#374151"))
-        c.drawString(28, y, file_note[:170])
-        y -= 16
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(colors.HexColor("#111827"))
-    x0 = 28
-    widths = [(w-56)/len(headers)] * len(headers)
-    for i, head in enumerate(headers):
-        c.drawString(x0 + sum(widths[:i]), y, str(head)[:22])
-    y -= 12
-    c.setStrokeColor(colors.HexColor("#9ca3af"))
-    c.line(28, y, w-28, y)
-    y -= 12
-    c.setFont("Helvetica", 7)
-    c.setFillColor(colors.black)
-    page = 1
-    for row in rows:
-        if y < 35:
-            c.setFont("Helvetica", 7)
-            c.drawRightString(w-28, 18, f"Page {page}")
-            c.showPage(); page += 1
-            pdf_header(c, title, subtitle)
-            y = h - 86
-            c.setFont("Helvetica-Bold", 8)
-            for i, head in enumerate(headers):
-                c.drawString(x0 + sum(widths[:i]), y, str(head)[:22])
-            y -= 24
-            c.setFont("Helvetica", 7)
-        for i, cell in enumerate(row):
-            c.drawString(x0 + sum(widths[:i]), y, str(cell)[:30])
-        y -= 11
-    c.drawRightString(w-28, 18, f"Page {page}")
-    c.save()
-    bio.seek(0)
-    return bio.getvalue()
-
-
-def generate_summary_pdf(active, summary=None):
-    summary = summary or st.session_state.get("quick_summary") or {"total": 0, "r": 0, "d": 0, "o": 0}
-    rows = [["Total Voters", f"{summary.get('total',0):,}"], ["Republican", f"{summary.get('r',0):,}"], ["Democrat", f"{summary.get('d',0):,}"], ["Other / Unaffiliated", f"{summary.get('o',0):,}"]]
-    chips = []
-    for k, vals in (active or {}).items():
-        if vals:
-            chips.append(f"{DISPLAY_LABELS.get(k,k)}: {', '.join(map(str, vals[:6]))}")
-    return simple_table_pdf("Candidate Connect Summary Report", " | ".join(chips) or "All voters", rows, ["Metric", "Value"], landscape_mode=False)
-
-
-def generate_street_list_pdf(active):
-    df = build_report_dataframe(active, max_rows=9000)
-    if df.empty:
-        return simple_table_pdf("Street List", "No matching voters", [], ["Street", "House", "Name", "Phone", "Party", "Age"])
-    for c in ["Street Name", "House Number", "Apartment Number"]:
-        if c not in df.columns: df[c] = ""
-    df["_name"] = df.apply(cc_full_name, axis=1)
-    df["_phone"] = df.apply(cc_phone_list, axis=1)
-    df["_house_sort"] = pd.to_numeric(df["House Number"].astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
-    df = df.sort_values(["County", "Municipality", "Precinct", "Street Name", "_house_sort", "LastName"], na_position="last")
-    rows = []
-    for _, r in df.iterrows():
-        rows.append([cc_clean_text(r.get("Street Name","")), cc_clean_text(r.get("House Number","")), cc_clean_text(r.get("Apartment Number","")), r.get("_name",""), r.get("_phone",""), cc_clean_text(r.get("Party","")), cc_clean_text(r.get("Age","")), cc_clean_text(r.get("MB_PERM",""))])
-    return simple_table_pdf("Candidate Connect Street List", f"{len(df):,} voters • phones show (m) mobile, (l) landline, (u) applicant/unknown", rows, ["Street", "House", "Apt", "Full Name", "Phone", "P", "Age", "Perm"])
-
-
-def generate_call_list_pdf(active):
-    df = build_report_dataframe(active, max_rows=9000)
-    if df.empty:
-        return simple_table_pdf("Call List", "No matching voters", [], ["Name", "Phone", "Party", "Age", "Municipality"])
-    df["_name"] = df.apply(cc_full_name, axis=1)
-    df["_phone"] = df.apply(cc_phone_list, axis=1)
-    df = df[df["_phone"].astype(str).str.strip().ne("")].sort_values(["County", "Municipality", "LastName", "FirstName"], na_position="last")
-    rows = [[r.get("_name",""), r.get("_phone",""), cc_clean_text(r.get("Party","")), cc_clean_text(r.get("Age","")), cc_clean_text(r.get("Municipality","")), cc_clean_text(r.get("Notes",""))] for _, r in df.iterrows()]
-    return simple_table_pdf("Candidate Connect Call List", f"{len(df):,} voters with phone • phones show (m) mobile, (l) landline, (u) applicant/unknown", rows, ["Full Name", "Phone(s)", "P", "Age", "Municipality", "Notes"])
-
-
-def generate_labels_pdf(active):
-    df = build_report_dataframe(active, max_rows=3000)
-    rows = []
-    for _, r in df.iterrows():
-        name = cc_full_name(r)
-        addr = cc_address_line(r)
-        city = cc_clean_text(r.get("City", "")) or cc_clean_text(r.get("res_city", ""))
-        state = cc_clean_text(r.get("State", "")) or cc_clean_text(r.get("res_state", "")) or "PA"
-        zipc = cc_clean_text(r.get("Zip", "")) or cc_clean_text(r.get("res_zip", ""))
-        if name and addr:
-            rows.append([name, addr, f"{city}, {state} {zipc}".strip()])
-    bio = io.BytesIO(); c = canvas.Canvas(bio, pagesize=letter); w, h = letter
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(36, h-28, "Avery 5160 / 8160 compatible: 30 labels per sheet, 3 columns x 10 rows. This note is in the top margin and should not overlap labels.")
-    left, top = 0.1875*inch, h - 0.5*inch
-    label_w, label_h = 2.625*inch, 1.0*inch
-    gap_x = 0.125*inch
-    x_positions = [left, left+label_w+gap_x, left+2*(label_w+gap_x)]
-    y = top
-    idx = 0
-    c.setFont("Helvetica", 9)
-    for name, addr, cityline in rows:
-        pos = idx % 30
-        if idx and pos == 0:
-            c.showPage(); c.setFont("Helvetica", 9)
-        col = pos % 3; row = pos // 3
-        x = x_positions[col] + 0.10*inch
-        y = top - row*label_h - 0.28*inch
-        c.drawString(x, y, name[:32]); c.drawString(x, y-12, addr[:32]); c.drawString(x, y-24, cityline[:32])
-        idx += 1
-    c.save(); bio.seek(0); return bio.getvalue()
-
-
-def render_enhanced_statewide_snapshot():
-    st.markdown("<div style='font-size:28px;font-weight:900;letter-spacing:.08em;color:#ffffff;margin:0 0 18px 6px;text-transform:uppercase;'>Voters Statewide</div>", unsafe_allow_html=True)
-    summary, _ = quick_counts({})
-    summary = summary or {"total":0,"r":0,"d":0,"o":0}
-    render_metrics(summary)
-    party_df = pd.DataFrame([{"Party":"Republican","Voters":summary.get("r",0)},{"Party":"Democrat","Voters":summary.get("d",0)},{"Party":"Other / Unaffiliated","Voters":summary.get("o",0)}])
-    left, right = st.columns([1,1])
-    with left:
-        st.markdown("#### Voters by Party")
-        st.bar_chart(party_df.set_index("Party"), height=260)
-    with right:
-        st.markdown("#### Voters by Geography")
-        st.dataframe(pd.DataFrame([
-            {"Geography":"US Congress", "Total Voters":summary.get("total",0), "Republican":summary.get("r",0), "Democrat":summary.get("d",0), "Other / Unaffiliated":summary.get("o",0)},
-            {"Geography":"State Senate", "Total Voters":summary.get("total",0), "Republican":summary.get("r",0), "Democrat":summary.get("d",0), "Other / Unaffiliated":summary.get("o",0)},
-            {"Geography":"State House", "Total Voters":summary.get("total",0), "Republican":summary.get("r",0), "Democrat":summary.get("d",0), "Other / Unaffiliated":summary.get("o",0)},
-        ]), hide_index=True, width="stretch")
-    st.caption("Use the sidebar to build a campaign universe, search voters, open Mail Ballot Center, or view Area Intelligence.")
-
-
-def render_voter_lookup_workspace():
-    st.markdown("## Voter Lookup")
-    st.caption("Search full-state active voters by name, county, address, PA ID, phone, or email. Uses remote DuckDB; no shard loop in Streamlit.")
-    q = st.session_state.get(special_key("lookup_query"), "")
-    maxn = int(st.session_state.get(special_key("lookup_max"), 25) or 25)
-    if not q:
-        st.info("Enter a search in the left pane."); return
+def remote_search_voters(term, max_rows=25):
     urls = index_urls_from_manifest()
-    term = str(q).strip().replace("'", "''")
+    term = str(term or "").strip().replace("'", "''")
+    if not term: return pd.DataFrame(columns=report_columns())
     like = f"%{term.lower()}%"
-    cols = detail_report_columns()
+    cols = report_columns()
     select_cols = ", ".join([f"CAST({sql_ident(c)} AS VARCHAR) AS {sql_ident(c)}" for c in cols])
-    where = " OR ".join([f"LOWER(CAST({sql_ident(c)} AS VARCHAR)) LIKE {sql_lit(like)}" for c in ["FullName","Name","FirstName","LastName","County","Municipality","Precinct","voter_id","Mobile","Landline","Email","Street Name","City"]])
+    searchable = ["FullName","Name","FirstName","LastName","County","Municipality","Precinct","voter_id","Mobile","Landline","Email","Street Name","City","Zip"]
+    where = " OR ".join([f"LOWER(CAST({sql_ident(c)} AS VARCHAR)) LIKE {sql_lit(like)}" for c in searchable])
     con = duckdb.connect(database=':memory:')
     try:
         try: con.execute('INSTALL httpfs; LOAD httpfs;')
         except Exception:
             try: con.execute('LOAD httpfs;')
             except Exception: pass
-        df = con.execute(f"SELECT {select_cols} FROM read_parquet({urls!r}) WHERE {where} LIMIT {maxn}").df()
+        return con.execute(f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where} LIMIT {int(max_rows)}").df()
     finally:
         con.close()
-    if df.empty:
-        st.warning("No voters found."); return
+
+def safe_filtered_df(active, max_rows=5000):
+    cols = report_columns()
+    try:
+        df = build_export(active, cols)
+        return df.head(max_rows)
+    except Exception:
+        return pd.DataFrame(columns=cols)
+
+def make_simple_pdf(title, rows, headers):
+    if canvas is None:
+        return b"PDF support unavailable."
+    bio = io.BytesIO(); c = canvas.Canvas(bio, pagesize=letter); w,h = letter
+    c.setFont("Helvetica-Bold", 15); c.drawString(36, h-42, title)
+    c.setFont("Helvetica", 8); y = h-66
+    widths = [90, 70, 150, 120, 40, 40][:len(headers)]
+    def line(vals, bold=False):
+        nonlocal y
+        if y < 45:
+            c.showPage(); y = h-42
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", 7.5)
+        x=36
+        for i,v in enumerate(vals):
+            c.drawString(x, y, str(v)[:32])
+            x += widths[i] if i < len(widths) else 80
+        y -= 12
+    line(headers, True)
+    for r in rows:
+        line(r)
+    c.save(); bio.seek(0); return bio.getvalue()
+
+def street_list_pdf(active):
+    df = safe_filtered_df(active, 8000)
+    if df.empty: return make_simple_pdf("Candidate Connect Street List", [], ["Street","House","Name","Phone","P","Age"])
+    df["_name"] = df.apply(full_name, axis=1); df["_phone"] = df.apply(phone_label, axis=1)
+    if "House Number" in df.columns:
+        df["_hs"] = pd.to_numeric(df["House Number"].astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
+    else: df["_hs"] = 0
+    sort_cols = [c for c in ["County","Municipality","Precinct","Street Name","_hs","LastName"] if c in df.columns]
+    if sort_cols: df = df.sort_values(sort_cols, na_position="last")
+    rows = [[cc_text(r.get("Street Name","")), cc_text(r.get("House Number","")), r.get("_name",""), r.get("_phone",""), cc_text(r.get("Party","")), cc_text(r.get("Age",""))] for _,r in df.iterrows()]
+    return make_simple_pdf("Candidate Connect Street List — phones: (m) mobile, (l) landline, (u) applicant/unknown", rows, ["Street","House","Full Name","Phone","P","Age"])
+
+def call_list_pdf(active):
+    df = safe_filtered_df(active, 8000)
+    if df.empty: return make_simple_pdf("Candidate Connect Call List", [], ["Name","Phone","P","Age","Area"])
+    df["_name"] = df.apply(full_name, axis=1); df["_phone"] = df.apply(phone_label, axis=1)
+    df = df[df["_phone"].astype(str).str.strip().ne("")]
+    rows = [[r.get("_name",""), r.get("_phone",""), cc_text(r.get("Party","")), cc_text(r.get("Age","")), cc_text(r.get("Municipality",""))] for _,r in df.iterrows()]
+    return make_simple_pdf("Candidate Connect Call List — phones: (m) mobile, (l) landline, (u) applicant/unknown", rows, ["Full Name","Phone(s)","P","Age","Area"])
+
+def summary_pdf(active):
+    summary, mode, err = update_counts(active)
+    rows = [["Total", summary.get("total",0)], ["Republican", summary.get("r",0)], ["Democrat", summary.get("d",0)], ["Other", summary.get("o",0)]] if summary else [["Unavailable", err or ""]]
+    return make_simple_pdf("Candidate Connect Summary Report", rows, ["Metric", "Value"])
+
+def labels_pdf(active):
+    df = safe_filtered_df(active, 3000)
+    if canvas is None: return b"PDF support unavailable."
+    bio = io.BytesIO(); c = canvas.Canvas(bio, pagesize=letter); w,h = letter
+    c.setFont("Helvetica-Bold", 8); c.drawString(36, h-24, "Avery 5160 / 8160 compatible — 30 labels per sheet. This note is in the top margin and should not overlap labels.")
+    left, top = 0.1875*inch, h-0.5*inch; label_w, label_h = 2.625*inch, 1.0*inch; gap_x=0.125*inch
+    xs=[left,left+label_w+gap_x,left+2*(label_w+gap_x)]; idx=0
+    c.setFont("Helvetica", 8)
+    for _,r in df.iterrows():
+        name=full_name(r); addr=address_line(r); city=cc_text(r.get("City","")) or cc_text(r.get("res_city","")); state=cc_text(r.get("State","")) or cc_text(r.get("res_state","")) or "PA"; z=cc_text(r.get("Zip","")) or cc_text(r.get("res_zip",""))
+        if not name or not addr: continue
+        pos=idx%30
+        if idx and pos==0: c.showPage(); c.setFont("Helvetica",8)
+        col=pos%3; row=pos//3; x=xs[col]+0.10*inch; y=top-row*label_h-0.28*inch
+        c.drawString(x,y,name[:34]); c.drawString(x,y-11,addr[:34]); c.drawString(x,y-22,f"{city}, {state} {z}"[:34]); idx+=1
+    c.save(); bio.seek(0); return bio.getvalue()
+
+def render_enhanced_home():
+    render_statewide_snapshot()
+
+def render_voter_lookup_workspace():
+    st.markdown("## Voter Lookup")
+    q = st.session_state.get(special_key("lookup_query"), "")
+    maxn = st.session_state.get(special_key("lookup_max"), 25)
+    if not q:
+        st.info("Enter a search in the left pane."); return
+    with st.spinner("Searching voters..."):
+        df = remote_search_voters(q, maxn)
     st.caption(f"{len(df)} result(s) found for: {q}")
-    results_col, detail_col = st.columns([0.9,1.6])
-    if "lookup_selected_idx" not in st.session_state: st.session_state.lookup_selected_idx = 0
-    with results_col:
+    if df.empty: st.warning("No voters found."); return
+    if "lookup_selected_idx" not in st.session_state: st.session_state["lookup_selected_idx"] = 0
+    left,right = st.columns([.9,1.6])
+    with left:
         st.markdown("### Search Results")
-        for i, r in df.iterrows():
-            label = cc_full_name(r)
-            addr = cc_address_line(r)
-            if st.button(f"{label}\n{addr}\n{cc_clean_text(r.get('County',''))} County", key=f"lookup_pick_{i}", width="stretch"):
-                st.session_state.lookup_selected_idx = int(i); st.rerun()
-    with detail_col:
-        r = df.iloc[min(st.session_state.lookup_selected_idx, len(df)-1)]
-        st.markdown(f"## {cc_full_name(r)}")
-        st.markdown(f"{cc_address_line(r)}  \\n{cc_clean_text(r.get('City','')) or cc_clean_text(r.get('res_city',''))}, {cc_clean_text(r.get('State','')) or cc_clean_text(r.get('res_state',''))} {cc_clean_text(r.get('Zip','')) or cc_clean_text(r.get('res_zip',''))}")
-        k1,k2,k3,k4 = st.columns(4)
-        k1.metric("Party", cc_clean_text(r.get("Party","")) or "—"); k2.metric("Gender", cc_clean_text(r.get("Gender","")) or "—"); k3.metric("Age", cc_clean_text(r.get("Age","")) or "—"); k4.metric("PA ID", cc_clean_text(r.get("voter_id","")) or "—")
-        left,right = st.columns(2)
-        with left:
-            st.markdown("### Voter Details")
-            detail_rows = [["Registration Date", r.get("RegistrationDate","")], ["County", r.get("County","")], ["Municipality", r.get("Municipality","")], ["Precinct", r.get("Precinct","")], ["Congressional", r.get("USC","")], ["State Senate", r.get("STS","")], ["State House", r.get("STH","")], ["School District", r.get("School District","")], ["School Region", r.get("School Region","")]]
-            st.dataframe(pd.DataFrame(detail_rows, columns=["Field","Value"]), hide_index=True, width="stretch")
-        with right:
-            st.markdown("### Contact + Mail Ballot")
-            st.dataframe(pd.DataFrame([["Phones", cc_phone_list(r)], ["Email", r.get("Email","")], ["Mail Ballot Application", r.get("MB_App","") or r.get("MIB_Applied","")], ["Mail Ballot Status", r.get("MB_Status","") or r.get("MIB_BALLOT","")], ["Tags", r.get("Tags","")]], columns=["Field","Value"]), hide_index=True, width="stretch")
+        for i,r in df.iterrows():
+            if st.button(f"{full_name(r)}\n{address_line(r)}\n{cc_text(r.get('County',''))} County", key=f"lookup_pick_{i}", width="stretch"):
+                st.session_state["lookup_selected_idx"] = int(i); st.rerun()
+    with right:
+        r = df.iloc[min(int(st.session_state.get("lookup_selected_idx",0)), len(df)-1)]
+        st.markdown(f"## {full_name(r)}")
+        st.write(address_line(r))
+        a,b,c1,d = st.columns(4)
+        a.metric("Party", cc_text(r.get("Party","")) or "—"); b.metric("Gender", cc_text(r.get("Gender","")) or "—"); c1.metric("Age", cc_text(r.get("Age","")) or "—"); d.metric("PA ID", cc_text(r.get("voter_id","")) or "—")
+        st.dataframe(pd.DataFrame([["County",r.get("County","")],["Municipality",r.get("Municipality","")],["Precinct",r.get("Precinct","")],["School District",r.get("School District","")],["Phone",phone_label(r)],["Email",r.get("Email","")],["Mail Ballot",r.get("MB_App","") or r.get("MIB_Applied","")],["Tags",r.get("Tags","")]], columns=["Field","Value"]), hide_index=True, width="stretch")
         with st.expander("Edit / Correct This Voter Record", expanded=False):
-            st.info("Corrections entered here can be copied into the pipeline correction file. Persistent cloud write-back will be reconnected after core launch testing.")
-            edits = {}
-            ec = st.columns(4)
-            for j, field in enumerate(["FirstName","MiddleName","LastName","NameSuffix","Gender","Party","DOB","RegistrationDate","House Number","Street Name","Apartment Number","City","State","Zip","Municipality","Precinct","School District","School Region","Mobile","Landline","Email","MB_App","MB_Status","Tags"]):
-                with ec[j % 4]:
-                    edits[field] = st.text_input(field, value=cc_clean_text(r.get(field,"")), key=f"edit_{field}_{r.get('voter_id','')}")
-            notes = st.text_area("Correction Notes", key=f"edit_notes_{r.get('voter_id','')}")
-            payload = {"voter_id": cc_clean_text(r.get("voter_id","")), "updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": notes}
-            st.download_button("Download This Correction JSON", data=json.dumps(payload, indent=2).encode("utf-8"), file_name=f"voter_correction_{payload['voter_id'] or 'unknown'}.json", mime="application/json", width="stretch")
+            st.info("Download the correction JSON and place it in the pipeline correction workflow if needed.")
+            edits={}
+            cols=st.columns(4)
+            for j,field in enumerate(["FirstName","MiddleName","LastName","NameSuffix","Gender","Party","DOB","RegistrationDate","House Number","Street Name","Apartment Number","City","State","Zip","Municipality","Precinct","School District","School Region","Mobile","Landline","Email","MB_App","MB_Status","Tags"]):
+                with cols[j%4]: edits[field]=st.text_input(field, value=cc_text(r.get(field,"")), key=f"edit_{field}_{r.get('voter_id','')}")
+            payload={"voter_id": cc_text(r.get("voter_id","")), "updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": st.text_area("Correction Notes")}
+            st.download_button("Download Correction JSON", json.dumps(payload, indent=2).encode(), file_name=f"voter_correction_{payload['voter_id'] or 'unknown'}.json", mime="application/json")
 
-
-def render_mail_ballot_center_workspace():
+def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
-    st.caption("Strategic mail ballot operations, targeting, and follow-up workspace. Counts use the same remote quick-count/index logic as Create Universe.")
-    main_
+    st.caption("Strategic mail ballot operations, targeting, and follow-up workspace.")
+    base = active_filters() if st.session_state.get(special_key("mb_start_current"), True) else {}
+    c1,c2,c3,c4 = st.columns(4)
+    app = c1.multiselect("Application Status", field_options(filter_options,"MB_App_Status",base), key=special_key("mb_app_status"))
+    sent = c2.multiselect("Ballot Sent", field_options(filter_options,"MB_Sent",base), key=special_key("mb_sent"))
+    ret = c3.multiselect("Ballot Status", field_options(filter_options,"MB_Status",base), key=special_key("mb_status"))
+    score = c4.slider("MB Probability Score",0,4,(0,4),key=special_key("mb_score_center"))
+    mb_active = dict(base)
+    if app: mb_active["MB_App_Status"] = app
+    if sent: mb_active["MB_Sent"] = sent
+    if ret: mb_active["MB_Status"] = ret
+    st.session_state[special_key("mb_prob_score_range")] = score
+    if st.button("Apply Mail Ballot Filters", width="stretch"):
+        st.session_state.update({filter_key(k):v for k,v in mb_active.items()})
+        st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
+    summary, mode, err = update_counts(mb_active)
+    if summary: render_metrics(summary)
+    tabs=st.tabs(["Operations","Exports","Analysis","Notes"])
+    with tabs[0]: st.info("Use presets here to build chase, cure, and growth universes. Counts use the same remote quick-count/index engine.")
+    with tabs[1]: st.download_button("Download MB CSV", safe_filtered_df(mb_active,50000).to_csv(index=False).encode(), "mail_ballot_universe.csv", "text/csv")
+    with tabs[2]: st.write("Mail ballot analysis workspace restored for DEV testing.")
+    with tabs[3]: st.text_area("Notes")
+
+def render_area_intelligence_workspace():
+    st.markdown("## Area Intelligence")
+    level = st.selectbox("Report Level", ["County","Municipality","Precinct","School District","School Region","USC","STS","STH"], key=special_key("area_level"))
+    opts = field_options(filter_options, level, {})
+    val = st.selectbox(level, opts, key=special_key("area_value")) if opts else ""
+    area_active = {level:[val]} if val else {}
+    st.markdown(f"### {level} Profile")
+    summary, mode, err = update_counts(area_active)
+    if summary: render_metrics(summary)
+    st.info("Area Intelligence profile restored for DEV testing. More profile details/charts can be layered back after live-safe export/report testing.")
+
+def render_output_buttons(active):
+    tabs = st.tabs(["Exports", "Reports"])
+    with tabs[0]:
+        st.markdown("### Exports")
+        col1,col2,col3=st.columns(3)
+        with col1:
+            if st.button("Prepare Filtered CSV", width="stretch"):
+                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); st.download_button("Download Filtered CSV", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch")
+        with col2:
+            if st.button("Prepare Texting CSV", width="stretch"):
+                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); df=df[df.apply(phone_label,axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)] if not df.empty else df; st.download_button("Download Texting CSV", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch")
+        with col3:
+            if st.button("Prepare Mail CSV", width="stretch"):
+                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); st.download_button("Download Mail CSV", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch")
+    with tabs[1]:
+        st.markdown("### Reports")
+        r1,r2,r3,r4=st.columns(4)
+        with r1: st.download_button("Summary PDF", summary_pdf(active), "candidate_connect_summary.pdf", "application/pdf", width="stretch")
+        with r2: st.download_button("Street List PDF", street_list_pdf(active), "candidate_connect_street_list.pdf", "application/pdf", width="stretch")
+        with r3: st.download_button("Call List PDF", call_list_pdf(active), "candidate_connect_call_list.pdf", "application/pdf", width="stretch")
+        with r4: st.download_button("Mailing Labels PDF", labels_pdf(active), "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch")
+
+
+st.markdown('<div class="cc-header">', unsafe_allow_html=True)
+h_logo, h_mid, h_power = st.columns([1.1, 2.8, 1.2])
+with h_logo:
+    if file_exists(LOGO_CANDIDATE_CONNECT): st.image(LOGO_CANDIDATE_CONNECT, width="stretch")
+    else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
+with h_mid:
+    st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21r</div>', unsafe_allow_html=True)
+with h_power:
+    if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
+    else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+try:
+    with st.spinner("Loading filters from R2..."):
+        manifest, filter_options, geo_hierarchy = load_filter_layer()
+except Exception as e:
+    st.error("Could not load the filter layer."); st.exception(e); st.stop()
+
+if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_token"] = 0
+if "left_section" not in st.session_state: st.session_state["left_section"] = None
+_filter_suffix = st.session_state["filter_reset_token"]
+
+with st.sidebar:
+    st.markdown("## Candidate Connect")
+    st.caption("DEV final hybrid v21r — restored workspaces from stable v21p")
+    if st.button("🎯 Create Universe", width="stretch"):
+        st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
+    if st.button("🔎 Voter Lookup", width="stretch"):
+        st.session_state["left_section"]="voter_lookup"; st.session_state["view"]="dashboard"; st.rerun()
+    if st.button("📬 Mail Ballot Center", width="stretch"):
+        st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
+    if st.button("⌂ Area Intelligence", width="stretch"):
+        st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+    st.divider()
+
+    if st.session_state.get("left_section") == "create_universe":
+        st.markdown("### Create Universe")
+        with st.expander("Geography", expanded=False):
+            for field in GEO_FIELDS:
+                st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
+        with st.expander("Voter Details", expanded=False):
+            for field in ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party"]:
+                opts = field_options(filter_options, field, active_filters())
+                if opts: st.multiselect(DISPLAY_LABELS.get(field, field), options=opts, key=filter_key(field))
+            st.slider("Newly Registered Within Last N Months",0,24,0,1,key=special_key("new_reg_months"))
+        with st.expander("Vote History", expanded=False):
+            st.selectbox("Vote History Type", ["All Elections","General Elections","Primary Elections"], key=special_key("vote_score_type"))
+            st.slider("Vote History Score Range",0,4,(0,4),1,key=special_key("vote_history_score_range"))
+            years, etypes, methods = election_options()
+            st.multiselect("Election Year", years, key=special_key("election_years"))
+            st.multiselect("Election Type", etypes, key=special_key("election_types"))
+            st.multiselect("Vote Method", methods, key=special_key("election_methods"))
+        with st.expander("Mail Ballot", expanded=False):
+            for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
+                st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
+            st.slider("Mail Ballot Probability Score",0,4,(0,4),1,key=special_key("mb_prob_score_range"))
+        with st.expander("Contact Filters", expanded=False):
+            st.selectbox("Mobile / Landline Reach", ["No phone filter","Mobile only","Landline only","Mobile OR landline","Mobile AND landline","No mobile or landline"], key=special_key("phone_reach_mode"))
+            for field in ["HasEmail","HasApplicantPhone"]:
+                st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
+        tag_opts=field_options(filter_options,"Tags",active_filters())
+        if tag_opts:
+            with st.expander("Tags", expanded=False): st.multiselect("Tags", tag_opts, key=filter_key("Tags"))
+        with st.expander("Saved Universes", expanded=False):
+            saved=load_persistent_saved_universes(); name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
+            if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
+                if str(name).strip():
+                    saved[str(name).strip()]={"filters":active_filters(),"special":active_special_filters()}; persist_saved_universes(saved); st.success("Saved.")
+                else: st.warning("Enter a universe name first.")
+            if saved:
+                choice=st.selectbox("Load saved universe", [""]+sorted(saved.keys()), key=special_key("load_universe_choice"))
+                ca,cb=st.columns(2)
+                with ca:
+                    if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice: load_saved_universe_into_widgets(saved.get(choice,{}))
+                with cb:
+                    if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
+                        saved.pop(choice,None); persist_saved_universes(saved); st.rerun()
+            else: st.caption("No saved universes saved yet.")
+    elif st.session_state.get("left_section") == "voter_lookup":
+        st.markdown("### Voter Lookup")
+        st.text_input("Search voters", key=special_key("lookup_query"), placeholder="Name, county, address, PA ID, phone, email")
+        st.selectbox("Max Results", [10,25,50,100], index=1, key=special_key("lookup_max"))
+    elif st.session_state.get("left_section") == "mail_ballot_center":
+        st.markdown("### Mail Ballot Center")
+        st.checkbox("Start from current main universe", value=True, key=special_key("mb_start_current"))
+    elif st.session_state.get("left_section") == "area_intelligence":
+        st.markdown("### Area Intelligence")
+        st.caption("Select the area on the right.")
+
 active = active_filters()
 section = st.session_state.get("left_section")
+if section == "voter_lookup": render_voter_lookup_workspace(); st.stop()
+if section == "mail_ballot_center": render_mail_ballot_workspace(); st.stop()
+if section == "area_intelligence": render_area_intelligence_workspace(); st.stop()
+if section != "create_universe": render_enhanced_home(); st.stop()
 
-if section == "voter_lookup":
-    render_voter_lookup_workspace()
-    st.stop()
-if section == "mail_ballot_center":
-    render_mail_ballot_center_workspace()
-    st.stop()
-if section == "area_intelligence":
-    render_area_intelligence_workspace()
-    st.stop()
-if section != "create_universe":
-    render_enhanced_statewide_snapshot()
-    st.stop()
+st.session_state["view"]="targeting"
+st.markdown("## Create Universe")
+st.markdown("### Current Universe")
+special_active = active_special_filters()
+if active or special_active:
+    chips=[]
+    for k,vals in active.items(): chips.append(f"**{DISPLAY_LABELS.get(k,k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals)>6 else ''}")
+    if "RegistrationMonthsAgo" in special_active: chips.append(f"**Newly Registered:** last {special_active['RegistrationMonthsAgo']['max']} months")
+    if "__PhoneReach" in special_active: chips.append(f"**Phone Reach:** {special_active['__PhoneReach']}")
+    if "__ElectionFilters" in special_active:
+        ef=special_active["__ElectionFilters"]; bits=[]
+        if ef.get("years"): bits.append("Years "+", ".join(map(str,ef.get("years",[]))))
+        if ef.get("types"): bits.append("Types "+", ".join(map(str,ef.get("types",[]))))
+        if ef.get("methods"): bits.append("Methods "+", ".join(map(str,ef.get("methods",[]))))
+        chips.append("**Specific Elections:** "+"; ".join(bits))
+    for sf in ["V4A","V4G","V4P","MB_Prob_Score"]:
+        if sf in special_active: chips.append(f"**{DISPLAY_LABELS.get(sf,sf)}:** {special_active[sf]['min']}–{special_active[sf]['max']}")
+    st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
+else: st.info("No filters selected. Choose filters in the left pane.")
 
-render_create_universe_main(active)
+st.markdown('<div class="cc-note"><b>Update Counts uses the rebuilt quick-count cube without scanning detail shards.</b> Tags/specific election/phone reach use remote DuckDB when needed.</div>', unsafe_allow_html=True)
+st.markdown("## Counts")
+a1,a2,sp = st.columns([.85,.85,4.3])
+with a1:
+    if st.button("Update Counts", width="stretch"):
+        with st.spinner("Updating counts..."):
+            summary, mode, err = update_counts(active)
+        if err: st.warning("Counts are unavailable for this filter combination."); st.caption(str(err)[:500])
+        else: st.session_state["quick_summary"]=summary; st.session_state["count_mode"]=mode
+with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
+if st.session_state.get("quick_summary"):
+    st.markdown("### Current Counts"); st.caption("Updated using remote counts."); render_metrics(st.session_state["quick_summary"]); render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
+
+st.markdown("## Output Center")
+st.caption("Exports and reports apply the current filters against detail shards. Counts remain remote/fast.")
+render_output_buttons(active)
 st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
