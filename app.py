@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21p PERSISTENT_SAVED_UNIVERSES
+# Candidate Connect DEV — Final Hybrid Cloud App v21s HOME_DESIGN_RESTORE
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
@@ -300,6 +300,23 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
     background: #111827 !important;
     border: 1px solid rgba(201,31,39,.65) !important;
 }
+
+
+/* v21s restored local-style dashboard cards */
+.cc-home-title { font-size: 28px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; margin: 10px 0 18px 0; color: #f8fafc; }
+.cc-home-card { border: 1px solid rgba(148,163,184,.28); border-radius: 16px; background: linear-gradient(180deg, #07101a, #02060b); padding: 18px; box-shadow: 0 14px 28px rgba(0,0,0,.35); margin-bottom: 16px; }
+.cc-icon-metric { display:flex; align-items:center; gap:14px; border:1px solid rgba(148,163,184,.25); border-left:4px solid #c91f27; border-radius:16px; background:linear-gradient(180deg,#0c1624,#050b12); padding:18px 16px; min-height:94px; }
+.cc-icon-metric.blue { border-left-color:#2454d6; } .cc-icon-metric.green { border-left-color:#4c9a2a; } .cc-icon-metric.gold { border-left-color:#f2b84b; }
+.cc-icon-dot { width:46px; height:46px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.18), 0 8px 18px rgba(201,31,39,.25); font-size:21px; }
+.cc-icon-dot.blue { background:radial-gradient(circle at 35% 20%, #60a5fa, #1d4ed8 72%); } .cc-icon-dot.green { background:radial-gradient(circle at 35% 20%, #86efac, #3f8f27 72%); } .cc-icon-dot.gold { background:radial-gradient(circle at 35% 20%, #fde68a, #b7791f 72%); }
+.cc-icon-label { color:#94a3b8; font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; } .cc-icon-value { color:#fff; font-size:29px; line-height:1.15; font-weight:950; margin-top:4px; } .cc-icon-sub { color:#cbd5e1; font-size:11px; margin-top:2px; }
+.cc-donut-wrap { display:flex; align-items:center; justify-content:center; gap:28px; min-height:275px; }
+.cc-donut { --r:40; --d:43; --o:17; width:220px; height:220px; border-radius:50%; background:conic-gradient(#d51f2a 0 calc(var(--r)*1%), #2454d6 calc(var(--r)*1%) calc((var(--r) + var(--d))*1%), #4c9a2a calc((var(--r) + var(--d))*1%) 100%); position:relative; box-shadow:0 18px 35px rgba(0,0,0,.38), inset 0 0 0 1px rgba(255,255,255,.12); }
+.cc-donut:after { content:''; position:absolute; inset:58px; border-radius:50%; background:#050b12; box-shadow:inset 0 0 0 1px rgba(148,163,184,.24); }
+.cc-donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:2; font-weight:950; color:#fff; }
+.cc-legend-row { display:grid; grid-template-columns:16px 1fr auto; gap:10px; align-items:center; margin:12px 0; color:#f8fafc; } .cc-swatch { width:12px; height:12px; border-radius:999px; }
+.cc-age-row { display:grid; grid-template-columns:80px 1fr 70px; gap:12px; align-items:center; margin:13px 0; } .cc-age-bar-bg { height:18px; border-radius:999px; background:#111827; border:1px solid rgba(148,163,184,.2); overflow:hidden; } .cc-age-bar { height:100%; border-radius:999px; background:linear-gradient(90deg,#8b0d13,#ef4444); }
+.cc-home-table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; } .cc-home-table th { color:#f8fafc; background:#111827; padding:11px; font-size:12px; text-align:left; } .cc-home-table td { color:#e5e7eb; background:#0b1220; padding:10px 11px; border-top:1px solid rgba(148,163,184,.15); font-size:12px; }
 
 </style>
 """,
@@ -1277,13 +1294,26 @@ def render_metrics(summary, label=""):
 
 
 def render_party_chart(summary, title="Party Breakdown"):
-    chart_df = pd.DataFrame([
-        {"Group": "Republican", "Voters": int(summary.get("r", 0))},
-        {"Group": "Democrat", "Voters": int(summary.get("d", 0))},
-        {"Group": "Other / Unaffiliated", "Voters": int(summary.get("o", 0))},
-    ])
-    st.markdown(f"#### {title}")
-    st.bar_chart(chart_df.set_index("Group"), height=260)
+    """Local-style party donut. Replaces the plain Streamlit bar chart."""
+    total = int(summary.get("total", 0) or 0)
+    r = int(summary.get("r", 0) or 0)
+    d = int(summary.get("d", 0) or 0)
+    o = int(summary.get("o", 0) or 0)
+    rp = round((r / total * 100), 1) if total else 0
+    dp = round((d / total * 100), 1) if total else 0
+    op = round((o / total * 100), 1) if total else 0
+    html = f"""<div class=\"cc-home-card\"><h3>{title}</h3>
+    <div class=\"cc-donut-wrap\">
+      <div class=\"cc-donut\" style=\"--r:{rp};--d:{dp};--o:{op};\">
+        <div class=\"cc-donut-center\"><div>{total:,}</div><div style=\"font-size:11px;color:#cbd5e1;\">Total</div></div>
+      </div>
+      <div style=\"min-width:260px;\">
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#d51f2a\"></span><span>Republican</span><b>{r:,} ({rp:.1f}%)</b></div>
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#2454d6\"></span><span>Democrat</span><b>{d:,} ({dp:.1f}%)</b></div>
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#4c9a2a\"></span><span>Other / Unaffiliated</span><b>{o:,} ({op:.1f}%)</b></div>
+      </div>
+    </div></div>"""
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_quick_exact_comparison():
     q = st.session_state.get("quick_summary")
@@ -1325,9 +1355,68 @@ def render_top_nav():
             set_view("export")
             st.rerun()
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def duckdb_count_cube_group(field: str, limit: int = 12) -> pd.DataFrame:
+    """Small remote group-by for the home dashboard. Never downloads the cube."""
+    field = str(field)
+    if not re.fullmatch(r"[A-Za-z0-9_ /-]+", field):
+        return pd.DataFrame(columns=[field, "Voters"])
+    url = count_cube_url()
+    query = f"""
+        SELECT CAST({sql_ident(field)} AS VARCHAR) AS label, SUM(Voters) AS Voters
+        FROM read_parquet({sql_lit(url)})
+        WHERE CAST({sql_ident(field)} AS VARCHAR) IS NOT NULL
+          AND TRIM(CAST({sql_ident(field)} AS VARCHAR)) <> ''
+        GROUP BY CAST({sql_ident(field)} AS VARCHAR)
+        ORDER BY Voters DESC
+        LIMIT {int(limit)}
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        return con.execute(query).df()
+    except Exception:
+        return pd.DataFrame(columns=["label", "Voters"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
+def render_icon_metric(label: str, value: int, sub: str = "", icon: str = "●", klass: str = ""):
+    html = f'<div class="cc-icon-metric {klass}"><div class="cc-icon-dot {klass}">{icon}</div><div><div class="cc-icon-label">{label}</div><div class="cc-icon-value">{int(value or 0):,}</div><div class="cc-icon-sub">{sub}</div></div></div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+def render_home_age_card(total: int):
+    age = duckdb_count_cube_group("Age_Range", 12)
+    if age.empty or "Voters" not in age.columns:
+        st.markdown('<div class="cc-home-card"><h3>Voters by Age Range</h3><p>Age range quick-count data is not available.</p></div>', unsafe_allow_html=True)
+        return
+    rows = []
+    order = {"18-24":1,"25-34":2,"35-44":3,"45-54":4,"55-64":5,"65+":6,"65-74":7,"75-84":8,"85+":9}
+    age["sort"] = age["label"].map(lambda x: order.get(str(x), 99))
+    age = age.sort_values(["sort", "label"]).head(9)
+    maxv = max(int(age["Voters"].max() or 1), 1)
+    for _, r in age.iterrows():
+        lab = str(r.get("label", ""))
+        val = int(r.get("Voters", 0) or 0)
+        p = (val / total * 100) if total else 0
+        w = max(2, val / maxv * 100)
+        rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{p:.1f}%</span></div>')
+    html = '<div class="cc-home-card"><h3>Voters by Age Range</h3>' + ''.join(rows) + '<div style="color:#94a3b8;font-size:12px;margin-top:10px;">Universe: All Voters</div></div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+def render_home_geo_table(summary: dict):
+    total = int(summary.get("total",0) or 0); r=int(summary.get("r",0) or 0); d=int(summary.get("d",0) or 0); o=int(summary.get("o",0) or 0)
+    rows = "".join([f"<tr><td>{g}</td><td>{total:,}</td><td>{r:,}</td><td>{d:,}</td><td>{o:,}</td></tr>" for g in ["US Congress", "State Senate", "State House"]])
+    html = f'<div class="cc-home-card"><h3>Voters by Geography</h3><table class="cc-home-table"><thead><tr><th>Geography</th><th>Total Voters</th><th>Republican</th><th>Democrat</th><th>Other / Unaffiliated</th></tr></thead><tbody>{rows}</tbody></table><div style="color:#94a3b8;font-size:12px;margin-top:10px;">Universe: All Voters</div></div>'
+    st.markdown(html, unsafe_allow_html=True)
+
 def render_statewide_snapshot():
-    st.markdown("## Statewide Snapshot")
-    st.caption("Current statewide voter universe from the rebuilt quick-count table.")
+    st.markdown('<div class="cc-home-title">Voters Statewide</div>', unsafe_allow_html=True)
 
     summary = None
     err = None
@@ -1343,14 +1432,32 @@ def render_statewide_snapshot():
             total = 0
         summary = {"total": total, "r": 0, "d": 0, "o": 0}
 
-    render_metrics(summary, label="")
-    if summary.get("r") or summary.get("d") or summary.get("o"):
-        render_party_chart(summary, "Statewide Party Breakdown")
+    total = int(summary.get("total", 0) or 0)
+    r = int(summary.get("r", 0) or 0)
+    d = int(summary.get("d", 0) or 0)
+    o = int(summary.get("o", 0) or 0)
 
-    if err and not (summary.get("r") or summary.get("d") or summary.get("o")):
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: render_icon_metric("Total Voters", total, "100% of universe", "👥", "")
+    with c2: render_icon_metric("Republican", r, pct(r, total) + " of universe", "🐘", "")
+    with c3: render_icon_metric("Democrat", d, pct(d, total) + " of universe", "🫏", "blue")
+    with c4: render_icon_metric("Other / Unaffiliated", o, pct(o, total) + " of universe", "●", "green")
+
+    left, right = st.columns([1.05, 1.55])
+    with left:
+        render_party_chart(summary, "Voters by Party")
+        gdf = duckdb_count_cube_group("Gender", 8)
+        if not gdf.empty and "Voters" in gdf.columns:
+            gf = {str(row.get("label", "")).upper(): int(row.get("Voters", 0) or 0) for _, row in gdf.iterrows()}
+            gs = {"total": sum(gf.values()), "r": gf.get("F", 0), "d": gf.get("M", 0), "o": sum(v for k,v in gf.items() if k not in {"F","M"})}
+            render_party_chart(gs, "Voters by Gender")
+    with right:
+        render_home_age_card(total)
+        render_home_geo_table(summary)
+
+    if err and not (r or d or o):
         st.warning("Quick-count statewide party numbers were not available, so the app showed the manifest total only.")
-
-    st.info("Use **Create Universe** in the left pane. Counts use the rebuilt quick-count cube; geography dropdowns use the safe dependent geo table when available.")
+    st.caption("Use the sidebar to build a campaign universe, search voters, open Mail Ballot Center, or view Area Intelligence.")
 
 def quick_counts(active: dict):
     # v21i: use DuckDB against the remote quick-count parquet so Streamlit does
@@ -1713,7 +1820,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21r</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21s</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -1731,7 +1838,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21r — restored workspaces from stable v21p")
+    st.caption("DEV final hybrid v21s — stable counts + restored home design")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
