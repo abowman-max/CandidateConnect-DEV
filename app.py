@@ -445,6 +445,47 @@ def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
     return "(" + " OR ".join(col_checks) + ")"
 
 
+def index_contact_flag_sql(field: str, vals: list[str]) -> str | None:
+    """Translate count-cube contact flags to real columns in lightweight index shards.
+    Step 8 index shards include Mobile/Landline/Email/Current_ApplicantPhone,
+    not HasMobile/HasLandline/HasEmail/HasApplicantPhone.
+    """
+    col_map = {
+        "HasMobile": "Mobile",
+        "HasLandline": "Landline",
+        "HasEmail": "Email",
+        "HasApplicantPhone": "Current_ApplicantPhone",
+    }
+    col = col_map.get(field)
+    if not col:
+        return None
+    has_expr = f"NULLIF(TRIM(CAST({sql_ident(col)} AS VARCHAR)), '') IS NOT NULL"
+    wanted = {str(v).strip().lower() for v in (vals or []) if str(v).strip()}
+    parts = []
+    if wanted & {"yes", "y", "true", "1"}:
+        parts.append(f"({has_expr})")
+    if wanted & {"no", "n", "false", "0"}:
+        parts.append(f"(NOT ({has_expr}))")
+    return "(" + " OR ".join(parts) + ")" if parts else None
+
+
+def index_phone_reach_sql(mode: str) -> str | None:
+    mobile = "NULLIF(TRIM(CAST(\"Mobile\" AS VARCHAR)), '') IS NOT NULL"
+    landline = "NULLIF(TRIM(CAST(\"Landline\" AS VARCHAR)), '') IS NOT NULL"
+    mode = str(mode or "").strip()
+    if mode == "Mobile only":
+        return f"(({mobile}) AND NOT ({landline}))"
+    if mode == "Landline only":
+        return f"(({landline}) AND NOT ({mobile}))"
+    if mode == "Mobile OR landline":
+        return f"(({mobile}) OR ({landline}))"
+    if mode == "Mobile AND landline":
+        return f"(({mobile}) AND ({landline}))"
+    if mode == "No mobile or landline":
+        return f"(NOT (({mobile}) OR ({landline})))"
+    return None
+
+
 def index_where_sql(active: dict, special: dict | None = None) -> str:
     clauses = []
     for field, vals in (active or {}).items():
@@ -455,17 +496,32 @@ def index_where_sql(active: dict, special: dict | None = None) -> str:
             continue
         if field == "Tags":
             tag_expr = f"LOWER(CAST({sql_ident(field)} AS VARCHAR))"
-            tag_clauses = [f"{tag_expr} LIKE {sql_lit('%' + v.lower().replace("'", "''") + '%')}" for v in cleaned]
+            tag_clauses = [f"{tag_expr} LIKE {sql_lit('%' + v.lower().replace(chr(39), chr(39)+chr(39)) + '%')}" for v in cleaned]
             clauses.append("(" + " OR ".join(tag_clauses) + ")")
         else:
-            clauses.append(f"CAST({sql_ident(field)} AS VARCHAR) IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
+            contact_clause = index_contact_flag_sql(field, cleaned)
+            if contact_clause:
+                clauses.append(contact_clause)
+            else:
+                clauses.append(f"CAST({sql_ident(field)} AS VARCHAR) IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
 
     special = special or {}
-    # Reuse regular special numeric/phone logic where possible.
-    base_special = {k: v for k, v in special.items() if k != "__ElectionFilters"}
-    base_where = count_cube_where_sql({}, base_special).strip()
-    if base_where.upper().startswith("WHERE "):
-        clauses.append("(" + base_where[6:] + ")")
+    for field, rule in special.items():
+        if field == "__ElectionFilters":
+            continue
+        if field == "__PhoneReach":
+            phone_clause = index_phone_reach_sql(str(rule))
+            if phone_clause:
+                clauses.append(phone_clause)
+            continue
+        if str(field).startswith("__"):
+            continue
+        if isinstance(rule, dict):
+            expr = f"TRY_CAST({sql_ident(field)} AS DOUBLE)"
+            if "min" in rule:
+                clauses.append(f"{expr} >= {float(rule['min'])}")
+            if "max" in rule:
+                clauses.append(f"{expr} <= {float(rule['max'])}")
 
     ef = special.get("__ElectionFilters")
     if isinstance(ef, dict):
@@ -656,6 +712,7 @@ def clear_filter_state():
     st.session_state["filter_reset_token"] = old_token + 1
     st.session_state["left_section"] = "create_universe"
     st.session_state["view"] = "targeting"
+    st.rerun()
 
 def active_filters() -> dict:
     out = {}
@@ -1335,7 +1392,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21n — remote exact counts + reset + saved universes")
+    st.caption("DEV final hybrid v21o — remote exact counts + phone reach fix")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1561,7 +1618,7 @@ if active.get("Tags"):
 if "__ElectionFilters" in special_notice:
     notice_bits.append("specific election year/type/method filters")
 if notice_bits:
-    st.info("Tags and specific election filters are counted remotely with DuckDB against the lightweight index shards; Streamlit does not download or loop through the shards.")
+    st.info("Tags, phone reach, and specific election filters are counted remotely with DuckDB against the lightweight index shards; Streamlit does not download or loop through the shards.")
 
 st.markdown("## Counts")
 
