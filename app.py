@@ -1856,6 +1856,77 @@ def cc_text(v):
     if s.lower() in {"nan", "none", "null"}: return ""
     return re.sub(r"\s+", " ", s)
 
+
+def canonical_precinct_display(value, municipality=""):
+    """Normalize obvious duplicate precinct labels for display/export.
+    Example: YORK 1ST WARD - 2ND PRECINCT -> York Township Precinct 540102.
+    This is an app-side display/export guardrail until the same fix is moved into Step 8.
+    """
+    raw = cc_text(value)
+    if not raw:
+        return ""
+    s = raw.upper().replace("–", "-").replace("—", "-")
+    m = re.search(r"\bYORK\s+(\d+)(?:ST|ND|RD|TH)?\s+WARD\s*-\s*(\d+)(?:ST|ND|RD|TH)?\s+PRECINCT\b", s)
+    if m:
+        ward = int(m.group(1)); pct = int(m.group(2))
+        return f"York Township Precinct 540{ward}0{pct}"
+    # Standardize case for numeric township precincts too.
+    m2 = re.search(r"\bYORK\s+TOWNSHIP\s+PRECINCT\s+(\d{6})\b", s)
+    if m2:
+        return f"York Township Precinct {m2.group(1)}"
+    return raw
+
+
+def clean_apartment_and_address2(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep Apartment Number to real unit/apartment values only; move street-type junk to Address Line 2.
+    SURE address pieces can be messy; this makes vendor exports safer without deleting extra info.
+    """
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    for c in ["Apartment Number", "Address Line 2"]:
+        if c not in df.columns:
+            df[c] = ""
+    apt = df["Apartment Number"].astype(str).replace({"nan":"", "None":""}).str.strip()
+    line2 = df["Address Line 2"].astype(str).replace({"nan":"", "None":""}).str.strip()
+    good_pat = re.compile(r"^(APT|APARTMENT|UNIT|STE|SUITE|#|NO\.?|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)\b|^#?[A-Z0-9-]{1,8}$", re.I)
+    bad_words = re.compile(r"\b(ST|STREET|RD|ROAD|DR|DRIVE|AVE|AVENUE|LN|LANE|CT|COURT|CIR|CIRCLE|BLVD|WAY|PIKE|HWY|HIGHWAY)\b", re.I)
+    new_apt=[]; new_line2=[]
+    for a,l in zip(apt, line2):
+        aa=a.strip(); ll=l.strip()
+        if not aa:
+            new_apt.append(""); new_line2.append(ll); continue
+        if bad_words.search(aa) and not good_pat.search(aa):
+            combined = (ll + " " + aa).strip() if ll else aa
+            new_apt.append(""); new_line2.append(combined)
+        else:
+            new_apt.append(aa); new_line2.append(ll)
+    df["Apartment Number"] = new_apt
+    df["Address Line 2"] = new_line2
+    return df
+
+
+def household_for_mail(df: pd.DataFrame) -> pd.DataFrame:
+    """One mail row per household/address when householding is selected."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    for c in ["County","Municipality","House Number","Street Name","Apartment Number","City","State","Zip"]:
+        if c not in df.columns: df[c] = ""
+    key = (df["County"].astype(str).str.upper().str.strip()+"|"+
+           df["Municipality"].astype(str).str.upper().str.strip()+"|"+
+           df["House Number"].astype(str).str.upper().str.strip()+"|"+
+           df["Street Name"].astype(str).str.upper().str.strip()+"|"+
+           df["Apartment Number"].astype(str).str.upper().str.strip()+"|"+
+           df["City"].astype(str).str.upper().str.strip()+"|"+
+           df["State"].astype(str).str.upper().str.strip()+"|"+
+           df["Zip"].astype(str).str.upper().str.strip())
+    df["_HH_KEY"] = key
+    # Keep first voter_id as household anchor and add household count.
+    df["HouseholdCount"] = df.groupby("_HH_KEY")["_HH_KEY"].transform("size")
+    out = df.sort_values(["Street Name","House Number","LastName","FirstName"], kind="stable").drop_duplicates("_HH_KEY", keep="first").drop(columns=["_HH_KEY"], errors="ignore")
+    return out
+
 def full_name(row):
     parts = [cc_text(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
     name = " ".join([p for p in parts if p])
@@ -1881,19 +1952,32 @@ def phone_label(row):
 def first_existing_col(df: pd.DataFrame, candidates: list[str]):
     if df is None or df.empty:
         return None
-    norm_map = {re.sub(r"[^a-z0-9]+", "", str(c).lower()): c for c in df.columns}
-    for cand in candidates:
-        hit = norm_map.get(re.sub(r"[^a-z0-9]+", "", str(cand).lower()))
-        if hit is not None:
-            return hit
+    wanted = [re.sub(r"[^a-z0-9]+", "", str(x).lower()) for x in candidates]
+    for w in wanted:
+        for c in df.columns:
+            if re.sub(r"[^a-z0-9]+", "", str(c).lower()) == w:
+                return c
     return None
+
+def matching_cols(df: pd.DataFrame, candidates: list[str]) -> list[str]:
+    if df is None or df.empty:
+        return []
+    wanted = [re.sub(r"[^a-z0-9]+", "", str(x).lower()) for x in candidates]
+    hits=[]
+    for w in wanted:
+        for c in df.columns:
+            if c in hits:
+                continue
+            if re.sub(r"[^a-z0-9]+", "", str(c).lower()) == w:
+                hits.append(c)
+    return hits
 
 def coalesce_columns(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
     out = pd.Series([""] * len(df), index=df.index, dtype="object")
-    for cand in candidates:
-        col = first_existing_col(df, [cand])
-        if col is None:
-            continue
+    # Use every matching column, not just the first normalized hit. This fixes shards
+    # that contain both a blank display column (FirstName) and a populated source
+    # column (first_name / First Name).
+    for col in matching_cols(df, candidates):
         vals = df[col].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
         mask = out.astype(str).str.strip().eq("") & vals.ne("")
         out.loc[mask] = vals.loc[mask]
@@ -1913,10 +1997,10 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName"],
-        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial"],
-        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName"],
-        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix"],
+        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName", "first", "FIRST"],
+        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial", "middle_initial", "MName"],
+        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName", "last", "LAST"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix", "surnsuffix", "SurnSuffix"],
         "FullName": ["FullName", "Full Name", "Name", "name"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
@@ -1924,9 +2008,9 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "Age": ["Age", "age", "Age_Calc"],
         "Age_Range": ["Age_Range", "age_group", "Age Group"],
         "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
-        "House Number": ["House Number", "HouseNumber", "house_number", "res_house_number"],
+        "House Number": ["House Number", "HouseNumber", "house_number", "res_house_number", "house_num", "street_number"],
         "House Number Suffix": ["House Number Suffix", "HouseNumberSuffix", "house_number_suffix"],
-        "Street Name": ["Street Name", "StreetName", "street_name", "res_street_name"],
+        "Street Name": ["Street Name", "StreetName", "street_name", "res_street_name", "street", "address_street"],
         "Apartment Number": ["Apartment Number", "ApartmentNumber", "Unit", "Apt", "apartment_number"],
         "Address Line 2": ["Address Line 2", "AddressLine2", "Address2", "address_line_2"],
         "City": ["City", "city", "res_city", "Mail City"],
@@ -1957,6 +2041,13 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
     for c in DEFAULT_EXPORT_COLUMNS:
         if c not in df.columns:
             df[c] = ""
+
+    # Canonical app-side cleanup for duplicate-looking precinct labels and messy address pieces.
+    if "Precinct" in df.columns:
+        muni_series = df["Municipality"] if "Municipality" in df.columns else pd.Series([""]*len(df), index=df.index)
+        df["Precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df["Precinct"], muni_series)]
+    df = clean_apartment_and_address2(df)
+
     # Keep the clean user-facing columns, plus any election vote-method columns needed for audit.
     election_cols = [c for c in df.columns if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c)) or re.match(r"^[GPS]\d{2}(?:_\d+)?_method$", str(c))]
     ordered = DEFAULT_EXPORT_COLUMNS + [c for c in election_cols if c not in DEFAULT_EXPORT_COLUMNS]
@@ -2158,10 +2249,15 @@ def render_output_buttons(active):
         if not area_df_ov.empty:
             area_df_ov = area_df_ov.rename(columns={"label": area_level_ov})
             area_df_ov["Voters"] = area_df_ov["Voters"].fillna(0).astype(int)
+            if area_level_ov == "Precinct":
+                area_df_ov[area_level_ov] = area_df_ov[area_level_ov].map(canonical_precinct_display)
+                area_df_ov = area_df_ov.groupby(area_level_ov, as_index=False)["Voters"].sum()
+            area_df_ov = area_df_ov.sort_values(area_level_ov, kind="stable")
             st.dataframe(area_df_ov, hide_index=True, width="stretch", height=260)
     with tabs[1]:
         st.markdown("### Exports")
         st.caption("Prepare builds the filtered file from the remote detail shards. Download appears after the prepare step finishes.")
+        mailing_mode = st.radio("Mailing Mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"))
         area_level = st.selectbox("First Excel sheet area count", ["Municipality", "Precinct", "County", "School District", "School Region"], key=special_key("excel_area_level"))
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -2185,7 +2281,9 @@ def render_output_buttons(active):
             if st.button("Prepare Mail CSV", width="stretch"):
                 with st.spinner("Building mail CSV..."):
                     df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    if mailing_mode == "Householded":
+                        df = household_for_mail(df)
+                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","HouseholdCount","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
                     st.session_state["prepared_mail_df"] = df[mail_cols] if mail_cols else df
             if "prepared_mail_df" in st.session_state:
                 df = st.session_state["prepared_mail_df"]
@@ -2212,7 +2310,9 @@ def render_output_buttons(active):
             if st.button("Prepare Mail Excel", width="stretch"):
                 with st.spinner("Building mail Excel workbook..."):
                     df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    if mailing_mode == "Householded":
+                        df = household_for_mail(df)
+                    mail_cols = [c for c in ["voter_id","FirstName","MiddleName","LastName","NameSuffix","FullName","HouseholdCount","House Number","House Number Suffix","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
                     df = df[mail_cols] if mail_cols else df
                     st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_mail_xlsx" in st.session_state:
@@ -2263,7 +2363,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21v</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21w</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -2397,6 +2497,10 @@ if st.session_state.get("quick_summary"):
     if not area_df.empty:
         area_df = area_df.rename(columns={"label": area_choice})
         area_df["Voters"] = area_df["Voters"].fillna(0).astype(int)
+        if area_choice == "Precinct":
+            area_df[area_choice] = area_df[area_choice].map(canonical_precinct_display)
+            area_df = area_df.groupby(area_choice, as_index=False)["Voters"].sum()
+        area_df = area_df.sort_values(area_choice, kind="stable")
         st.dataframe(area_df, hide_index=True, width="stretch", height=280)
 
 st.markdown("## Output Center")
