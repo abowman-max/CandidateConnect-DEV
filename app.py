@@ -1936,19 +1936,25 @@ def clean_apartment_and_address2(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = ""
     apt = df["Apartment Number"].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
     line2 = df["Address Line 2"].astype(str).replace({"nan":"", "None":"", "<NA>":""}).str.strip()
-    explicit_unit = re.compile(r"^(APT|APARTMENT|UNIT|STE|SUITE|#|NO\.?|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)\b", re.I)
-    simple_unit = re.compile(r"^#?[A-Z0-9][A-Z0-9\-]{0,7}$", re.I)
+    apt_unit = re.compile(r"^(APT|APARTMENT|UNIT|#)\s*[A-Z0-9][A-Z0-9\-]*$", re.I)
+    bare_apt = re.compile(r"^[A-Z0-9][A-Z0-9\-]{0,6}$", re.I)
+    address2_unit = re.compile(r"^(STE|SUITE|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER|LOT|PO BOX|P\.?O\.? BOX|BOX)\b", re.I)
     street_words = re.compile(r"\b(ST|STREET|RD|ROAD|DR|DRIVE|AVE|AVENUE|LN|LANE|CT|COURT|CIR|CIRCLE|BLVD|WAY|PIKE|HWY|HIGHWAY|PKWY|PARKWAY|TER|TERRACE|PL|PLACE)\b", re.I)
     new_apt=[]; new_line2=[]
     for a,l in zip(apt, line2):
         aa=a.strip(); ll=l.strip()
         if not aa:
             new_apt.append(""); new_line2.append(ll); continue
-        if street_words.search(aa) and not explicit_unit.search(aa):
+        # Keep Apartment Number strict: only true apartment/unit identifiers.
+        # Suite, PO Box, building/floor/trailer/lot and stray street text belong in Address Line 2.
+        if street_words.search(aa) and not apt_unit.search(aa):
             combined = (ll + " " + aa).strip() if ll else aa
             new_apt.append(""); new_line2.append(combined); continue
-        if explicit_unit.search(aa) or simple_unit.fullmatch(aa):
-            new_apt.append(smart_title(aa, keep_upper={"APT","UNIT","STE","BLDG","RM","FL","PO","PA","JR","SR","III","IV"}))
+        if address2_unit.search(aa):
+            combined = (ll + " " + aa).strip() if ll else aa
+            new_apt.append(""); new_line2.append(combined); continue
+        if apt_unit.search(aa) or bare_apt.fullmatch(aa):
+            new_apt.append(smart_title(aa, keep_upper={"APT","UNIT","PO","PA","JR","SR","III","IV"}))
             new_line2.append(ll)
         else:
             combined = (ll + " " + aa).strip() if ll else aa
@@ -2349,37 +2355,121 @@ def zip_bytes(files: dict[str, bytes]) -> bytes:
     bio.seek(0)
     return bio.getvalue()
 
+
+def auto_area_level_for_export(active: dict | None) -> str:
+    """Pick the first Excel summary level automatically to remove a cluttering UI dropdown."""
+    active = active or {}
+    county = active.get("County") or []
+    muni = active.get("Municipality") or []
+    # If more than one county/municipality is in play, summarize by municipality.
+    # If exactly one municipality is selected, summarize by precinct.
+    if muni and len(muni) == 1:
+        return "Precinct"
+    if county or muni:
+        return "Municipality"
+    return "County"
+
+
+def prepared_key_for(kind: str, ftype: str) -> str:
+    safe = re.sub(r"[^a-z0-9]+", "_", f"{kind}_{ftype}".lower()).strip("_")
+    return f"prepared_one_export_{safe}"
+
+
+def build_single_export(active, export_kind: str, file_type: str, mailing_mode: str) -> tuple[str, bytes, str, int]:
+    """Build one export/report at a time from a simple dropdown workflow."""
+    area_level = auto_area_level_for_export(active)
+    kind = export_kind.lower()
+    ftype = file_type.lower()
+    if export_kind in {"Full File", "Texting File", "Mail File"}:
+        base_df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+        if export_kind == "Texting File":
+            out = texting_export_df(base_df)
+            stem = "candidate_connect_texting"
+        elif export_kind == "Mail File":
+            out = mail_export_df(base_df, mailing_mode)
+            stem = "candidate_connect_mail"
+        else:
+            out = base_df[[c for c in filtered_export_columns(base_df) if c in base_df.columns]].copy()
+            out = drop_all_blank_optional_columns(out, required=["voter_id","FirstName","LastName","House Number","Street Name","City","State","Zip"])
+            stem = "candidate_connect_filtered"
+        if ftype == "csv":
+            return f"{stem}.csv", out.to_csv(index=False).encode(), "text/csv", len(out)
+        return f"{stem}.xlsx", dataframe_to_excel_bytes(out, area_level), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", len(out)
+    if export_kind == "Street List PDF":
+        return "candidate_connect_street_list.pdf", street_list_pdf(active), "application/pdf", 0
+    if export_kind == "Call List PDF":
+        return "candidate_connect_call_list.pdf", call_list_pdf(active), "application/pdf", 0
+    if export_kind == "Mailing Labels PDF":
+        return "candidate_connect_labels_avery5160.pdf", labels_pdf(active), "application/pdf", 0
+    raise ValueError(f"Unsupported export type: {export_kind}")
+
+
+def contact_tracking_template(kind: str) -> bytes:
+    if kind == "Street Results":
+        cols = ["voter_id","FullName","Street Name","House Number","Apartment Number","Phone","F","A","U","NH","Yard Sign","Notes"]
+    else:
+        cols = ["voter_id","FullName","Phone","Contacted","Result","Support Level","Follow-Up","Notes"]
+    return pd.DataFrame(columns=cols).to_csv(index=False).encode()
+
 def render_output_buttons(active):
     tabs = st.tabs(["Overview", "Exports", "Reports"])
     with tabs[0]:
-        st.markdown("### Overview")
-        st.caption("Current universe overview uses the same remote quick-count path as Update Counts.")
         summary, mode, err = update_counts(active)
         if summary:
             render_metrics(summary)
-            render_party_chart(summary, "Party Breakdown")
-        st.markdown("### Counts by Area")
-        area_level_ov = st.selectbox("Overview area level", ["County", "Municipality", "Precinct", "School District", "School Region"], key=special_key("output_overview_area"))
-        area_df_ov = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_level_ov, 200)
-        if not area_df_ov.empty:
-            area_df_ov = area_df_ov.rename(columns={"label": area_level_ov})
-            area_df_ov["Voters"] = area_df_ov["Voters"].fillna(0).astype(int)
-            if area_level_ov == "Precinct":
-                area_df_ov[area_level_ov] = area_df_ov[area_level_ov].map(canonical_precinct_display)
-                area_df_ov = area_df_ov.groupby(area_level_ov, as_index=False)["Voters"].sum()
-            area_df_ov = area_df_ov.sort_values(area_level_ov, kind="stable")
-            st.dataframe(area_df_ov, hide_index=True, width="stretch", height=260)
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                render_party_chart(summary, "Party Breakdown")
+            with c2:
+                st.markdown("### Counts by Area")
+                area_level_ov = st.selectbox("Area table", ["County", "Municipality", "Precinct", "School District", "School Region"], key=special_key("output_overview_area"))
+                area_df_ov = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_level_ov, 200)
+                if not area_df_ov.empty:
+                    area_df_ov = area_df_ov.rename(columns={"label": area_level_ov})
+                    area_df_ov["Voters"] = area_df_ov["Voters"].fillna(0).astype(int)
+                    if area_level_ov == "Precinct":
+                        area_df_ov[area_level_ov] = area_df_ov[area_level_ov].map(canonical_precinct_display)
+                        area_df_ov = area_df_ov.groupby(area_level_ov, as_index=False)["Voters"].sum()
+                    area_df_ov = area_df_ov.sort_values(area_level_ov, kind="stable")
+                    st.dataframe(area_df_ov, hide_index=True, width="stretch", height=260)
+        elif err:
+            st.warning(err)
+
     with tabs[1]:
-        st.markdown("### Exports")
-        st.caption("Prepare builds the filtered file from the remote detail shards. Download appears after the prepare step finishes.")
-        mailing_mode = st.radio("Mailing Mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"))
-        area_level = st.selectbox("First Excel sheet area count", ["Municipality", "Precinct", "County", "School District", "School Region"], key=special_key("excel_area_level"))
-        with st.expander("Cleaner export workflow", expanded=False):
-            selected_types = st.multiselect("Report/File types to prepare", ["Full CSV", "Text CSV", "Mail CSV", "Full Excel", "Text Excel", "Mail Excel"], default=[], key=special_key("bulk_export_types"))
-            if st.button("Prepare Selected Export Zip", width="stretch"):
-                with st.spinner("Building selected exports..."):
+        st.markdown("### Export Center")
+        st.caption("Pick one output type and one file type, prepare it, then download. Excel summaries are chosen automatically: county/multi-municipality universes summarize by municipality; one municipality summarizes by precinct.")
+        e1, e2, e3 = st.columns([1.2, .8, 1.0])
+        with e1:
+            export_kind = st.selectbox("Download type", ["Full File", "Texting File", "Mail File", "Street List PDF", "Call List PDF", "Mailing Labels PDF"], key=special_key("export_kind"))
+        with e2:
+            allowed_types = ["PDF"] if export_kind.endswith("PDF") else ["CSV", "Excel"]
+            file_type = st.selectbox("File type", allowed_types, key=special_key("export_file_type"))
+        with e3:
+            mailing_mode = st.radio("Mailing mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"), disabled=(export_kind != "Mail File"))
+
+        key = prepared_key_for(export_kind, file_type)
+        pcol, dcol = st.columns([1, 1])
+        with pcol:
+            if st.button("Prepare Download", width="stretch"):
+                with st.spinner(f"Preparing {export_kind}..."):
+                    filename, data, mime, row_count = build_single_export(active, export_kind, file_type, mailing_mode)
+                    st.session_state[key] = {"filename": filename, "data": data, "mime": mime, "rows": row_count}
+        with dcol:
+            if key in st.session_state:
+                item = st.session_state[key]
+                label = f"Download {item['filename']}" + (f" ({item['rows']:,} rows)" if item.get("rows") else "")
+                st.download_button(label, item["data"], item["filename"], item["mime"], width="stretch", on_click=mark_downloaded, args=(key,))
+            else:
+                st.button("Download", disabled=True, width="stretch")
+
+        with st.expander("Batch ZIP export", expanded=False):
+            selected_types = st.multiselect("Files to include", ["Full CSV", "Text CSV", "Mail CSV", "Full Excel", "Text Excel", "Mail Excel", "Street List PDF", "Call List PDF", "Mailing Labels PDF"], default=[], key=special_key("bulk_export_types"))
+            zip_key = "prepared_export_zip"
+            if st.button("Prepare Selected ZIP", width="stretch"):
+                with st.spinner("Building selected ZIP..."):
                     base_df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
                     files = {}
+                    area_level = auto_area_level_for_export(active)
                     if "Full CSV" in selected_types:
                         fdf = base_df[[c for c in filtered_export_columns(base_df) if c in base_df.columns]]
                         files["candidate_connect_filtered.csv"] = fdf.to_csv(index=False).encode()
@@ -2394,93 +2484,42 @@ def render_output_buttons(active):
                         files["candidate_connect_texting.xlsx"] = dataframe_to_excel_bytes(texting_export_df(base_df), area_level)
                     if "Mail Excel" in selected_types:
                         files["candidate_connect_mail.xlsx"] = dataframe_to_excel_bytes(mail_export_df(base_df, mailing_mode), area_level)
-                    st.session_state["prepared_export_zip"] = zip_bytes(files) if files else b""
-            if st.session_state.get("prepared_export_zip"):
-                st.download_button("Download Selected Export Zip", st.session_state["prepared_export_zip"], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=("prepared_export_zip",))
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("Prepare Filtered CSV", width="stretch"):
-                with st.spinner("Building filtered CSV..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    st.session_state["prepared_filtered_df"] = df[[c for c in filtered_export_columns(df) if c in df.columns]]
-            if "prepared_filtered_df" in st.session_state:
-                df = st.session_state["prepared_filtered_df"]
-                st.download_button(f"Download Filtered CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_filtered_df",))
-        with c2:
-            if st.button("Prepare Texting CSV", width="stretch"):
-                with st.spinner("Building texting CSV..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    if not df.empty:
-                        df = df[df.apply(phone_label, axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)]
-                    st.session_state["prepared_texting_df"] = df
-            if "prepared_texting_df" in st.session_state:
-                df = st.session_state["prepared_texting_df"]
-                st.download_button(f"Download Texting CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_texting_df",))
-        with c3:
-            if st.button("Prepare Mail CSV", width="stretch"):
-                with st.spinner("Building mail CSV..."):
-                    df = mail_export_df(safe_filtered_df(active, EXPORT_ROW_LIMIT), mailing_mode)
-                    st.session_state["prepared_mail_df"] = df
-            if "prepared_mail_df" in st.session_state:
-                df = st.session_state["prepared_mail_df"]
-                st.download_button(f"Download Mail CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch", on_click=mark_downloaded, args=("prepared_mail_df",))
-        st.markdown("---")
-        e1, e2, e3 = st.columns(3)
-        with e1:
-            if st.button("Prepare Filtered Excel", width="stretch"):
-                with st.spinner("Building filtered Excel workbook..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    df = df[[c for c in filtered_export_columns(df) if c in df.columns]]
-                    st.session_state["prepared_filtered_xlsx"] = dataframe_to_excel_bytes(df, area_level)
-            if "prepared_filtered_xlsx" in st.session_state:
-                st.download_button("Download Filtered Excel", st.session_state["prepared_filtered_xlsx"], "candidate_connect_filtered.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_filtered_xlsx",))
-        with e2:
-            if st.button("Prepare Texting Excel", width="stretch"):
-                with st.spinner("Building texting Excel workbook..."):
-                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
-                    if not df.empty:
-                        df = df[df.apply(phone_label, axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)]
-                    st.session_state["prepared_texting_xlsx"] = dataframe_to_excel_bytes(df, area_level)
-            if "prepared_texting_xlsx" in st.session_state:
-                st.download_button("Download Texting Excel", st.session_state["prepared_texting_xlsx"], "candidate_connect_texting.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_texting_xlsx",))
-        with e3:
-            if st.button("Prepare Mail Excel", width="stretch"):
-                with st.spinner("Building mail Excel workbook..."):
-                    df = mail_export_df(safe_filtered_df(active, EXPORT_ROW_LIMIT), mailing_mode)
-                    st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
-            if "prepared_mail_xlsx" in st.session_state:
-                st.download_button("Download Mail Excel", st.session_state["prepared_mail_xlsx"], "candidate_connect_mail.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch", on_click=mark_downloaded, args=("prepared_mail_xlsx",))
+                    if "Street List PDF" in selected_types:
+                        files["candidate_connect_street_list.pdf"] = street_list_pdf(active)
+                    if "Call List PDF" in selected_types:
+                        files["candidate_connect_call_list.pdf"] = call_list_pdf(active)
+                    if "Mailing Labels PDF" in selected_types:
+                        files["candidate_connect_labels_avery5160.pdf"] = labels_pdf(active)
+                    st.session_state[zip_key] = zip_bytes(files) if files else b""
+            if st.session_state.get(zip_key):
+                st.download_button("Download Selected ZIP", st.session_state[zip_key], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=(zip_key,))
+
     with tabs[2]:
-        st.markdown("### Reports")
-        st.caption("Prepare builds the PDF and then shows a download button.")
-        r2, r3, r4 = st.columns(3)
-        st.markdown("### Tracking Templates")
-        t1, t2 = st.columns(2)
-        with t1:
-            tmpl = pd.DataFrame(columns=["voter_id","FullName","Address","Phone","F","A","U","NH","Yard Sign","Notes"]).to_csv(index=False).encode()
-            st.download_button("Download Street Results CSV Template", tmpl, "street_results_template.csv", "text/csv", width="stretch")
-        with t2:
-            tmpl2 = pd.DataFrame(columns=["voter_id","FullName","Phone","Contacted","Result","Support Level","Follow-Up","Notes"]).to_csv(index=False).encode()
-            st.download_button("Download Walk/Call Tracking CSV Template", tmpl2, "walk_call_tracking_template.csv", "text/csv", width="stretch")
-        st.markdown("---")
+        st.markdown("### Reports + Tracking")
+        st.caption("Street and call lists use the same voter order as the PDFs. Upload processing will be wired to the pipeline correction/contact update step after export QA is stable.")
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            st.download_button("Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv", width="stretch")
         with r2:
-            if st.button("Prepare Street List PDF", width="stretch"):
-                with st.spinner("Building street list PDF..."):
-                    st.session_state["prepared_street_pdf"] = street_list_pdf(active)
-            if "prepared_street_pdf" in st.session_state:
-                st.download_button("Download Street List PDF", st.session_state["prepared_street_pdf"], "candidate_connect_street_list.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_street_pdf",))
+            st.download_button("Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv", width="stretch")
         with r3:
-            if st.button("Prepare Call List PDF", width="stretch"):
-                with st.spinner("Building call list PDF..."):
-                    st.session_state["prepared_call_pdf"] = call_list_pdf(active)
-            if "prepared_call_pdf" in st.session_state:
-                st.download_button("Download Call List PDF", st.session_state["prepared_call_pdf"], "candidate_connect_call_list.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_call_pdf",))
-        with r4:
-            if st.button("Prepare Mailing Labels PDF", width="stretch"):
-                with st.spinner("Building mailing labels PDF..."):
-                    st.session_state["prepared_labels_pdf"] = labels_pdf(active)
-            if "prepared_labels_pdf" in st.session_state:
-                st.download_button("Download Mailing Labels PDF", st.session_state["prepared_labels_pdf"], "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch", on_click=mark_downloaded, args=("prepared_labels_pdf",))
+            uploaded = st.file_uploader("Upload completed contact results", type=["csv","xlsx"], key=special_key("contact_results_upload"))
+            if uploaded is not None:
+                st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
+        st.markdown("---")
+        p1, p2, p3 = st.columns(3)
+        for label, func, key_name, fname in [
+            ("Street List PDF", street_list_pdf, "prepared_street_pdf", "candidate_connect_street_list.pdf"),
+            ("Call List PDF", call_list_pdf, "prepared_call_pdf", "candidate_connect_call_list.pdf"),
+            ("Mailing Labels PDF", labels_pdf, "prepared_labels_pdf", "candidate_connect_labels_avery5160.pdf"),
+        ]:
+            col = p1 if "Street" in label else (p2 if "Call" in label else p3)
+            with col:
+                if st.button(f"Prepare {label}", width="stretch"):
+                    with st.spinner(f"Building {label}..."):
+                        st.session_state[key_name] = func(active)
+                if key_name in st.session_state:
+                    st.download_button(f"Download {label}", st.session_state[key_name], fname, "application/pdf", width="stretch", on_click=mark_downloaded, args=(key_name,))
 
 
 st.markdown('<div class="cc-header">', unsafe_allow_html=True)
@@ -2490,7 +2529,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21x</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21y</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
