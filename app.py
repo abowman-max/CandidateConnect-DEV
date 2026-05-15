@@ -1,6 +1,6 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21e STARTUP SAFE
+# Candidate Connect DEV — Final Hybrid Cloud App v21j TAG_CONTACT_FIX
 # Full safe filters + guarded export.
-# v21e: preserves v21d baseline but avoids loading huge R2 parquet files on initial page load.
+# v21j: preserves v21i remote DuckDB quick counts; routes Tags to exact index counts and removes duplicate phone fields.
 
 import io
 import json
@@ -310,6 +310,26 @@ def sql_ident(name: str) -> str:
 
 def sql_lit(value) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def tag_contains_mask(series: pd.Series, selected_tags) -> pd.Series:
+    """Match Tags safely when a row may contain comma/semicolon/pipe separated values."""
+    if series is None:
+        return pd.Series([], dtype=bool)
+    vals = [str(v).strip().lower() for v in (selected_tags or []) if str(v).strip()]
+    if not vals:
+        return pd.Series(True, index=series.index)
+
+    def has_any(raw) -> bool:
+        txt = str(raw or "").strip().lower()
+        if not txt:
+            return False
+        parts = [p.strip() for p in re.split(r"[,;|]+", txt) if p.strip()]
+        if parts:
+            return any(v == p for v in vals for p in parts)
+        return any(v in txt for v in vals)
+
+    return series.map(has_any).fillna(False)
 
 
 def count_cube_url() -> str:
@@ -853,11 +873,11 @@ def update_counts(active: dict):
         safe_active = count_safe_filters(active)
         special = active_special_filters()
 
-        # Specific-election filters are not in the count cube. Only those use the
+        # Specific-election filters and Tags are not in the count cube. Only those use the
         # lightweight index shards. Normal voter filters including Gender stay on
-        # the quick-count cube.
-        if "__ElectionFilters" in special:
-            return exact_counts(safe_active), "index", None
+        # the remote quick-count cube.
+        if "__ElectionFilters" in special or active.get("Tags"):
+            return exact_counts(active), "index", None
 
         try:
             summary = duckdb_count_cube_summary(
@@ -1068,7 +1088,9 @@ def exact_counts(active: dict):
         df = load_index_columns(key, cols)
 
         for col, vals in active.items():
-            if vals and col in df.columns:
+            if vals and col == "Tags" and col in df.columns:
+                df = df[tag_contains_mask(df[col], vals)]
+            elif vals and col in df.columns:
                 expanded_vals = expand_filter_values(col, vals)
                 df = df[df[col].astype(str).isin([str(v) for v in expanded_vals])]
             elif vals:
@@ -1112,7 +1134,9 @@ def build_export(active: dict, columns: list[str]):
         df = load_detail_columns(key, cols)
 
         for col, vals in active.items():
-            if vals and col in df.columns:
+            if vals and col == "Tags" and col in df.columns:
+                df = df[tag_contains_mask(df[col], vals)]
+            elif vals and col in df.columns:
                 expanded_vals = expand_filter_values(col, vals)
                 df = df[df[col].astype(str).isin([str(v) for v in expanded_vals])]
             elif vals:
@@ -1168,7 +1192,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21i — duckdb quick-count gender fix")
+    st.caption("DEV final hybrid v21j — remote quick counts + tag/contact fix")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1262,9 +1286,9 @@ with st.sidebar:
                 "Mobile / Landline Reach",
                 options=["No phone filter", "Mobile only", "Landline only", "Mobile OR landline", "Mobile AND landline", "No mobile or landline"],
                 key="phone_reach_mode",
-                help="Use this when you need mobile, landline, either one, or both. The separate Yes/No fields are still below for exact filtering."
+                help="Use this when you need mobile, landline, either one, both, or neither."
             )
-            for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
+            for field in ["HasEmail", "HasApplicantPhone"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field, active_filters())
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
@@ -1372,7 +1396,7 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses the rebuilt quick-count cube through a remote DuckDB query; only geography dropdowns are interdependent.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses the rebuilt quick-count cube through a remote DuckDB query; Tags and specific election filters use lightweight index counts; only geography dropdowns are interdependent.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
