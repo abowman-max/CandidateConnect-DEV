@@ -318,6 +318,29 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 .cc-age-row { display:grid; grid-template-columns:80px 1fr 70px; gap:12px; align-items:center; margin:13px 0; } .cc-age-bar-bg { height:18px; border-radius:999px; background:#111827; border:1px solid rgba(148,163,184,.2); overflow:hidden; } .cc-age-bar { height:100%; border-radius:999px; background:linear-gradient(90deg,#8b0d13,#ef4444); }
 .cc-home-table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; } .cc-home-table th { color:#f8fafc; background:#111827; padding:11px; font-size:12px; text-align:left; } .cc-home-table td { color:#e5e7eb; background:#0b1220; padding:10px 11px; border-top:1px solid rgba(148,163,184,.15); font-size:12px; }
 
+
+/* v21u compact dashboard/output polish */
+.cc-header { padding: 10px 16px !important; margin-bottom: 10px !important; }
+.cc-title { font-size: 24px !important; }
+.cc-sub { font-size: 11px !important; }
+.cc-home-title { font-size: 24px !important; margin: 8px 0 12px 0 !important; }
+.cc-icon-metric { min-height: 72px !important; padding: 12px !important; }
+.cc-icon-dot { width: 42px !important; height: 42px !important; font-size: 20px !important; }
+.cc-icon-value { font-size: 24px !important; }
+.cc-icon-label, .cc-icon-sub { font-size: 10px !important; }
+.cc-home-card { padding: 14px !important; margin-bottom: 12px !important; border-radius: 12px !important; }
+.cc-home-card h3 { font-size: 20px !important; margin: 0 0 10px 0 !important; }
+.cc-donut-wrap { gap: 18px !important; min-height: 190px !important; justify-content:flex-start !important; }
+.cc-donut { width: 150px !important; height: 150px !important; }
+.cc-donut:after { inset: 40px !important; }
+.cc-donut-center { font-size: 12px !important; }
+.cc-legend-row { font-size: 12px !important; grid-template-columns: 14px 130px 120px !important; gap: 8px !important; }
+.cc-age-row { grid-template-columns: 64px 1fr 72px !important; gap: 10px !important; font-size: 12px !important; margin: 8px 0 !important; }
+.cc-age-bar-bg { height: 14px !important; }
+.cc-home-table { font-size: 11px !important; }
+.cc-scroll-table { max-height: 245px; overflow-y: auto; border:1px solid rgba(148,163,184,.20); border-radius:10px; }
+.cc-section-tabs { display:flex; gap:8px; margin: 12px 0 10px 0; }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -570,8 +593,13 @@ def dataframe_to_excel_bytes(df: pd.DataFrame, area_level: str = "Municipality")
 
 
 def render_group_bar(active: dict, field: str, title: str, order: list[str] | None = None):
-    special = active_special_filters()
-    df = duckdb_detail_group(active, special, field, 20)
+    special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
+    df = duckdb_count_cube_group_filtered(
+        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps(special or {}, sort_keys=True),
+        field,
+        20,
+    )
     if df.empty or "Voters" not in df.columns:
         return
     df["label"] = df["label"].astype(str).str.strip()
@@ -586,10 +614,13 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
     total = float(df["Voters"].sum() or 1)
     maxv = float(df["Voters"].max() or 1)
     rows=[]
+    table_rows=[]
     for _,r in df.iterrows():
         lab=str(r["label"]); val=int(r["Voters"] or 0); p=val/total*100; w=max(2,val/maxv*100)
         rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{val:,} ({p:.1f}%)</span></div>')
+        table_rows.append({"Category": lab, "Voters": val, "%": f"{p:.1f}%"})
     st.markdown('<div class="cc-home-card"><h3>'+title+'</h3>'+''.join(rows)+'</div>', unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch", height=min(210, 42 + 32*len(table_rows)))
 
 
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
@@ -1537,6 +1568,70 @@ def duckdb_count_cube_group(field: str, limit: int = 12) -> pd.DataFrame:
         try: con.close()
         except Exception: pass
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def duckdb_count_cube_group_filtered(active_json: str, special_json: str, field: str, limit: int = 20) -> pd.DataFrame:
+    """Remote quick-count group by from the count cube. Does not scan detail/index shards."""
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(field)):
+        return pd.DataFrame(columns=["label", "Voters"])
+    url = count_cube_url()
+    where = count_cube_where_sql(active, special)
+    query = f"""
+        SELECT CAST({sql_ident(field)} AS VARCHAR) AS label, SUM(Voters) AS Voters
+        FROM read_parquet({sql_lit(url)})
+        {where}
+        GROUP BY CAST({sql_ident(field)} AS VARCHAR)
+        HAVING SUM(Voters) > 0
+        ORDER BY Voters DESC
+        LIMIT {int(limit)}
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        return con.execute(query).df()
+    except Exception:
+        return pd.DataFrame(columns=["label", "Voters"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
+@st.cache_data(ttl=300, show_spinner=False)
+def duckdb_county_party_table(limit: int = 67) -> pd.DataFrame:
+    """County by party table for the load screen from the remote count cube."""
+    url = count_cube_url()
+    query = f"""
+        SELECT
+            CAST(County AS VARCHAR) AS County,
+            SUM(Voters) AS Total,
+            SUM(CASE WHEN CAST(Party AS VARCHAR)='R' THEN Voters ELSE 0 END) AS Republican,
+            SUM(CASE WHEN CAST(Party AS VARCHAR)='D' THEN Voters ELSE 0 END) AS Democrat,
+            SUM(CASE WHEN CAST(Party AS VARCHAR) NOT IN ('R','D') THEN Voters ELSE 0 END) AS Other
+        FROM read_parquet({sql_lit(url)})
+        WHERE CAST(County AS VARCHAR) IS NOT NULL AND TRIM(CAST(County AS VARCHAR)) <> ''
+        GROUP BY CAST(County AS VARCHAR)
+        ORDER BY County
+        LIMIT {int(limit)}
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        return con.execute(query).df()
+    except Exception:
+        return pd.DataFrame(columns=["County","Total","Republican","Democrat","Other"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
 def render_icon_metric(label: str, value: int, sub: str = "", icon: str = "●", klass: str = ""):
     html = f'<div class="cc-icon-metric {klass}"><div class="cc-icon-dot {klass}">{icon}</div><div><div class="cc-icon-label">{label}</div><div class="cc-icon-value">{int(value or 0):,}</div><div class="cc-icon-sub">{sub}</div></div></div>'
     st.markdown(html, unsafe_allow_html=True)
@@ -1564,10 +1659,18 @@ def render_home_age_card(total: int):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_home_geo_table(summary: dict):
-    total = int(summary.get("total",0) or 0); r=int(summary.get("r",0) or 0); d=int(summary.get("d",0) or 0); o=int(summary.get("o",0) or 0)
-    rows = "".join([f"<tr><td>{g}</td><td>{total:,}</td><td>{r:,}</td><td>{d:,}</td><td>{o:,}</td></tr>" for g in ["US Congress", "State Senate", "State House"]])
-    html = f'<div class="cc-home-card"><h3>Voters by Geography</h3><table class="cc-home-table"><thead><tr><th>Geography</th><th>Total Voters</th><th>Republican</th><th>Democrat</th><th>Other / Unaffiliated</th></tr></thead><tbody>{rows}</tbody></table><div style="color:#94a3b8;font-size:12px;margin-top:10px;">Universe: All Voters</div></div>'
-    st.markdown(html, unsafe_allow_html=True)
+    df = duckdb_county_party_table(67)
+    if df.empty:
+        st.markdown('<div class="cc-home-card"><h3>County Breakdown</h3><p>County quick-count data is not available.</p></div>', unsafe_allow_html=True)
+        return
+    show = df.copy()
+    for c in ["Total","Republican","Democrat","Other"]:
+        if c in show.columns:
+            show[c] = show[c].fillna(0).astype(int).map(lambda x: f"{x:,}")
+    st.markdown('<div class="cc-home-card"><h3>County Breakdown by Party</h3><div style="color:#94a3b8;font-size:12px;margin-bottom:8px;">Sorted alphabetically. Scroll to view all counties.</div>', unsafe_allow_html=True)
+    st.dataframe(show, hide_index=True, width="stretch", height=235)
+    st.markdown('</div>', unsafe_allow_html=True)
+
 
 def render_statewide_snapshot():
     st.markdown('<div class="cc-home-title">Voters Statewide</div>', unsafe_allow_html=True)
@@ -1597,7 +1700,7 @@ def render_statewide_snapshot():
     with c3: render_icon_metric("Democrat", d, pct(d, total) + " of universe", "🫏", "blue")
     with c4: render_icon_metric("Other / Unaffiliated", o, pct(o, total) + " of universe", "●", "green")
 
-    left, right = st.columns([1.05, 1.55])
+    left, right = st.columns([1.0, 1.25])
     with left:
         render_party_chart(summary, "Voters by Party")
         gdf = duckdb_count_cube_group("Gender", 8)
@@ -1951,8 +2054,22 @@ def render_area_intelligence_workspace():
     st.info("Area Intelligence profile restored for DEV testing. More profile details/charts can be layered back after live-safe export/report testing.")
 
 def render_output_buttons(active):
-    tabs = st.tabs(["Exports", "Reports"])
+    tabs = st.tabs(["Overview", "Exports", "Reports"])
     with tabs[0]:
+        st.markdown("### Overview")
+        st.caption("Current universe overview uses the same remote quick-count path as Update Counts.")
+        summary, mode, err = update_counts(active)
+        if summary:
+            render_metrics(summary)
+            render_party_chart(summary, "Party Breakdown")
+        st.markdown("### Counts by Area")
+        area_level_ov = st.selectbox("Overview area level", ["County", "Municipality", "Precinct", "School District", "School Region"], key=special_key("output_overview_area"))
+        area_df_ov = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_level_ov, 200)
+        if not area_df_ov.empty:
+            area_df_ov = area_df_ov.rename(columns={"label": area_level_ov})
+            area_df_ov["Voters"] = area_df_ov["Voters"].fillna(0).astype(int)
+            st.dataframe(area_df_ov, hide_index=True, width="stretch", height=260)
+    with tabs[1]:
         st.markdown("### Exports")
         st.caption("Prepare builds the filtered file from the remote detail shards. Download appears after the prepare step finishes.")
         area_level = st.selectbox("First Excel sheet area count", ["Municipality", "Precinct", "County", "School District", "School Region"], key=special_key("excel_area_level"))
@@ -2010,7 +2127,7 @@ def render_output_buttons(active):
                     st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
             if "prepared_mail_xlsx" in st.session_state:
                 st.download_button("Download Mail Excel", st.session_state["prepared_mail_xlsx"], "candidate_connect_mail.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
-    with tabs[1]:
+    with tabs[2]:
         st.markdown("### Reports")
         st.caption("Prepare builds the PDF and then shows a download button.")
         r1, r2, r3, r4 = st.columns(4)
@@ -2047,7 +2164,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21t</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21u</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -2065,7 +2182,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21s — stable counts + restored home design")
+    st.caption("DEV final hybrid v21u — compact dashboard + restored output tabs")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
@@ -2157,8 +2274,7 @@ if active or special_active:
     st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
 else: st.info("No filters selected. Choose filters in the left pane.")
 
-st.markdown('<div class="cc-note"><b>Update Counts uses the rebuilt quick-count cube without scanning detail shards.</b> Tags/specific election/phone reach use remote DuckDB when needed.</div>', unsafe_allow_html=True)
-st.markdown("## Counts")
+
 a1,a2,sp = st.columns([.85,.85,4.3])
 with a1:
     if st.button("Update Counts", width="stretch"):
@@ -2169,7 +2285,6 @@ with a1:
 with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
-    st.caption("Updated using remote counts.")
     render_metrics(st.session_state["quick_summary"])
     render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
     cgender, cage = st.columns(2)
@@ -2177,8 +2292,14 @@ if st.session_state.get("quick_summary"):
         render_group_bar(active, "Gender", "Gender Breakdown", ["F", "M", "U"])
     with cage:
         render_group_bar(active, "Age_Range", "Age Range Breakdown", ["18-24", "25-34", "35-44", "45-54", "55-64", "65+", "65-74", "75-84", "85+"])
+    st.markdown("### Counts by Area")
+    area_choice = st.selectbox("Area table level", ["County", "Municipality", "Precinct", "School District", "School Region", "USC", "STS", "STH"], key=special_key("counts_area_table_level"))
+    area_df = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_choice, 200)
+    if not area_df.empty:
+        area_df = area_df.rename(columns={"label": area_choice})
+        area_df["Voters"] = area_df["Voters"].fillna(0).astype(int)
+        st.dataframe(area_df, hide_index=True, width="stretch", height=280)
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against detail shards. Counts remain remote/fast.")
 render_output_buttons(active)
 st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
