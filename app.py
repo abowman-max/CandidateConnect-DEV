@@ -1192,7 +1192,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21j — remote quick counts + tag/contact fix")
+    st.caption("DEV final hybrid v21k — clear filters state fix")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1382,9 +1382,34 @@ with action_left:
 
 with action_mid:
     if st.button("Clear Filters", width="stretch"):
+        # Clear both the app's active filter snapshot AND Streamlit widget state.
+        # v21k: this fixes the right-panel clear button resetting counts but
+        # leaving the left-sidebar multiselects/sliders visually selected.
         st.session_state["filter_reset_token"] = st.session_state.get("filter_reset_token", 0) + 1
-        st.session_state.pop("quick_summary", None)
-        st.session_state.pop("count_mode", None)
+
+        keys_to_clear = []
+        filter_prefixes = ("filter_",)
+        exact_filter_keys = {
+            "new_reg_months",
+            "vote_score_type",
+            "vote_history_score_range",
+            "election_years",
+            "election_types",
+            "election_methods",
+            "mb_prob_score_range",
+            "phone_reach_mode",
+            "quick_summary",
+            "count_mode",
+        }
+        for key in list(st.session_state.keys()):
+            if key.startswith(filter_prefixes) or key in exact_filter_keys:
+                keys_to_clear.append(key)
+
+        for key in keys_to_clear:
+            st.session_state.pop(key, None)
+
+        # Keep the user in Create Universe, but force all widgets to rebuild blank/default.
+        st.session_state["left_section"] = "create_universe"
         st.rerun()
 
 if st.session_state.get("quick_summary"):
