@@ -175,6 +175,21 @@ def active_filters(enabled_fields: list[str]) -> Dict[str, list]:
     return out
 
 
+
+def expand_filter_values(field: str, vals: list) -> list:
+    """DEV compatibility shim.
+
+    Older app builds called this helper before applying filters.
+    The rebuilt speed tables already store canonical filter values, so
+    DEV should filter directly against the selected values.
+    """
+    if vals is None:
+        return []
+    if isinstance(vals, (str, int, float, bool)):
+        return [vals]
+    return list(vals)
+
+
 def apply_filters(df: pd.DataFrame, active: Dict[str, list]) -> pd.DataFrame:
     out = df
     for field, vals in active.items():
