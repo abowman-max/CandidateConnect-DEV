@@ -324,17 +324,45 @@ def load_parquet(key: str, columns=None) -> pd.DataFrame:
 def load_filter_layer():
     """Load only the small filter layer needed to draw the UI.
 
-    v21e startup-safe fix:
-    - Do NOT load geo_hierarchy.parquet on page load. That table can be large
-      enough on R2 to kill Streamlit during the health check.
-    - Geography dropdowns use speed/filter_options.parquet for now.
-    - Dependent geography can be restored later with a smaller county/muni option table.
+    v21g startup-safe fix:
+    - Load manifest + filter_options only on startup.
+    - Do NOT load count_cube while the sidebar is being drawn.
+    - Do NOT load geo_hierarchy until Create Universe needs geo options.
     """
     manifest = load_manifest()
     speed = manifest.get("speed", {}).get("tables", {})
     filter_options = load_parquet(speed.get("filter_options", "speed/filter_options.parquet"))
     geo_hierarchy = pd.DataFrame()
     return manifest, filter_options, geo_hierarchy
+
+
+def r2_content_length(key: str) -> int:
+    try:
+        r = requests.head(r2_url(key), timeout=20)
+        r.raise_for_status()
+        return int(r.headers.get("Content-Length", "0") or 0)
+    except Exception:
+        return 0
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_geo_hierarchy_safe(max_bytes: int = 90_000_000) -> pd.DataFrame:
+    """Optional dependent geo table.
+
+    This keeps Create Universe from crashing: if the R2 geo_hierarchy file is too
+    large or unavailable, the app falls back to flat filter_options instead of
+    killing the Streamlit process.
+    """
+    try:
+        manifest = load_manifest()
+        speed = manifest.get("speed", {}).get("tables", {})
+        key = speed.get("geo_hierarchy", "speed/geo_hierarchy.parquet")
+        size = r2_content_length(key)
+        if size and size > max_bytes:
+            return pd.DataFrame()
+        return load_parquet(key)
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -548,12 +576,18 @@ def field_options(filter_options: pd.DataFrame, field: str, active: dict | None 
         fixed = clean_mail_options(field)
         if fixed:
             opts = fixed
-        else:
-            # First try the rebuilt quick-count cube so dropdowns are dependent.
-            # If that column is not available in the cube, fall back to the small filter_options table.
-            opts = options_from_count_cube(field, active)
+        elif field in GEO_FIELDS:
+            # v21g: Use the smaller geo_hierarchy table for interdependent geography
+            # when it is safe to load. Never use count_cube to draw dropdowns; that
+            # was the source of the Create Universe crash.
+            geo_df = load_geo_hierarchy_safe()
+            opts = options_from_geo(geo_df, field, active) if geo_df is not None and not geo_df.empty else []
             if not opts:
                 opts = options_from_filter_table(filter_options, field)
+        else:
+            # v21g: Sidebar dropdowns must stay light. Voter/contact/mail fields
+            # come from filter_options; quick-count cube is used only after Update Counts.
+            opts = options_from_filter_table(filter_options, field)
 
         # Streamlit can throw if a previously selected value disappears from options.
         # Keep current selections visible until the user clears them.
@@ -743,7 +777,7 @@ def render_statewide_snapshot():
     if err and not (summary.get("r") or summary.get("d") or summary.get("o")):
         st.warning("Quick-count statewide party numbers were not available, so the app showed the manifest total only.")
 
-    st.info("Use **Create Universe** in the left pane. Filters now narrow from the rebuilt quick-count cube instead of scanning detail shards.")
+    st.info("Use **Create Universe** in the left pane. Counts use the rebuilt quick-count cube; geography dropdowns use the safe dependent geo table when available.")
 
 def quick_counts(active: dict):
     # v14b: quick counts only use selected columns from speed/count_cube.parquet.
@@ -888,7 +922,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21f — quick-count dependent filters")
+    st.caption("DEV final hybrid v21g — stable quick-count filters")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
