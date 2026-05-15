@@ -503,12 +503,66 @@ def clean_mail_options(field: str):
     }
     return fixed.get(field, [])
 
-def field_options(filter_options: pd.DataFrame, field: str):
+def count_cube_option_filters(field: str, active: dict) -> dict:
+    """Return the filters that should narrow the dropdown for this field.
+
+    v21f: Dropdowns are made interdependent from the rebuilt quick-count cube,
+    not from detail shards. For geography, only prior geography levels are used
+    so County -> Municipality -> Precinct stays predictable. For voter fields,
+    all other count-safe filters are used.
+    """
+    active = active or {}
+    if field in GEO_FIELDS:
+        relevant = {}
+        for f in GEO_FIELDS:
+            if f == field:
+                break
+            if active.get(f):
+                relevant[f] = active[f]
+        return relevant
+
+    relevant = count_safe_filters(active)
+    relevant.pop(field, None)
+    return relevant
+
+
+def options_from_count_cube(field: str, active: dict) -> list:
     try:
+        relevant = count_cube_option_filters(field, active)
+        needed = set(relevant.keys()) | {field}
+        if not field or not needed:
+            return []
+        cube = load_count_cube_columns(tuple(sorted(needed)))
+        narrowed = apply_filters(cube, relevant)
+        if field not in narrowed.columns:
+            return []
+        vals = narrowed[field].astype(str).map(clean_value)
+        return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+    except Exception:
+        return []
+
+
+def field_options(filter_options: pd.DataFrame, field: str, active: dict | None = None):
+    try:
+        active = active or {}
         fixed = clean_mail_options(field)
         if fixed:
-            return fixed
-        return options_from_filter_table(filter_options, field)
+            opts = fixed
+        else:
+            # First try the rebuilt quick-count cube so dropdowns are dependent.
+            # If that column is not available in the cube, fall back to the small filter_options table.
+            opts = options_from_count_cube(field, active)
+            if not opts:
+                opts = options_from_filter_table(filter_options, field)
+
+        # Streamlit can throw if a previously selected value disappears from options.
+        # Keep current selections visible until the user clears them.
+        current = [str(v) for v in (active or {}).get(field, []) if str(v).strip()]
+        merged = list(opts)
+        for v in current:
+            if v not in merged:
+                merged.append(v)
+        return merged
     except Exception:
         return []
 
@@ -666,22 +720,30 @@ def render_top_nav():
 
 def render_statewide_snapshot():
     st.markdown("## Statewide Snapshot")
-    st.caption("Current statewide voter universe from the latest uploaded manifest. Open Create Universe to build counts.")
+    st.caption("Current statewide voter universe from the rebuilt quick-count table.")
 
+    summary = None
+    err = None
     try:
-        total = int(manifest.get("total_rows", 0)) if isinstance(manifest, dict) else 0
-    except Exception:
-        total = 0
+        summary, err = quick_counts({})
+    except Exception as e:
+        err = e
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(f'<div class="cc-metric"><div class="label">Total Voters</div><div class="value">{total:,}</div><div class="sub">From dataset manifest</div></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="cc-metric blue"><div class="label">DEV Status</div><div class="value">Ready</div><div class="sub">Startup-safe mode</div></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="cc-metric gold"><div class="label">Election Filters</div><div class="value">Disabled</div><div class="sub">Restore before LIVE</div></div>', unsafe_allow_html=True)
+    if not summary:
+        try:
+            total = int(manifest.get("total_rows", 0)) if isinstance(manifest, dict) else 0
+        except Exception:
+            total = 0
+        summary = {"total": total, "r": 0, "d": 0, "o": 0}
 
-    st.info("Use **Create Universe** in the left pane. Counts load only after you press **Update Counts**, so the app does not crash during Streamlit health checks.")
+    render_metrics(summary, label="")
+    if summary.get("r") or summary.get("d") or summary.get("o"):
+        render_party_chart(summary, "Statewide Party Breakdown")
+
+    if err and not (summary.get("r") or summary.get("d") or summary.get("o")):
+        st.warning("Quick-count statewide party numbers were not available, so the app showed the manifest total only.")
+
+    st.info("Use **Create Universe** in the left pane. Filters now narrow from the rebuilt quick-count cube instead of scanning detail shards.")
 
 def quick_counts(active: dict):
     # v14b: quick counts only use selected columns from speed/count_cube.parquet.
@@ -804,7 +866,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21e</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21f</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -826,7 +888,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21e — startup safe")
+    st.caption("DEV final hybrid v21f — quick-count dependent filters")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -859,13 +921,13 @@ with st.sidebar:
         with st.expander("Geography", expanded=False):
             for field in GEO_FIELDS:
                 label = DISPLAY_LABELS.get(field, field)
-                opts = field_options(filter_options, field)
+                opts = field_options(filter_options, field, active_filters())
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
         with st.expander("Voter Details", expanded=False):
             for field in ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-                opts = field_options(filter_options, field)
+                opts = field_options(filter_options, field, active_filters())
                 if opts:
                     st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
@@ -901,7 +963,7 @@ with st.sidebar:
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-                opts = field_options(filter_options, field)
+                opts = field_options(filter_options, field, active_filters())
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
             st.slider(
@@ -916,10 +978,10 @@ with st.sidebar:
         with st.expander("Contact Filters", expanded=False):
             for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
-                opts = field_options(filter_options, field)
+                opts = field_options(filter_options, field, active_filters())
                 st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
 
-        tag_opts = field_options(filter_options, "Tags")
+        tag_opts = field_options(filter_options, "Tags", active_filters())
         if tag_opts:
             with st.expander("Tags", expanded=False):
                 st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
@@ -975,7 +1037,7 @@ else:
     st.info("No filters selected. Choose filters in the left pane.")
 
 st.markdown(
-    '<div class="cc-note"><b>Update Counts uses the rebuilt quick-count tables.</b> '
+    '<div class="cc-note"><b>Update Counts uses the rebuilt quick-count cube.</b> '
     'Tags are applied in exports and reports.</div>',
     unsafe_allow_html=True,
 )
@@ -1013,7 +1075,7 @@ if st.session_state.get("quick_summary"):
         render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
 
 st.markdown("## Output Center")
-st.caption("Exports and reports apply the current filters against the detail shards. Update Counts uses rebuilt quick-count tables and does not scan detail shards.")
+st.caption("Exports and reports apply the current filters against the detail shards. Update Counts and dependent dropdowns use the rebuilt quick-count cube and do not scan detail shards.")
 
 selected_cols = st.multiselect("Export columns", options=DEFAULT_EXPORT_COLUMNS, default=DEFAULT_EXPORT_COLUMNS)
 
