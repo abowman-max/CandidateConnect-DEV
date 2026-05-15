@@ -1,13 +1,15 @@
-# Candidate Connect DEV — Stable Speed-Table Build
-# Purpose: get DEV operational against the rebuilt Step 8 manifest/speed tables.
-# Election year/type/method filters are intentionally disabled for this DEV rescue build.
+# Candidate Connect DEV — Safe Startup Rescue Build v3.1 (2026-05-15)
+# CHANGE MARKER: cc-dev-rescue-v3-1-healthcheck-safe-startup
+# Goal: load reliably against rebuilt Step 8 speed tables.
+# Election year/type/method filters remain disabled until LIVE prep.
 
 import io
 import json
 from datetime import datetime
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Tuple, Optional
 
 import pandas as pd
+import pyarrow.parquet as pq
 import requests
 import streamlit as st
 
@@ -25,7 +27,6 @@ TARGETING_FIELDS = [
     "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone",
     "RegistrationMonthsAgo",
 ]
-# Keep Tags out of speed-count filters unless Step 8 later adds it to count_cube.
 PREFERRED_FILTER_FIELDS = GEO_FIELDS + TARGETING_FIELDS
 
 DISPLAY_LABELS = {
@@ -53,8 +54,9 @@ DISPLAY_LABELS = {
 
 EXPORT_COLUMNS_PREFERRED = [
     "County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region",
-    "voter_id", "FirstName", "MiddleName", "LastName", "first_name", "middle_name", "last_name",
-    "Party", "party", "CalculatedParty", "Gender", "gender", "Age", "age", "Age_Range", "age_group", "RegistrationDate", "registration_date",
+    "voter_id", "VoterID", "FirstName", "MiddleName", "LastName", "first_name", "middle_name", "last_name",
+    "Party", "party", "CalculatedParty", "Gender", "gender", "Age", "age", "Age_Range", "age_group",
+    "RegistrationDate", "registration_date",
     "House Number", "Street Name", "Apartment Number", "City", "State", "Zip",
     "res_address", "res_city", "res_state", "res_zip",
     "Email", "Landline", "Mobile", "MobilePhone", "Phone", "Current_ApplicantPhone",
@@ -72,7 +74,6 @@ html, body, [data-testid="stAppViewContainer"], .stApp { background: #000000 !im
 .cc-header { border: 1px solid rgba(201,31,39,.85); border-radius: 18px; padding: 18px 22px; background: radial-gradient(circle at 80% 0%, rgba(201,31,39,.23), transparent 35%), linear-gradient(90deg, #03070c, #0b111a 55%, #190407); box-shadow: 0 14px 35px rgba(0,0,0,.45); margin-bottom: 16px; }
 .cc-title { font-size: 30px; font-weight: 950; color: #fff; }
 .cc-sub { color: #cbd5e1; margin-top: 4px; font-size: 13px; }
-.cc-card { border: 1px solid rgba(148,163,184,.24); border-radius: 16px; background: linear-gradient(180deg, #07101a, #03070c); padding: 16px; margin-bottom: 16px; }
 .cc-metric { border: 1px solid rgba(148,163,184,.22); border-left: 4px solid #c91f27; border-radius: 14px; background: linear-gradient(180deg, #0d1724, #07101a); padding: 16px; min-height: 96px; }
 .cc-metric.blue { border-left-color:#1d4ed8; } .cc-metric.green { border-left-color:#4c9a2a; } .cc-metric.gold { border-left-color:#f2b84b; }
 .cc-metric .label { color: #94a3b8; font-size: 11px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
@@ -106,24 +107,35 @@ def fetch_manifest() -> dict:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_parquet(key: str, columns_tuple: Tuple[str, ...] | None = None) -> pd.DataFrame:
+def fetch_parquet(key: str, columns_tuple: Optional[Tuple[str, ...]] = None) -> pd.DataFrame:
     columns = list(columns_tuple) if columns_tuple else None
     return pd.read_parquet(io.BytesIO(fetch_bytes(key)), columns=columns)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load_speed_metadata() -> tuple[dict, pd.DataFrame, pd.DataFrame, list[str]]:
+def parquet_schema_names(key: str) -> list[str]:
+    # Important: this reads only parquet metadata from the downloaded bytes, not the full dataframe.
+    pf = pq.ParquetFile(io.BytesIO(fetch_bytes(key)))
+    return list(pf.schema_arrow.names)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_startup_metadata() -> tuple[dict, pd.DataFrame, pd.DataFrame, list[str]]:
     manifest = fetch_manifest()
     speed = (manifest.get("speed") or {}).get("tables") or {}
-    filter_options = fetch_parquet(speed.get("filter_options", "speed/filter_options.parquet"))
-    geo_hierarchy = fetch_parquet(speed.get("geo_hierarchy", "speed/geo_hierarchy.parquet"))
-    # Read only one row to get columns is not reliable over remote bytes, so read no columns where supported.
-    count_cube = fetch_parquet(speed.get("count_cube", "speed/count_cube.parquet"))
-    count_columns = list(count_cube.columns)
+    filter_key = speed.get("filter_options", "speed/filter_options.parquet")
+    geo_key = speed.get("geo_hierarchy", "speed/geo_hierarchy.parquet")
+    count_key = speed.get("count_cube", "speed/count_cube.parquet")
+    filter_options = fetch_parquet(filter_key)
+    try:
+        geo_hierarchy = fetch_parquet(geo_key)
+    except Exception:
+        geo_hierarchy = pd.DataFrame()
+    count_columns = parquet_schema_names(count_key)
     return manifest, filter_options, geo_hierarchy, count_columns
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_count_cube_columns(cols_tuple: Tuple[str, ...]) -> pd.DataFrame:
     manifest = fetch_manifest()
     speed = (manifest.get("speed") or {}).get("tables") or {}
@@ -137,6 +149,11 @@ def clean_value(value) -> str:
     s = str(value).strip()
     if s.lower() in {"", "nan", "none", "null", "(blank)"}:
         return ""
+    if s.endswith(".0"):
+        try:
+            return str(int(float(s)))
+        except Exception:
+            return s
     return s
 
 
@@ -149,7 +166,6 @@ def smart_sort_key(v):
 
 
 def normalize_yes_no_options(options: list[str]) -> list[str]:
-    # Preserve the speed table's actual stored values; this only sorts common booleans nicely.
     order = {"Y": 0, "YES": 0, "1": 0, "TRUE": 0, "N": 1, "NO": 1, "0": 1, "FALSE": 1}
     return sorted(options, key=lambda x: (order.get(str(x).upper(), 9), smart_sort_key(x)))
 
@@ -167,27 +183,7 @@ def selected(field: str) -> list:
 
 
 def active_filters(enabled_fields: list[str]) -> Dict[str, list]:
-    out = {}
-    for field in enabled_fields:
-        vals = selected(field)
-        if vals:
-            out[field] = vals
-    return out
-
-
-
-def expand_filter_values(field: str, vals: list) -> list:
-    """DEV compatibility shim.
-
-    Older app builds called this helper before applying filters.
-    The rebuilt speed tables already store canonical filter values, so
-    DEV should filter directly against the selected values.
-    """
-    if vals is None:
-        return []
-    if isinstance(vals, (str, int, float, bool)):
-        return [vals]
-    return list(vals)
+    return {field: selected(field) for field in enabled_fields if selected(field)}
 
 
 def apply_filters(df: pd.DataFrame, active: Dict[str, list]) -> pd.DataFrame:
@@ -197,8 +193,8 @@ def apply_filters(df: pd.DataFrame, active: Dict[str, list]) -> pd.DataFrame:
             continue
         if field not in out.columns:
             return out.iloc[0:0]
-        val_set = {str(v) for v in vals}
-        out = out[out[field].astype(str).isin(val_set)]
+        val_set = {clean_value(v) for v in vals}
+        out = out[out[field].map(clean_value).isin(val_set)]
     return out
 
 
@@ -218,7 +214,7 @@ def options_from_filter_table(filter_options: pd.DataFrame, field: str) -> list[
 
 
 def options_from_geo(geo_hierarchy: pd.DataFrame, field: str, active: Dict[str, list]) -> list[str]:
-    if field not in geo_hierarchy.columns:
+    if geo_hierarchy.empty or field not in geo_hierarchy.columns:
         return []
     relevant = {}
     for f in GEO_FIELDS:
@@ -227,40 +223,39 @@ def options_from_geo(geo_hierarchy: pd.DataFrame, field: str, active: Dict[str, 
         if active.get(f):
             relevant[f] = active[f]
     narrowed = apply_filters(geo_hierarchy, relevant)
-    vals = narrowed[field].astype(str).map(clean_value)
+    vals = narrowed[field].map(clean_value)
     return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
 
 
 def summarize_from_cube(active: Dict[str, list], count_columns: list[str]) -> tuple[dict, pd.DataFrame]:
     needed = set(active.keys()) | {"Party"} | {c for c in MEASURE_COLS if c in count_columns}
     needed = [c for c in needed if c in count_columns]
-    if "Voters" not in needed and "Voters" in count_columns:
+    if "Voters" in count_columns and "Voters" not in needed:
         needed.append("Voters")
     if not needed:
-        return {"total": 0, "r": 0, "d": 0, "o": 0, "emails": 0, "mobiles": 0, "landlines": 0}, pd.DataFrame()
+        empty_summary = {"total": 0, "r": 0, "d": 0, "o": 0, "emails": 0, "mobiles": 0, "landlines": 0}
+        return empty_summary, pd.DataFrame()
     cube = load_count_cube_columns(tuple(sorted(needed)))
     filtered = apply_filters(cube, active)
-    count_col = "Voters" if "Voters" in filtered.columns else None
-    if not count_col:
-        total = len(filtered)
-        party_weights = pd.Series([1] * len(filtered), index=filtered.index)
+    if "Voters" in filtered.columns:
+        weights = pd.to_numeric(filtered["Voters"], errors="coerce").fillna(0)
+        total = int(weights.sum())
     else:
-        total = int(pd.to_numeric(filtered[count_col], errors="coerce").fillna(0).sum())
-        party_weights = pd.to_numeric(filtered[count_col], errors="coerce").fillna(0)
-    party = filtered["Party"].astype(str).str.upper() if "Party" in filtered.columns else pd.Series([], dtype=str)
-    r = int(party_weights[party.eq("R")].sum()) if len(party) else 0
-    d = int(party_weights[party.eq("D")].sum()) if len(party) else 0
+        weights = pd.Series([1] * len(filtered), index=filtered.index)
+        total = int(len(filtered))
+    party = filtered["Party"].map(clean_value).str.upper() if "Party" in filtered.columns else pd.Series([], dtype=str)
+    r = int(weights[party.eq("R")].sum()) if len(party) else 0
+    d = int(weights[party.eq("D")].sum()) if len(party) else 0
     o = int(total - r - d)
-    summary = {
+    return {
         "total": total,
         "r": r,
         "d": d,
         "o": o,
-        "emails": int(pd.to_numeric(filtered.get("Emails", 0), errors="coerce").fillna(0).sum()) if "Emails" in filtered.columns else 0,
-        "mobiles": int(pd.to_numeric(filtered.get("Mobiles", 0), errors="coerce").fillna(0).sum()) if "Mobiles" in filtered.columns else 0,
-        "landlines": int(pd.to_numeric(filtered.get("Landlines", 0), errors="coerce").fillna(0).sum()) if "Landlines" in filtered.columns else 0,
-    }
-    return summary, filtered
+        "emails": int(pd.to_numeric(filtered["Emails"], errors="coerce").fillna(0).sum()) if "Emails" in filtered.columns else 0,
+        "mobiles": int(pd.to_numeric(filtered["Mobiles"], errors="coerce").fillna(0).sum()) if "Mobiles" in filtered.columns else 0,
+        "landlines": int(pd.to_numeric(filtered["Landlines"], errors="coerce").fillna(0).sum()) if "Landlines" in filtered.columns else 0,
+    }, filtered
 
 
 def pct(n: int, d: int) -> str:
@@ -299,7 +294,7 @@ def group_rollup(filtered_cube: pd.DataFrame, field: str) -> pd.DataFrame:
     if filtered_cube.empty or field not in filtered_cube.columns or "Voters" not in filtered_cube.columns:
         return pd.DataFrame(columns=[field, "Voters"])
     out = filtered_cube.groupby(field, dropna=False, as_index=False)["Voters"].sum()
-    out[field] = out[field].astype(str).map(clean_value)
+    out[field] = out[field].map(clean_value)
     out = out[out[field].ne("")].sort_values("Voters", ascending=False)
     return out.head(250)
 
@@ -313,7 +308,7 @@ def available_detail_columns(manifest: dict) -> list[str]:
     return list((manifest.get("detail") or {}).get("columns") or [])
 
 
-def map_filter_to_detail_column(field: str, detail_cols: Iterable[str]) -> str | None:
+def map_filter_to_detail_column(field: str, detail_cols: Iterable[str]) -> Optional[str]:
     detail_cols = list(detail_cols)
     if field in detail_cols:
         return field
@@ -321,11 +316,6 @@ def map_filter_to_detail_column(field: str, detail_cols: Iterable[str]) -> str |
         "Party": ["Party", "party", "Party_Group"],
         "Gender": ["Gender", "gender"],
         "Age_Range": ["Age_Range", "age_group"],
-        "RegistrationMonthsAgo": ["RegistrationMonthsAgo"],
-        "HasMobile": ["HasMobile"],
-        "HasLandline": ["HasLandline"],
-        "HasEmail": ["HasEmail"],
-        "HasApplicantPhone": ["HasApplicantPhone"],
     }
     for cand in aliases.get(field, []):
         if cand in detail_cols:
@@ -353,7 +343,8 @@ def export_detail_csv(manifest: dict, active: Dict[str, list], max_rows: int) ->
         for field, vals in active.items():
             col = filter_col_map.get(field)
             if col and col in df.columns:
-                df = df[df[col].astype(str).isin({str(v) for v in vals})]
+                val_set = {clean_value(v) for v in vals}
+                df = df[df[col].map(clean_value).isin(val_set)]
             elif vals:
                 df = df.iloc[0:0]
         if not df.empty:
@@ -369,10 +360,10 @@ def export_detail_csv(manifest: dict, active: Dict[str, list], max_rows: int) ->
 
 
 try:
-    with st.spinner("Loading Candidate Connect DEV speed tables..."):
-        manifest, filter_options, geo_hierarchy, count_columns = load_speed_metadata()
+    with st.spinner("Loading Candidate Connect DEV speed-table metadata..."):
+        manifest, filter_options, geo_hierarchy, count_columns = load_startup_metadata()
 except Exception as e:
-    st.error("Candidate Connect could not load the rebuilt DEV speed tables from R2.")
+    st.error("Candidate Connect could not load DEV metadata from R2. This is a startup-safe error screen, not a silent crash.")
     st.exception(e)
     st.stop()
 
@@ -384,7 +375,7 @@ st.markdown(
 <div class="cc-header">
   <div class="cc-title">Candidate Connect DEV</div>
   <div class="cc-sub">
-    Stable speed-table build • Dataset rows: {int(manifest.get('total_rows', 0)):,}
+    Safe startup build • Dataset rows: {int(manifest.get('total_rows', 0)):,}
     • Built: {manifest.get('built_at', 'unknown')}
     • Detail shards: {(manifest.get('detail') or {}).get('count', 0)}
   </div>
@@ -395,19 +386,20 @@ st.markdown(
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV stable rescue build")
+    st.caption("DEV safe startup rescue")
     if st.button("Clear Filters", use_container_width=True):
         for k in list(st.session_state.keys()):
             if k.startswith("filter_"):
                 del st.session_state[k]
-        st.session_state["filters_applied"] = False
         st.rerun()
 
     current_active = active_filters(enabled_fields)
 
     with st.expander("Geography", expanded=False):
         for field in [f for f in GEO_FIELDS if f in enabled_fields]:
-            opts = options_from_geo(geo_hierarchy, field, current_active) if field in geo_hierarchy.columns else options_from_filter_table(filter_options, field)
+            opts = options_from_geo(geo_hierarchy, field, current_active)
+            if not opts:
+                opts = options_from_filter_table(filter_options, field)
             st.multiselect(field_label(field), options=opts, key=get_filter_key(field))
 
     with st.expander("Voter", expanded=False):
@@ -426,17 +418,12 @@ with st.sidebar:
             if field in enabled_fields:
                 st.multiselect(field_label(field), options=options_from_filter_table(filter_options, field), key=get_filter_key(field))
 
-    st.divider()
-    if st.button("Apply / Update Counts", use_container_width=True):
-        st.session_state["filters_applied"] = True
-        st.rerun()
-
 active = active_filters(enabled_fields)
 
 try:
     summary, filtered_cube = summarize_from_cube(active, count_columns)
 except Exception as e:
-    st.error("Counts failed against speed/count_cube.parquet.")
+    st.error("Counts failed against speed/count_cube.parquet, but the app is still alive.")
     st.exception(e)
     st.stop()
 
@@ -444,7 +431,7 @@ left, right = st.columns([2, 1])
 with left:
     st.markdown("### Current Universe")
     if not active:
-        st.info("No filters selected. Showing statewide speed-table counts. Open a sidebar section, select filters, then click Apply / Update Counts.")
+        st.info("No filters selected. Showing statewide speed-table counts. Open a sidebar section to filter.")
     else:
         st.success(f"{len(active)} active filter group(s): " + ", ".join(active.keys()))
 with right:
@@ -477,22 +464,26 @@ else:
     st.warning("No rollup columns are available from the selected speed cube columns.")
 
 st.markdown("### Export")
-st.caption("Export scans detail shards only when you click the download button. Keep exports filtered and under the safety limit.")
+st.caption("Export is intentionally not prepared on page load. Click the button first so Streamlit does not scan detail shards during startup.")
 if summary["total"] > EXPORT_ROW_LIMIT:
     st.warning(f"This universe is {summary['total']:,} voters. Add more filters before exporting; current export safety limit is {EXPORT_ROW_LIMIT:,} rows.")
 else:
-    try:
-        csv_bytes = export_detail_csv(manifest, active, EXPORT_ROW_LIMIT)
+    if st.button("Prepare selected voters CSV", use_container_width=True):
+        try:
+            with st.spinner("Preparing CSV from detail shards..."):
+                st.session_state["prepared_csv"] = export_detail_csv(manifest, active, EXPORT_ROW_LIMIT)
+                st.session_state["prepared_csv_name"] = f"candidate_connect_dev_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        except Exception as e:
+            st.warning("Export is not available for this filter combination yet, but counts and analysis are operational.")
+            st.caption(str(e)[:500])
+    if st.session_state.get("prepared_csv"):
         st.download_button(
             "Download selected voters CSV",
-            data=csv_bytes,
-            file_name=f"candidate_connect_dev_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data=st.session_state["prepared_csv"],
+            file_name=st.session_state.get("prepared_csv_name", "candidate_connect_dev_export.csv"),
             mime="text/csv",
             use_container_width=True,
         )
-    except Exception as e:
-        st.warning("Export is not available for this filter combination yet, but counts and analysis are operational.")
-        st.caption(str(e)[:500])
 
 with st.expander("DEV diagnostics", expanded=False):
     st.json({
