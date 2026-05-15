@@ -514,9 +514,20 @@ def smart_sort_key(v):
         return (1, s)
 
 
+def current_filter_suffix() -> int:
+    return int(st.session_state.get("filter_reset_token", 0))
+
+
+def filter_key(field: str) -> str:
+    return f"filter_{field}_{current_filter_suffix()}"
+
+
+def special_key(name: str) -> str:
+    return f"{name}_{current_filter_suffix()}"
+
+
 def selected(field: str):
-    suffix = st.session_state.get("filter_reset_token", 0)
-    return st.session_state.get(f"filter_{field}_{suffix}", [])
+    return st.session_state.get(filter_key(field), [])
 
 def active_filters() -> dict:
     out = {}
@@ -647,30 +658,39 @@ def selected_election_columns(years=None, types=None) -> list[str]:
         cols.append(c)
     return cols
 
+def vote_score_field_from_selection() -> str:
+    choice = st.session_state.get(special_key("vote_score_type"), "All Elections")
+    if choice == "General Elections":
+        return "V4G"
+    if choice == "Primary Elections":
+        return "V4P"
+    return "V4A"
+
+
 def active_special_filters() -> dict:
     special = {}
 
     # Newly registered slider, expressed against RegistrationMonthsAgo from Step 8 v18.
-    new_reg_months = st.session_state.get("new_reg_months", 0)
+    new_reg_months = st.session_state.get(special_key("new_reg_months"), 0)
     if new_reg_months and int(new_reg_months) > 0:
         special["RegistrationMonthsAgo"] = {"max": int(new_reg_months)}
 
-    vh_range = st.session_state.get("vote_history_score_range", (0, 4))
+    vh_range = st.session_state.get(special_key("vote_history_score_range"), (0, 4))
     vh_field = vote_score_field_from_selection() if "vote_score_field_from_selection" in globals() else "V4A"
     if vh_range != (0, 4):
         special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
 
-    mb_prob = st.session_state.get("mb_prob_score_range", (0, 4))
+    mb_prob = st.session_state.get(special_key("mb_prob_score_range"), (0, 4))
     if mb_prob != (0, 4):
         special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
 
-    phone_mode = st.session_state.get("phone_reach_mode", "No phone filter")
+    phone_mode = st.session_state.get(special_key("phone_reach_mode"), "No phone filter")
     if phone_mode and phone_mode != "No phone filter":
         special["__PhoneReach"] = phone_mode
 
-    election_years = st.session_state.get("election_years", [])
-    election_types = st.session_state.get("election_types", [])
-    election_methods = st.session_state.get("election_methods", [])
+    election_years = st.session_state.get(special_key("election_years"), [])
+    election_types = st.session_state.get(special_key("election_types"), [])
+    election_methods = st.session_state.get(special_key("election_methods"), [])
     if election_years or election_types or election_methods:
         special["__ElectionFilters"] = {
             "years": list(election_years or []),
@@ -870,7 +890,7 @@ def is_cube_safe(active: dict) -> bool:
 
 def update_counts(active: dict):
     try:
-        # v21l: Update Counts must NEVER scan index/detail shards. The app only
+        # v21m: Update Counts must NEVER scan index/detail shards. The app only
         # uses the rebuilt quick-count cube through DuckDB remote parquet reads.
         # Tags and exact specific-election filters are intentionally excluded from
         # live counts because Step 8 v18 does not put them in count_cube.parquet.
@@ -1196,7 +1216,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21l — quick-count only targeting")
+    st.caption("DEV final hybrid v21m — quick-count only targeting")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -1230,14 +1250,14 @@ with st.sidebar:
             for field in GEO_FIELDS:
                 label = DISPLAY_LABELS.get(field, field)
                 opts = field_options(filter_options, field, active_filters())
-                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+                st.multiselect(label, options=opts, key=filter_key(field))
 
         with st.expander("Voter Details", expanded=False):
             for field in ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field, active_filters())
                 if opts:
-                    st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+                    st.multiselect(label, options=opts, key=filter_key(field))
 
             st.slider(
                 "Newly Registered Within Last N Months",
@@ -1246,14 +1266,14 @@ with st.sidebar:
                 value=0,
                 step=1,
                 help="0 = all voters.",
-                key="new_reg_months",
+                key=special_key("new_reg_months"),
             )
 
         with st.expander("Vote History", expanded=False):
             st.selectbox(
                 "Vote History Type",
                 options=["All Elections", "General Elections", "Primary Elections"],
-                key="vote_score_type",
+                key=special_key("vote_score_type"),
             )
             st.slider(
                 "Vote History Score Range",
@@ -1261,20 +1281,20 @@ with st.sidebar:
                 max_value=4,
                 value=(0, 4),
                 step=1,
-                key="vote_history_score_range",
+                key=special_key("vote_history_score_range"),
             )
 
             years, etypes, methods = election_options()
-            st.multiselect("Election Year", options=years, key="election_years")
-            st.multiselect("Election Type", options=etypes, key="election_types")
-            st.multiselect("Vote Method", options=methods, key="election_methods")
+            st.multiselect("Election Year", options=years, key=special_key("election_years"))
+            st.multiselect("Election Type", options=etypes, key=special_key("election_types"))
+            st.multiselect("Vote Method", options=methods, key=special_key("election_methods"))
             st.caption("Specific election filters are kept for exports/downloads. Live counts stay on the quick-count cube and do not scan shards.")
 
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field, active_filters())
-                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+                st.multiselect(label, options=opts, key=filter_key(field))
 
             st.slider(
                 "Mail Ballot Probability Score",
@@ -1282,25 +1302,25 @@ with st.sidebar:
                 max_value=4,
                 value=(0, 4),
                 step=1,
-                key="mb_prob_score_range",
+                key=special_key("mb_prob_score_range"),
             )
 
         with st.expander("Contact Filters", expanded=False):
             st.selectbox(
                 "Mobile / Landline Reach",
                 options=["No phone filter", "Mobile only", "Landline only", "Mobile OR landline", "Mobile AND landline", "No mobile or landline"],
-                key="phone_reach_mode",
+                key=special_key("phone_reach_mode"),
                 help="Use this when you need mobile, landline, either one, both, or neither."
             )
             for field in ["HasEmail", "HasApplicantPhone"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field, active_filters())
-                st.multiselect(label, options=opts, key=f"filter_{field}_{_filter_suffix}")
+                st.multiselect(label, options=opts, key=filter_key(field))
 
         tag_opts = field_options(filter_options, "Tags", active_filters())
         if tag_opts:
             with st.expander("Tags", expanded=False):
-                st.multiselect("Tags", options=tag_opts, key=f"filter_Tags_{_filter_suffix}")
+                st.multiselect("Tags", options=tag_opts, key=filter_key("Tags"))
 
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
@@ -1399,27 +1419,27 @@ with action_mid:
 
         keys_to_clear = []
         filter_prefixes = ("filter_",)
-        exact_filter_keys = {
-            "new_reg_months",
-            "vote_score_type",
-            "vote_history_score_range",
-            "election_years",
-            "election_types",
-            "election_methods",
-            "mb_prob_score_range",
-            "phone_reach_mode",
-            "quick_summary",
-            "count_mode",
-        }
+        special_prefixes = (
+            "new_reg_months_",
+            "vote_score_type_",
+            "vote_history_score_range_",
+            "election_years_",
+            "election_types_",
+            "election_methods_",
+            "mb_prob_score_range_",
+            "phone_reach_mode_",
+        )
+        exact_filter_keys = {"quick_summary", "count_mode", "exact_summary"}
         for key in list(st.session_state.keys()):
-            if key.startswith(filter_prefixes) or key in exact_filter_keys:
+            if key.startswith(filter_prefixes) or key.startswith(special_prefixes) or key in exact_filter_keys:
                 keys_to_clear.append(key)
 
         for key in keys_to_clear:
             st.session_state.pop(key, None)
 
-        # Keep the user in Create Universe, but force all widgets to rebuild blank/default.
+        # Keep the user in Create Universe, but force every filter widget to rebuild with a fresh key.
         st.session_state["left_section"] = "create_universe"
+        st.session_state["view"] = "targeting"
         st.rerun()
 
 if st.session_state.get("quick_summary"):
