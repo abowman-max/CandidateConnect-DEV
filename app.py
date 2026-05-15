@@ -1,9 +1,10 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21j TAG_CONTACT_FIX
+# Candidate Connect DEV — Final Hybrid Cloud App v21p PERSISTENT_SAVED_UNIVERSES
 # Full safe filters + guarded export.
-# v21n: remote DuckDB exact counts for Tags/elections when needed; robust clear filters; session saved universes.
+# v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
 import io
 import json
+import base64
 import re
 from datetime import datetime
 from pathlib import Path
@@ -687,6 +688,114 @@ def filter_key(field: str) -> str:
 
 def special_key(name: str) -> str:
     return f"{name}_{current_filter_suffix()}"
+
+
+SAVED_UNIVERSES_PARAM = "cc_saved_universes"
+
+def _json_safe_saved_universes(saved):
+    """Return saved universes as plain JSON-safe dict/list/scalar values."""
+    if not isinstance(saved, dict):
+        return {}
+    clean = {}
+    for name, data in saved.items():
+        if not str(name).strip() or not isinstance(data, dict):
+            continue
+        clean[str(name)] = {
+            "filters": data.get("filters") or {},
+            "special": data.get("special") or {},
+        }
+    return clean
+
+
+def encode_saved_universes(saved) -> str:
+    try:
+        payload = json.dumps(_json_safe_saved_universes(saved), separators=(",", ":"), ensure_ascii=False)
+        return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    except Exception:
+        return ""
+
+
+def decode_saved_universes(raw):
+    try:
+        if isinstance(raw, list):
+            raw = raw[0] if raw else ""
+        raw = str(raw or "").strip()
+        if not raw:
+            return {}
+        payload = base64.urlsafe_b64decode(raw.encode("ascii") + b"=" * (-len(raw) % 4)).decode("utf-8")
+        data = json.loads(payload)
+        return _json_safe_saved_universes(data)
+    except Exception:
+        return {}
+
+
+def load_persistent_saved_universes():
+    """Initialize session saved universes from URL query params after an app reboot."""
+    if "saved_universes" not in st.session_state:
+        raw = None
+        try:
+            raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "")
+        except Exception:
+            raw = ""
+        st.session_state["saved_universes"] = decode_saved_universes(raw)
+    return st.session_state.setdefault("saved_universes", {})
+
+
+def persist_saved_universes(saved):
+    """Persist saved universes into the browser URL so refresh/reboot keeps them."""
+    try:
+        encoded = encode_saved_universes(saved)
+        if encoded:
+            st.query_params[SAVED_UNIVERSES_PARAM] = encoded
+        elif SAVED_UNIVERSES_PARAM in st.query_params:
+            del st.query_params[SAVED_UNIVERSES_PARAM]
+    except Exception:
+        # Saving still works for the current browser session if URL persistence fails.
+        pass
+
+
+def load_saved_universe_into_widgets(data):
+    """Reset current widget keys, then write saved filter values into the fresh keys."""
+    old_token = int(st.session_state.get("filter_reset_token", 0))
+    prefixes = (
+        "filter_",
+        "new_reg_months_",
+        "vote_score_type_",
+        "vote_history_score_range_",
+        "election_years_",
+        "election_types_",
+        "election_methods_",
+        "mb_prob_score_range_",
+        "phone_reach_mode_",
+    )
+    for key in list(st.session_state.keys()):
+        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"}:
+            st.session_state.pop(key, None)
+    st.session_state["filter_reset_token"] = old_token + 1
+
+    for f, vals in ((data or {}).get("filters") or {}).items():
+        st.session_state[filter_key(f)] = vals
+
+    sp = (data or {}).get("special") or {}
+    for k, v in sp.items():
+        if k == "__PhoneReach":
+            st.session_state[special_key("phone_reach_mode")] = v
+        elif k == "__ElectionFilters" and isinstance(v, dict):
+            st.session_state[special_key("election_years")] = v.get("years", [])
+            st.session_state[special_key("election_types")] = v.get("types", [])
+            st.session_state[special_key("election_methods")] = v.get("methods", [])
+        elif k == "RegistrationMonthsAgo" and isinstance(v, dict):
+            st.session_state[special_key("new_reg_months")] = int(v.get("max", 0) or 0)
+        elif k == "MB_Prob_Score" and isinstance(v, dict):
+            st.session_state[special_key("mb_prob_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
+        elif k in {"V4A", "V4G", "V4P"} and isinstance(v, dict):
+            label = "All Elections" if k == "V4A" else ("General Elections" if k == "V4G" else "Primary Elections")
+            st.session_state[special_key("vote_score_type")] = label
+            st.session_state[special_key("vote_history_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
+
+    st.session_state["left_section"] = "create_universe"
+    st.session_state["view"] = "targeting"
+    st.rerun()
 
 
 def selected(field: str):
@@ -1499,7 +1608,7 @@ with st.sidebar:
                 st.multiselect("Tags", options=tag_opts, key=filter_key("Tags"))
 
         with st.expander("Saved Universes", expanded=False):
-            saved = st.session_state.setdefault("saved_universes", {})
+            saved = load_persistent_saved_universes()
             save_name = st.text_input("Save current filters as", key=special_key("save_universe_name"), placeholder="Example: York teacher MB targets")
             if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
                 name = str(save_name or "").strip()
@@ -1510,6 +1619,7 @@ with st.sidebar:
                         "filters": active_filters(),
                         "special": active_special_filters(),
                     }
+                    persist_saved_universes(saved)
                     st.success(f"Saved: {name}")
             if saved:
                 names = sorted(saved.keys())
@@ -1517,34 +1627,14 @@ with st.sidebar:
                 col_a, col_b = st.columns(2)
                 with col_a:
                     if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice:
-                        clear_filter_state()
-                        # After reset token changes, write the saved values into the fresh keys.
-                        data = saved.get(choice, {})
-                        for f, vals in (data.get("filters") or {}).items():
-                            st.session_state[filter_key(f)] = vals
-                        sp = data.get("special") or {}
-                        for k, v in sp.items():
-                            if k == "__PhoneReach":
-                                st.session_state[special_key("phone_reach_mode")] = v
-                            elif k == "__ElectionFilters" and isinstance(v, dict):
-                                st.session_state[special_key("election_years")] = v.get("years", [])
-                                st.session_state[special_key("election_types")] = v.get("types", [])
-                                st.session_state[special_key("election_methods")] = v.get("methods", [])
-                            elif k == "RegistrationMonthsAgo" and isinstance(v, dict):
-                                st.session_state[special_key("new_reg_months")] = int(v.get("max", 0) or 0)
-                            elif k == "MB_Prob_Score" and isinstance(v, dict):
-                                st.session_state[special_key("mb_prob_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
-                            elif k in {"V4A", "V4G", "V4P"} and isinstance(v, dict):
-                                label = "All Elections" if k == "V4A" else ("General Elections" if k == "V4G" else "Primary Elections")
-                                st.session_state[special_key("vote_score_type")] = label
-                                st.session_state[special_key("vote_history_score_range")] = (int(v.get("min", 0)), int(v.get("max", 4)))
-                        st.rerun()
+                        load_saved_universe_into_widgets(saved.get(choice, {}))
                 with col_b:
                     if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
                         saved.pop(choice, None)
+                        persist_saved_universes(saved)
                         st.rerun()
             else:
-                st.caption("No saved universes in this browser session yet.")
+                st.caption("No saved universes saved yet. Saved universes now persist through refresh/reboot in this browser URL.")
 
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
