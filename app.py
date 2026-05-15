@@ -441,6 +441,157 @@ def index_urls_from_manifest() -> list[str]:
     return [r2_url(f"index/voters_index_{i:03d}.parquet") for i in range(count)]
 
 
+def detail_urls_from_manifest() -> list[str]:
+    """Remote detail shard URLs for DuckDB exports/reports."""
+    m = load_manifest()
+    count = int(((m.get("detail", {}) or {}).get("count", DETAIL_SHARDS)) or DETAIL_SHARDS)
+    return [r2_url(f"detail/voters_detail_{i:03d}.parquet") for i in range(count)]
+
+
+def normalize_compare_value(value) -> str:
+    s = clean_value(value).upper()
+    s = s.replace("&", " AND ")
+    s = re.sub(r"\bTOWNSHIP\b", "TWP", s)
+    s = re.sub(r"\bTWP\.\b", "TWP", s)
+    s = re.sub(r"\bBOROUGH\b", "BORO", s)
+    s = re.sub(r"\bBORO\.\b", "BORO", s)
+    s = re.sub(r"\bPRECINCT\b", "PRECINCT", s)
+    s = re.sub(r"[^A-Z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def detail_filter_where_sql(active: dict, special: dict | None = None) -> str:
+    clauses = []
+    for field, vals in (active or {}).items():
+        cleaned = [str(v).strip() for v in (vals or []) if str(v).strip()]
+        if not cleaned:
+            continue
+        if field == "Tags":
+            expr = f"LOWER(CAST({sql_ident(field)} AS VARCHAR))"
+            clauses.append("(" + " OR ".join([f"{expr} LIKE {sql_lit('%' + v.lower().replace(chr(39), chr(39)+chr(39)) + '%')}" for v in cleaned]) + ")")
+        else:
+            norm_vals = [normalize_compare_value(v) for v in cleaned]
+            expr = (
+                "REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE("
+                f"UPPER(CAST({sql_ident(field)} AS VARCHAR)), "
+                "'\\bTOWNSHIP\\b','TWP','g'), "
+                "'\\bTWP\\.\\b','TWP','g'), "
+                "'\\bBOROUGH\\b','BORO','g'), "
+                "'[^A-Z0-9]+',' ','g')"
+            )
+            clauses.append(f"TRIM({expr}) IN (" + ",".join(sql_lit(v) for v in norm_vals) + ")")
+    special = special or {}
+    for field, rule in special.items():
+        if field == "__ElectionFilters":
+            continue
+        if field == "__PhoneReach":
+            phone_clause = index_phone_reach_sql(str(rule))
+            if phone_clause:
+                clauses.append(phone_clause)
+            continue
+        if str(field).startswith("__"):
+            continue
+        if isinstance(rule, dict):
+            expr = f"TRY_CAST({sql_ident(field)} AS DOUBLE)"
+            if "min" in rule:
+                clauses.append(f"{expr} >= {float(rule['min'])}")
+            if "max" in rule:
+                clauses.append(f"{expr} <= {float(rule['max'])}")
+    ef = special.get("__ElectionFilters")
+    if isinstance(ef, dict):
+        cols = selected_election_columns(ef.get("years") or [], ef.get("types") or [])
+        if cols:
+            clauses.append(election_method_sql(cols, ef.get("methods") or []))
+        elif ef.get("years") or ef.get("types") or ef.get("methods"):
+            clauses.append("(FALSE)")
+    return " WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+def duckdb_detail_filtered_df(active: dict, special: dict | None, max_rows: int) -> pd.DataFrame:
+    urls = detail_urls_from_manifest()
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    where = detail_filter_where_sql(active or {}, special or {})
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        q = f"SELECT * FROM read_parquet({url_list}, union_by_name=true) {where} LIMIT {int(max_rows)}"
+        return con.execute(q).df()
+    finally:
+        try: con.close()
+        except Exception: pass
+
+
+def duckdb_detail_group(active: dict, special: dict | None, field: str, limit: int = 20) -> pd.DataFrame:
+    urls = detail_urls_from_manifest()
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    where = detail_filter_where_sql(active or {}, special or {})
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        q = f"""
+            SELECT CAST({sql_ident(field)} AS VARCHAR) AS label, COUNT(*) AS Voters
+            FROM read_parquet({url_list}, union_by_name=true)
+            {where}
+            GROUP BY CAST({sql_ident(field)} AS VARCHAR)
+            ORDER BY Voters DESC
+            LIMIT {int(limit)}
+        """
+        return con.execute(q).df()
+    except Exception:
+        return pd.DataFrame(columns=["label", "Voters"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
+
+def dataframe_to_excel_bytes(df: pd.DataFrame, area_level: str = "Municipality") -> bytes:
+    bio = io.BytesIO()
+    if df is None:
+        df = pd.DataFrame()
+    area_col = area_level if area_level in df.columns else ("Precinct" if "Precinct" in df.columns else ("Municipality" if "Municipality" in df.columns else None))
+    if area_col and not df.empty:
+        counts = df.groupby(area_col, dropna=False).size().reset_index(name="Voters").sort_values("Voters", ascending=False)
+    else:
+        counts = pd.DataFrame(columns=[area_level, "Voters"])
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        counts.to_excel(writer, sheet_name="Area Counts", index=False)
+        df.to_excel(writer, sheet_name="Data", index=False)
+    bio.seek(0)
+    return bio.getvalue()
+
+
+def render_group_bar(active: dict, field: str, title: str, order: list[str] | None = None):
+    special = active_special_filters()
+    df = duckdb_detail_group(active, special, field, 20)
+    if df.empty or "Voters" not in df.columns:
+        return
+    df["label"] = df["label"].astype(str).str.strip()
+    df = df[~df["label"].str.lower().isin(["", "(blank)", "blank", "nan", "none", "null"])]
+    df = df[df["Voters"].fillna(0).astype(float) > 0]
+    if df.empty:
+        return
+    if order:
+        sortmap = {v:i for i,v in enumerate(order)}
+        df["_sort"] = df["label"].map(lambda x: sortmap.get(str(x), 999))
+        df = df.sort_values(["_sort", "label"])
+    total = float(df["Voters"].sum() or 1)
+    maxv = float(df["Voters"].max() or 1)
+    rows=[]
+    for _,r in df.iterrows():
+        lab=str(r["label"]); val=int(r["Voters"] or 0); p=val/total*100; w=max(2,val/maxv*100)
+        rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{val:,} ({p:.1f}%)</span></div>')
+    st.markdown('<div class="cc-home-card"><h3>'+title+'</h3>'+''.join(rows)+'</div>', unsafe_allow_html=True)
+
+
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
     if not selected_cols:
         return "(FALSE)"
@@ -792,7 +943,7 @@ def load_saved_universe_into_widgets(data):
         "phone_reach_mode_",
     )
     for key in list(st.session_state.keys()):
-        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"}:
+        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"} or key.startswith("prepared_"):
             st.session_state.pop(key, None)
     st.session_state["filter_reset_token"] = old_token + 1
 
@@ -839,7 +990,7 @@ def clear_filter_state():
         "phone_reach_mode_",
     )
     for key in list(st.session_state.keys()):
-        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"}:
+        if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"} or key.startswith("prepared_"):
             st.session_state.pop(key, None)
     st.session_state["filter_reset_token"] = old_token + 1
     st.session_state["left_section"] = "create_universe"
@@ -1397,6 +1548,9 @@ def render_home_age_card(total: int):
         return
     rows = []
     order = {"18-24":1,"25-34":2,"35-44":3,"45-54":4,"55-64":5,"65+":6,"65-74":7,"75-84":8,"85+":9}
+    age["label"] = age["label"].astype(str).str.strip()
+    age = age[~age["label"].str.lower().isin(["", "(blank)", "blank", "nan", "none", "null"])]
+    age = age[age["Voters"].fillna(0).astype(float) > 0]
     age["sort"] = age["label"].map(lambda x: order.get(str(x), 99))
     age = age.sort_values(["sort", "label"]).head(9)
     maxv = max(int(age["Voters"].max() or 1), 1)
@@ -1649,9 +1803,15 @@ def remote_search_voters(term, max_rows=25):
 def safe_filtered_df(active, max_rows=5000):
     cols = report_columns()
     try:
-        df = build_export(active, cols)
-        return df.head(max_rows)
-    except Exception:
+        df = duckdb_detail_filtered_df(active or {}, active_special_filters(), max_rows)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=cols)
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        return df[cols].head(max_rows)
+    except Exception as e:
+        st.warning(f"Export query returned no rows or failed: {str(e)[:250]}")
         return pd.DataFrame(columns=cols)
 
 def make_simple_pdf(title, rows, headers):
@@ -1794,23 +1954,90 @@ def render_output_buttons(active):
     tabs = st.tabs(["Exports", "Reports"])
     with tabs[0]:
         st.markdown("### Exports")
-        col1,col2,col3=st.columns(3)
-        with col1:
+        st.caption("Prepare builds the filtered file from the remote detail shards. Download appears after the prepare step finishes.")
+        area_level = st.selectbox("First Excel sheet area count", ["Municipality", "Precinct", "County", "School District", "School Region"], key=special_key("excel_area_level"))
+        c1, c2, c3 = st.columns(3)
+        with c1:
             if st.button("Prepare Filtered CSV", width="stretch"):
-                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); st.download_button("Download Filtered CSV", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch")
-        with col2:
+                with st.spinner("Building filtered CSV..."):
+                    st.session_state["prepared_filtered_df"] = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+            if "prepared_filtered_df" in st.session_state:
+                df = st.session_state["prepared_filtered_df"]
+                st.download_button(f"Download Filtered CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_filtered.csv", "text/csv", width="stretch")
+        with c2:
             if st.button("Prepare Texting CSV", width="stretch"):
-                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); df=df[df.apply(phone_label,axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)] if not df.empty else df; st.download_button("Download Texting CSV", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch")
-        with col3:
+                with st.spinner("Building texting CSV..."):
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    if not df.empty:
+                        df = df[df.apply(phone_label, axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)]
+                    st.session_state["prepared_texting_df"] = df
+            if "prepared_texting_df" in st.session_state:
+                df = st.session_state["prepared_texting_df"]
+                st.download_button(f"Download Texting CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_texting.csv", "text/csv", width="stretch")
+        with c3:
             if st.button("Prepare Mail CSV", width="stretch"):
-                df=safe_filtered_df(active, EXPORT_ROW_LIMIT); st.download_button("Download Mail CSV", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch")
+                with st.spinner("Building mail CSV..."):
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    mail_cols = [c for c in ["FirstName","MiddleName","LastName","NameSuffix","House Number","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    st.session_state["prepared_mail_df"] = df[mail_cols] if mail_cols else df
+            if "prepared_mail_df" in st.session_state:
+                df = st.session_state["prepared_mail_df"]
+                st.download_button(f"Download Mail CSV ({len(df):,} rows)", df.to_csv(index=False).encode(), "candidate_connect_mail.csv", "text/csv", width="stretch")
+        st.markdown("---")
+        e1, e2, e3 = st.columns(3)
+        with e1:
+            if st.button("Prepare Filtered Excel", width="stretch"):
+                with st.spinner("Building filtered Excel workbook..."):
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    st.session_state["prepared_filtered_xlsx"] = dataframe_to_excel_bytes(df, area_level)
+            if "prepared_filtered_xlsx" in st.session_state:
+                st.download_button("Download Filtered Excel", st.session_state["prepared_filtered_xlsx"], "candidate_connect_filtered.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+        with e2:
+            if st.button("Prepare Texting Excel", width="stretch"):
+                with st.spinner("Building texting Excel workbook..."):
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    if not df.empty:
+                        df = df[df.apply(phone_label, axis=1).astype(str).str.contains("\\(m\\)", regex=True, na=False)]
+                    st.session_state["prepared_texting_xlsx"] = dataframe_to_excel_bytes(df, area_level)
+            if "prepared_texting_xlsx" in st.session_state:
+                st.download_button("Download Texting Excel", st.session_state["prepared_texting_xlsx"], "candidate_connect_texting.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
+        with e3:
+            if st.button("Prepare Mail Excel", width="stretch"):
+                with st.spinner("Building mail Excel workbook..."):
+                    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+                    mail_cols = [c for c in ["FirstName","MiddleName","LastName","NameSuffix","House Number","Street Name","Apartment Number","Address Line 2","City","State","Zip","County","Municipality","Precinct","Party","Gender","Age"] if c in df.columns]
+                    df = df[mail_cols] if mail_cols else df
+                    st.session_state["prepared_mail_xlsx"] = dataframe_to_excel_bytes(df, area_level)
+            if "prepared_mail_xlsx" in st.session_state:
+                st.download_button("Download Mail Excel", st.session_state["prepared_mail_xlsx"], "candidate_connect_mail.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
     with tabs[1]:
         st.markdown("### Reports")
-        r1,r2,r3,r4=st.columns(4)
-        with r1: st.download_button("Summary PDF", summary_pdf(active), "candidate_connect_summary.pdf", "application/pdf", width="stretch")
-        with r2: st.download_button("Street List PDF", street_list_pdf(active), "candidate_connect_street_list.pdf", "application/pdf", width="stretch")
-        with r3: st.download_button("Call List PDF", call_list_pdf(active), "candidate_connect_call_list.pdf", "application/pdf", width="stretch")
-        with r4: st.download_button("Mailing Labels PDF", labels_pdf(active), "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch")
+        st.caption("Prepare builds the PDF and then shows a download button.")
+        r1, r2, r3, r4 = st.columns(4)
+        with r1:
+            if st.button("Prepare Summary PDF", width="stretch"):
+                with st.spinner("Building summary PDF..."):
+                    st.session_state["prepared_summary_pdf"] = summary_pdf(active)
+            if "prepared_summary_pdf" in st.session_state:
+                st.download_button("Download Summary PDF", st.session_state["prepared_summary_pdf"], "candidate_connect_summary.pdf", "application/pdf", width="stretch")
+        with r2:
+            if st.button("Prepare Street List PDF", width="stretch"):
+                with st.spinner("Building street list PDF..."):
+                    st.session_state["prepared_street_pdf"] = street_list_pdf(active)
+            if "prepared_street_pdf" in st.session_state:
+                st.download_button("Download Street List PDF", st.session_state["prepared_street_pdf"], "candidate_connect_street_list.pdf", "application/pdf", width="stretch")
+        with r3:
+            if st.button("Prepare Call List PDF", width="stretch"):
+                with st.spinner("Building call list PDF..."):
+                    st.session_state["prepared_call_pdf"] = call_list_pdf(active)
+            if "prepared_call_pdf" in st.session_state:
+                st.download_button("Download Call List PDF", st.session_state["prepared_call_pdf"], "candidate_connect_call_list.pdf", "application/pdf", width="stretch")
+        with r4:
+            if st.button("Prepare Mailing Labels PDF", width="stretch"):
+                with st.spinner("Building mailing labels PDF..."):
+                    st.session_state["prepared_labels_pdf"] = labels_pdf(active)
+            if "prepared_labels_pdf" in st.session_state:
+                st.download_button("Download Mailing Labels PDF", st.session_state["prepared_labels_pdf"], "candidate_connect_labels_avery5160.pdf", "application/pdf", width="stretch")
 
 
 st.markdown('<div class="cc-header">', unsafe_allow_html=True)
@@ -1820,7 +2047,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21s</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21t</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -1941,7 +2168,15 @@ with a1:
         else: st.session_state["quick_summary"]=summary; st.session_state["count_mode"]=mode
 with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
 if st.session_state.get("quick_summary"):
-    st.markdown("### Current Counts"); st.caption("Updated using remote counts."); render_metrics(st.session_state["quick_summary"]); render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
+    st.markdown("### Current Counts")
+    st.caption("Updated using remote counts.")
+    render_metrics(st.session_state["quick_summary"])
+    render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
+    cgender, cage = st.columns(2)
+    with cgender:
+        render_group_bar(active, "Gender", "Gender Breakdown", ["F", "M", "U"])
+    with cage:
+        render_group_bar(active, "Age_Range", "Age Range Breakdown", ["18-24", "25-34", "35-44", "45-54", "55-64", "65+", "65-74", "75-84", "85+"])
 
 st.markdown("## Output Center")
 st.caption("Exports and reports apply the current filters against detail shards. Counts remain remote/fast.")
