@@ -367,14 +367,22 @@ def load_geo_hierarchy_safe(max_bytes: int = 90_000_000) -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_count_cube_columns(cols_tuple):
+    """Read only requested columns from the quick-count cube.
+
+    v21h: never fall back to a full count_cube read. A full read can exceed
+    Streamlit Cloud memory and kill the app health check when a selected field
+    is missing/mismatched. Callers can catch the exception and choose a safer
+    fallback.
+    """
     manifest = load_manifest()
     speed = manifest.get("speed", {}).get("tables", {})
     key = speed.get("count_cube", "speed/count_cube.parquet")
-    try:
-        return load_parquet(key, columns=list(cols_tuple))
-    except Exception:
-        # Fallback: full read only if column-select fails.
-        return load_parquet(key)
+    return load_parquet(key, columns=list(cols_tuple))
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_index_columns(key: str, cols_tuple):
+    return load_parquet(key, columns=list(cols_tuple))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -436,6 +444,102 @@ def non_count_filters(active: dict) -> dict:
     ])
     return {k: v for k, v in active.items() if k not in safe}
 
+
+def normalize_election_method_value(value) -> str:
+    s = clean_value(value).upper()
+    if not s:
+        return ""
+    if s in {"Y", "V", "VOTED", "YES"}:
+        return "Voted"
+    if s in {"A", "AB", "ABS", "ABSENTEE"} or "ABS" in s:
+        return "Absentee"
+    if s in {"M", "MB", "MAIL", "MAIL-IN", "MAIL IN", "MAILIN"} or "MAIL" in s:
+        return "Mail"
+    if s in {"P", "POLL", "POLLING", "IN PERSON", "IN-PERSON", "ELECTION DAY"} or "POLL" in s or "PERSON" in s:
+        return "Polls"
+    if s in {"PROV", "PROVISIONAL"} or "PROV" in s:
+        return "Provisional"
+    return clean_value(value).title()
+
+
+def election_meta_from_col(col: str):
+    raw = str(col).strip()
+    u = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+    patterns = [
+        r"^([GPS])_?((?:20)?\d{2})(?:_|$)",
+        r"^(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)_?((?:20)?\d{2})(?:_|$)",
+        r"^((?:20)?\d{2})_?(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)(?:_|$)",
+        r"(?:^|_)([GPS])_?((?:20)?\d{2})(?:_|$)",
+        r"(?:^|_)(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)_?((?:20)?\d{2})(?:_|$)",
+        r"(?:^|_)((?:20)?\d{2})_?(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)(?:_|$)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, u)
+        if not m:
+            continue
+        a, b = m.group(1), m.group(2)
+        if a.isdigit():
+            yy, typ = a, b
+        else:
+            typ, yy = a, b
+        try:
+            year = int(yy) if len(str(yy)) == 4 else 2000 + int(yy)
+        except Exception:
+            continue
+        if not (2000 <= year <= 2030):
+            continue
+        typ_u = str(typ).upper()
+        if typ_u.startswith("G"):
+            etype = "General"
+        elif typ_u.startswith("P"):
+            etype = "Primary"
+        elif typ_u.startswith("S"):
+            etype = "Special"
+        else:
+            etype = str(typ).title()
+        return {"column": raw, "year": str(year), "type": etype}
+    return None
+
+
+def election_columns_from_manifest() -> list[str]:
+    try:
+        m = load_manifest()
+        cols = []
+        for section in ["index", "schema", "detail"]:
+            data = m.get(section, {}) if isinstance(m, dict) else {}
+            for key in ["columns", "index_columns", "detail_columns"]:
+                for c in data.get(key, []) or []:
+                    if election_meta_from_col(c) and c not in cols:
+                        cols.append(c)
+        return cols
+    except Exception:
+        return []
+
+
+def election_options():
+    metas = [election_meta_from_col(c) for c in election_columns_from_manifest()]
+    metas = [m for m in metas if m]
+    years = sorted({m["year"] for m in metas}, key=lambda x: int(x), reverse=True)
+    types = sorted({m["type"] for m in metas})
+    methods = ["Voted", "Mail", "Absentee", "Polls", "Provisional"]
+    return years, types, methods
+
+
+def selected_election_columns(years=None, types=None) -> list[str]:
+    years = set(years or [])
+    types = set(types or [])
+    cols = []
+    for c in election_columns_from_manifest():
+        meta = election_meta_from_col(c)
+        if not meta:
+            continue
+        if years and meta["year"] not in years:
+            continue
+        if types and meta["type"] not in types:
+            continue
+        cols.append(c)
+    return cols
+
 def active_special_filters() -> dict:
     special = {}
 
@@ -453,11 +557,62 @@ def active_special_filters() -> dict:
     if mb_prob != (0, 4):
         special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
 
+    phone_mode = st.session_state.get("phone_reach_mode", "No phone filter")
+    if phone_mode and phone_mode != "No phone filter":
+        special["__PhoneReach"] = phone_mode
+
+    election_years = st.session_state.get("election_years", [])
+    election_types = st.session_state.get("election_types", [])
+    election_methods = st.session_state.get("election_methods", [])
+    if election_years or election_types or election_methods:
+        special["__ElectionFilters"] = {
+            "years": list(election_years or []),
+            "types": list(election_types or []),
+            "methods": list(election_methods or []),
+        }
+
     return special
 
 def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
     out = df
     for field, rule in (special or {}).items():
+        if out.empty:
+            return out
+
+        if field == "__PhoneReach":
+            mobile = out["HasMobile"].astype(str).str.lower().eq("yes") if "HasMobile" in out.columns else pd.Series(False, index=out.index)
+            landline = out["HasLandline"].astype(str).str.lower().eq("yes") if "HasLandline" in out.columns else pd.Series(False, index=out.index)
+            mode = str(rule)
+            if mode == "Mobile only":
+                out = out[mobile]
+            elif mode == "Landline only":
+                out = out[landline]
+            elif mode == "Mobile OR landline":
+                out = out[mobile | landline]
+            elif mode == "Mobile AND landline":
+                out = out[mobile & landline]
+            elif mode == "No mobile or landline":
+                out = out[~(mobile | landline)]
+            continue
+
+        if field == "__ElectionFilters" and isinstance(rule, dict):
+            years = rule.get("years") or []
+            types = rule.get("types") or []
+            methods = set(rule.get("methods") or [])
+            cols = [c for c in selected_election_columns(years, types) if c in out.columns]
+            if not cols:
+                out = out.iloc[0:0]
+                continue
+            mask = pd.Series(False, index=out.index)
+            for c in cols:
+                vals = out[c].map(normalize_election_method_value)
+                if methods:
+                    mask = mask | vals.isin(methods)
+                else:
+                    mask = mask | vals.astype(str).str.strip().ne("")
+            out = out[mask]
+            continue
+
         if field in out.columns and isinstance(rule, dict):
             vals = pd.to_numeric(out[field], errors="coerce")
             if "min" in rule:
@@ -611,9 +766,15 @@ def update_counts(active: dict):
         safe_active = count_safe_filters(active)
         special = active_special_filters()
 
+        # OR/contact-combo and specific-election filters are not represented as a
+        # single row in the count cube. Use index shards, which are much lighter
+        # than detail shards and retain the election vote-method columns.
+        if "__PhoneReach" in special or "__ElectionFilters" in special:
+            return exact_counts(safe_active), "index", None
+
         needed = set(["Party"])
         needed.update(safe_active.keys())
-        needed.update(special.keys())
+        needed.update([k for k in special.keys() if not str(k).startswith("__")])
         possible_count_cols = ["Voters", "voters", "count", "Count", "Total", "total"]
         last_error = None
 
@@ -627,10 +788,8 @@ def update_counts(active: dict):
                 last_error = e
                 continue
 
-        # If the quick count cube cannot be read, fall back to exact detail shards.
-        # This is slower, but it prevents DEV from being blocked by a bad/oversized speed table.
         try:
-            return exact_counts(safe_active), "exact", None
+            return exact_counts(safe_active), "index", None
         except Exception as exact_error:
             return None, "unavailable", exact_error or last_error
     except Exception as e:
@@ -801,11 +960,26 @@ def quick_counts(active: dict):
     return None, last_error or RuntimeError("Quick count fields are not available for this filter combination.")
 
 
+
+def special_required_columns(special: dict) -> set[str]:
+    cols = set()
+    if not special:
+        return cols
+    if "__PhoneReach" in special:
+        cols.update(["HasMobile", "HasLandline"])
+    ef = special.get("__ElectionFilters")
+    if isinstance(ef, dict):
+        cols.update(selected_election_columns(ef.get("years") or [], ef.get("types") or []))
+    for k in special.keys():
+        if not str(k).startswith("__"):
+            cols.add(k)
+    return cols
+
 def exact_counts(active: dict):
     special = active_special_filters()
     needed = set(["Party"])
     needed.update(active.keys())
-    needed.update(special.keys())
+    needed.update(special_required_columns(special))
     cols = tuple(sorted(needed))
 
     total = 0
@@ -816,10 +990,11 @@ def exact_counts(active: dict):
     progress = st.progress(0)
     status = st.empty()
 
-    for i in range(DETAIL_SHARDS):
-        key = f"detail/voters_detail_{i:03d}.parquet"
-        status.write(f"Verifying shard {i+1} of {DETAIL_SHARDS}: {key}")
-        df = load_detail_columns(key, cols)
+    shard_count = int((load_manifest().get("index", {}) or {}).get("count", DETAIL_SHARDS) or DETAIL_SHARDS)
+    for i in range(shard_count):
+        key = f"index/voters_index_{i:03d}.parquet"
+        status.write(f"Counting index shard {i+1} of {shard_count}: {key}")
+        df = load_index_columns(key, cols)
 
         for col, vals in active.items():
             if vals and col in df.columns:
@@ -839,7 +1014,7 @@ def exact_counts(active: dict):
             o_count += int((~party.isin(["R", "D"])).sum())
 
         del df
-        progress.progress((i + 1) / DETAIL_SHARDS)
+        progress.progress((i + 1) / shard_count)
 
     status.empty()
     return {"total": total, "r": r_count, "d": d_count, "o": o_count}
@@ -852,7 +1027,7 @@ def build_export(active: dict, columns: list[str]):
 
     needed = set(columns)
     needed.update(active.keys())
-    needed.update(special.keys())
+    needed.update(special_required_columns(special))
     cols = tuple(sorted(needed))
 
     parts = []
@@ -900,7 +1075,7 @@ with h_logo:
         st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21f</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21h</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC):
         st.image(LOGO_TPTC, width="stretch")
@@ -922,7 +1097,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21g — stable quick-count filters")
+    st.caption("DEV final hybrid v21h — gender/election/contact fix")
 
     if "left_section" not in st.session_state:
         st.session_state["left_section"] = None
@@ -990,9 +1165,11 @@ with st.sidebar:
                 key="vote_history_score_range",
             )
 
-            # Temporarily disabled for DEV stabilization.
-            # Must be restored before LIVE.
-            st.caption("Election year/type/method filters are temporarily disabled in DEV stabilization and must be restored before LIVE.")
+            years, etypes, methods = election_options()
+            st.multiselect("Election Year", options=years, key="election_years")
+            st.multiselect("Election Type", options=etypes, key="election_types")
+            st.multiselect("Vote Method", options=methods, key="election_methods")
+            st.caption("Specific election filters count through lightweight index shards; normal counts stay on the rebuilt quick-count cube.")
 
         with st.expander("Mail Ballot", expanded=False):
             for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
@@ -1010,6 +1187,12 @@ with st.sidebar:
             )
 
         with st.expander("Contact Filters", expanded=False):
+            st.selectbox(
+                "Mobile / Landline Reach",
+                options=["No phone filter", "Mobile only", "Landline only", "Mobile OR landline", "Mobile AND landline", "No mobile or landline"],
+                key="phone_reach_mode",
+                help="Use this when you need mobile, landline, either one, or both. The separate Yes/No fields are still below for exact filtering."
+            )
             for field in ["HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone"]:
                 label = DISPLAY_LABELS.get(field, field.replace("_", " "))
                 opts = field_options(filter_options, field, active_filters())
@@ -1063,6 +1246,15 @@ if active or special_active:
         chips.append(f"**{DISPLAY_LABELS.get(k, k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals) > 6 else ''}")
     if "RegistrationMonthsAgo" in special_active:
         chips.append(f"**Newly Registered:** last {special_active['RegistrationMonthsAgo']['max']} months")
+    if "__PhoneReach" in special_active:
+        chips.append(f"**Phone Reach:** {special_active['__PhoneReach']}")
+    if "__ElectionFilters" in special_active:
+        ef = special_active["__ElectionFilters"]
+        bits = []
+        if ef.get("years"): bits.append("Years " + ", ".join(map(str, ef.get("years", []))))
+        if ef.get("types"): bits.append("Types " + ", ".join(map(str, ef.get("types", []))))
+        if ef.get("methods"): bits.append("Methods " + ", ".join(map(str, ef.get("methods", []))))
+        chips.append("**Specific Elections:** " + "; ".join(bits))
     for _score_field in ["V4A", "V4G", "V4P", "MB_Prob_Score"]:
         if _score_field in special_active:
             chips.append(f"**{DISPLAY_LABELS.get(_score_field, _score_field)}:** {special_active[_score_field]['min']}–{special_active[_score_field]['max']}")
@@ -1102,7 +1294,7 @@ with action_mid:
 
 if st.session_state.get("quick_summary"):
     st.markdown("### Current Counts")
-    st.caption("Updated using fast count tables." if st.session_state.get("count_mode") == "quick" else "Updated using exact detail scan for this filter combination.")
+    st.caption("Updated using fast count tables." if st.session_state.get("count_mode") == "quick" else "Updated using lightweight index shards for this filter combination.")
     render_metrics(st.session_state["quick_summary"], label="")
     left_chart, right_blank = st.columns([1, 1])
     with left_chart:
