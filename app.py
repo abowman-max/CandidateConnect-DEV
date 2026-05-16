@@ -2418,9 +2418,9 @@ def _build_street_pdf(active, call_mode=False):
             for txt, x in [("Full Name", 34), ("Phone", 222), ("Party", 398), ("Sex", 426), ("Age", 452), ("Precinct", 478)]:
                 _ = c.drawString(x, y-8, txt)
         else:
-            for txt, x in [("House", 34), ("Full Name", 80), ("Phone", 250), ("Party", 392), ("Sex", 418), ("Age", 442)]:
+            for txt, x in [("House", 34), ("Full Name", 76), ("Phone", 226), ("Party", 362), ("Sex", 388), ("Age", 412)]:
                 _ = c.drawString(x, y-8, txt)
-            for label, x in [("F", 468), ("A", 492), ("U", 516), ("NH", 540), ("YS", 566), ("MB", 590)]:
+            for label, x in [("F", 438), ("A", 462), ("U", 486), ("NH", 510), ("YS", 538), ("MB", 566)]:
                 _ = c.drawCentredString(x, y-8, label)
         return y - 24
 
@@ -2591,22 +2591,22 @@ def _build_street_pdf(active, call_mode=False):
                 _ = c.setFont("Helvetica-Bold", 5.6)
             _ = c.drawString(34, baseline, house_text[:14])
             _ = c.setFont("Helvetica", 6.4)
-            _ = c.drawString(80, baseline, smart_title(r.get("_name", ""))[:36])
+            _ = c.drawString(76, baseline, smart_title(r.get("_name", ""))[:34])
             _ = c.setFont("Helvetica", 6.3)
             if len(phone_lines) > 1:
-                _ = c.drawString(250, baseline+5, phone_lines[0][:30])
-                _ = c.drawString(250, baseline-4, phone_lines[1][:30])
+                _ = c.drawString(226, baseline+5, phone_lines[0][:28])
+                _ = c.drawString(226, baseline-4, phone_lines[1][:28])
             elif phone_lines:
-                _ = c.drawString(250, baseline, phone_lines[0][:30])
-            _ = c.drawString(394, baseline, cc_text(r.get("Party", ""))[:1])
-            _ = c.drawString(420, baseline, cc_text(r.get("Gender", ""))[:1])
-            _ = c.drawRightString(456, baseline, cc_text(r.get("Age", ""))[:3])
-            for x in [468, 492, 516, 540, 566]:
+                _ = c.drawString(226, baseline, phone_lines[0][:28])
+            _ = c.drawString(364, baseline, cc_text(r.get("Party", ""))[:1])
+            _ = c.drawString(390, baseline, cc_text(r.get("Gender", ""))[:1])
+            _ = c.drawRightString(426, baseline, cc_text(r.get("Age", ""))[:3])
+            for x in [438, 462, 486, 510, 538]:
                 _ = c.rect(x-3, baseline-2, 6, 6, fill=0, stroke=1)
             mb_val = str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper()
             if mb_val in {"Y", "YES", "1", "TRUE"}:
                 _ = c.setFont("Helvetica-Bold", 7.0)
-                _ = c.drawCentredString(590, baseline, "Y")
+                _ = c.drawCentredString(566, baseline, "Y")
         y -= row_h + 4
         row_count += 1
 
