@@ -25,6 +25,10 @@ DETAIL_SHARDS = 36
 EXPORT_ROW_LIMIT = 250_000
 
 st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
+try:
+    st.set_option("runner.magicEnabled", False)
+except Exception:
+    pass
 
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
 VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
@@ -2377,7 +2381,7 @@ def _build_street_pdf(active, call_mode=False):
     w, h = letter
     mar_l, mar_r = 28, 28
     title = "Voter Call List" if call_mode else "Voter Contact List"
-    subtitle = "Phones: (m) mobile, (l) landline, (u) applicant/unknown"
+    subtitle = ""
     tracks = _contact_tracking_cols()
 
     def safe_bookmark(name, title_text, level=0):
@@ -2411,6 +2415,22 @@ def _build_street_pdf(active, call_mode=False):
             yy -= 15
     else:
         c.drawString(54, yy, u"• All active selected voters")
+        yy -= 15
+    yy -= 16
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, yy, "Legend")
+    yy -= 15
+    c.setFillColorRGB(0.15, 0.15, 0.15)
+    c.setFont("Helvetica", 8.5)
+    legend_lines = [
+        "Phones: (m) mobile, (l) landline, (u) applicant/unknown",
+        "Contact boxes: F = Favorable, A = Against, U = Undecided, NH = Not Home",
+        "Yard Sign is a tracking checkbox. MB Perm prints Y when the voter is a permanent mail ballot voter.",
+    ]
+    for line in legend_lines:
+        c.drawString(54, yy, u"• " + line)
+        yy -= 13
     c.showPage()
 
     # Precinct summary pages
@@ -2451,13 +2471,15 @@ def _build_street_pdf(active, call_mode=False):
             headers=[("Full Name",34), ("Phone",210), ("Party",375), ("Sex",405), ("Age",433), ("Precinct",458)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
         else:
-            headers=[("Full Name",72), ("Phone",224), ("Party",350), ("Sex",378), ("Age",404)]
+            headers=[("House",42), ("Full Name",78), ("Phone",250), ("Party",395), ("Sex",418), ("Age",440)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
-            x=432
+            x=462
             for t in tracks:
-                c.drawCentredString(x, yy-8, t if len(t)<=3 else t[:8])
-                x += 25 if t != "Yard Sign" else 42
-            c.drawCentredString(574, yy-8, "MB Perm")
+                label = "YS" if t == "Yard Sign" else t
+                c.drawCentredString(x, yy-8, label)
+                x += 22
+            c.setFont("Helvetica-Bold", 6.0)
+            c.drawCentredString(586, yy-8, "MB")
         return yy-22
 
     current_precinct = None
@@ -2468,8 +2490,13 @@ def _build_street_pdf(active, call_mode=False):
     for _,r in df.iterrows():
         precinct = cc_text(r.get("_precinct", "")) or "Unassigned"
         street = smart_title(r.get("_street", "")) or "Unknown Street"
-        house = cc_text(r.get("House Number", ""))
-        apt = cc_text(r.get("Apartment Number", ""))
+        house_raw = cc_text(r.get("House Number", ""))
+        m_house = re.search(r"\d+", house_raw)
+        house = m_house.group(0) if m_house else house_raw[:8]
+        apt_raw = cc_text(r.get("Apartment Number", ""))
+        apt = ""
+        if re.fullmatch(r"(?i)(?:apt|unit|ste|suite|#)?\s*[A-Z0-9-]{1,8}", apt_raw or "") and not re.search(r"(?i)\b(?:dr|rd|st|ave|ln|ct|cir|blvd|way|road|street|drive|lane)\b", apt_raw or ""):
+            apt = re.sub(r"(?i)^(apt|unit|ste|suite)\s+", "", apt_raw).strip()
         house_text = (house + (f" Apt {apt}" if apt else "")).strip()
         need_new_precinct = precinct != current_precinct
         if y is None or need_new_precinct or y < 44:
@@ -2484,10 +2511,12 @@ def _build_street_pdf(active, call_mode=False):
             if y < 62:
                 c.showPage(); y = new_detail_page(precinct, cont=True)
             y = _draw_section_bar(c, street, y, x=mar_l, width=w-mar_l-mar_r)
+            y -= 6
             current_street = street
         # alternating voter row shading
         c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
-        c.rect(mar_l+6, y-4, w-mar_l-mar_r-12, 15 if (not call_mode and len(phone_entries(r)) > 1) else 11, fill=1, stroke=0)
+        row_h = 22 if (not call_mode and len(phone_entries(r)) > 1) else 15
+        c.rect(mar_l+6, y-6, w-mar_l-mar_r-12, row_h, fill=1, stroke=0)
         c.setFillColorRGB(0.08,0.08,0.08)
         if call_mode:
             c.setFont("Helvetica", 6.7)
@@ -2501,24 +2530,24 @@ def _build_street_pdf(active, call_mode=False):
             # Taller row so mobile/landline can be stacked instead of running into party/age columns.
             phone_lines = [f"{num} ({typ})" for num, typ in phone_entries(r)]
             c.setFont("Helvetica-Bold", 6.7)
-            c.drawString(42, y, house_text[:16])
-            c.setFont("Helvetica", 6.6)
-            c.drawString(72, y, smart_title(r.get("_name", ""))[:30])
-            py = y + 3 if len(phone_lines) > 1 else y
-            for ph in phone_lines[:3]:
-                c.drawString(224, py, ph[:27])
-                py -= 7
-            c.drawString(352, y, cc_text(r.get("Party", ""))[:1])
-            c.drawString(381, y, cc_text(r.get("Gender", ""))[:1])
-            c.drawRightString(418, y, cc_text(r.get("Age", ""))[:3])
-            x=432
+            c.drawString(42, y, house_text[:10])
+            c.setFont("Helvetica", 6.3)
+            c.drawString(78, y, smart_title(r.get("_name", ""))[:34])
+            py = y + 4 if len(phone_lines) > 1 else y
+            for ph in phone_lines[:2]:
+                c.drawString(250, py, ph[:31])
+                py -= 8
+            c.drawString(397, y, cc_text(r.get("Party", ""))[:1])
+            c.drawString(421, y, cc_text(r.get("Gender", ""))[:1])
+            c.drawRightString(454, y, cc_text(r.get("Age", ""))[:3])
+            x=462
             for t in tracks:
-                c.rect(x, y-2, 6, 6, fill=0, stroke=1)
-                x += 25 if t != "Yard Sign" else 42
+                c.rect(x-3, y-2, 6, 6, fill=0, stroke=1)
+                x += 22
             if str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
                 c.setFont("Helvetica-Bold", 6.8)
-                c.drawCentredString(574, y, "Y")
-        y -= (17 if (not call_mode and len(phone_entries(r)) > 1) else 13)
+                c.drawCentredString(586, y, "Y")
+        y -= (25 if (not call_mode and len(phone_entries(r)) > 1) else 17)
         row_count += 1
     c.save(); bio.seek(0); return bio.getvalue()
 
@@ -2873,7 +2902,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zc</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zd</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -2891,7 +2920,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zc — street list layout + report workflow fix")
+    st.caption("DEV final hybrid v21zd — street list padding + magic none fix")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
