@@ -2020,15 +2020,36 @@ def address_line(row):
     line = " ".join([x for x in [hn, stn] if x])
     return (line + (f" Apt {apt}" if apt else "")).strip() or cc_text(row.get("res_address", ""))
 
-def phone_label(row):
-    vals = []
+def format_phone_number(value):
+    s = cc_text(value)
+    digits = re.sub(r"\D+", "", s)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    return s
+
+def phone_entries(row):
+    entries = []
     mobile = cc_text(row.get("Mobile", "")) or cc_text(row.get("MobilePhone", ""))
     land = cc_text(row.get("Landline", "")) or cc_text(row.get("Phone", ""))
     app = cc_text(row.get("Current_ApplicantPhone", "")) or cc_text(row.get("ApplicantPhone", ""))
-    if mobile: vals.append(f"{mobile} (m)")
-    if land: vals.append(f"{land} (l)")
-    if app and app not in {mobile, land}: vals.append(f"{app} (u)")
-    return " / ".join(vals)
+    if mobile:
+        entries.append((format_phone_number(mobile), "m"))
+    if land:
+        entries.append((format_phone_number(land), "l"))
+    if app and app not in {mobile, land}:
+        entries.append((format_phone_number(app), "u"))
+    # De-dupe exact label/type pairs while preserving order.
+    seen = set(); clean = []
+    for num, typ in entries:
+        key = (num, typ)
+        if num and key not in seen:
+            seen.add(key); clean.append((num, typ))
+    return clean
+
+def phone_label(row):
+    return " / ".join([f"{num} ({typ})" for num, typ in phone_entries(row)])
 
 def first_existing_col(df: pd.DataFrame, candidates: list[str]):
     if df is None or df.empty:
@@ -2308,7 +2329,8 @@ def _street_sort_key_df(df):
     return df.sort_values(["_precinct_sort","_street_sort","_house_sort","_last_sort","_first_sort"], kind="stable")
 
 def _contact_tracking_cols():
-    return ["F", "A", "U", "NH", "Yard Sign", "MB Perm"]
+    # MB Perm is printed as Y/blank, not as a tracking checkbox.
+    return ["F", "A", "U", "NH", "Yard Sign"]
 
 def _build_street_pdf(active, call_mode=False):
     """Build branded street/call list PDF matching the local working street-list format.
@@ -2429,12 +2451,13 @@ def _build_street_pdf(active, call_mode=False):
             headers=[("Full Name",34), ("Phone",210), ("Party",375), ("Sex",405), ("Age",433), ("Precinct",458)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
         else:
-            headers=[("Full Name",72), ("Phone",238), ("Party",342), ("Sex",370), ("Age",398)]
+            headers=[("Full Name",72), ("Phone",224), ("Party",350), ("Sex",378), ("Age",404)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
-            x=425
+            x=432
             for t in tracks:
                 c.drawCentredString(x, yy-8, t if len(t)<=3 else t[:8])
                 x += 25 if t != "Yard Sign" else 42
+            c.drawCentredString(574, yy-8, "MB Perm")
         return yy-22
 
     current_precinct = None
@@ -2464,7 +2487,7 @@ def _build_street_pdf(active, call_mode=False):
             current_street = street
         # alternating voter row shading
         c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
-        c.rect(mar_l+6, y-2, w-mar_l-mar_r-12, 11, fill=1, stroke=0)
+        c.rect(mar_l+6, y-4, w-mar_l-mar_r-12, 15 if (not call_mode and len(phone_entries(r)) > 1) else 11, fill=1, stroke=0)
         c.setFillColorRGB(0.08,0.08,0.08)
         if call_mode:
             c.setFont("Helvetica", 6.7)
@@ -2475,21 +2498,27 @@ def _build_street_pdf(active, call_mode=False):
             c.drawRightString(450, y, cc_text(r.get("Age", ""))[:3])
             c.drawString(458, y, smart_title(precinct)[:23])
         else:
-            c.setFont("Helvetica-Bold", 7)
-            c.drawString(42, y, house_text[:17])
-            c.setFont("Helvetica", 6.8)
-            c.drawString(72, y, smart_title(r.get("_name", ""))[:34])
-            c.drawString(238, y, cc_text(r.get("_phone", ""))[:29])
-            c.drawString(344, y, cc_text(r.get("Party", ""))[:1])
-            c.drawString(372, y, cc_text(r.get("Gender", ""))[:1])
+            # Taller row so mobile/landline can be stacked instead of running into party/age columns.
+            phone_lines = [f"{num} ({typ})" for num, typ in phone_entries(r)]
+            c.setFont("Helvetica-Bold", 6.7)
+            c.drawString(42, y, house_text[:16])
+            c.setFont("Helvetica", 6.6)
+            c.drawString(72, y, smart_title(r.get("_name", ""))[:30])
+            py = y + 3 if len(phone_lines) > 1 else y
+            for ph in phone_lines[:3]:
+                c.drawString(224, py, ph[:27])
+                py -= 7
+            c.drawString(352, y, cc_text(r.get("Party", ""))[:1])
+            c.drawString(381, y, cc_text(r.get("Gender", ""))[:1])
             c.drawRightString(418, y, cc_text(r.get("Age", ""))[:3])
-            x=428
+            x=432
             for t in tracks:
                 c.rect(x, y-2, 6, 6, fill=0, stroke=1)
                 x += 25 if t != "Yard Sign" else 42
-            if str(r.get("MB_PERM", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
-                c.drawString(574, y, "Y")
-        y -= 12
+            if str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
+                c.setFont("Helvetica-Bold", 6.8)
+                c.drawCentredString(574, y, "Y")
+        y -= (17 if (not call_mode and len(phone_entries(r)) > 1) else 13)
         row_count += 1
     c.save(); bio.seek(0); return bio.getvalue()
 
@@ -2798,8 +2827,8 @@ def render_output_buttons(active):
             # Clear old report artifacts first so no stale download appears.
             for k in list(st.session_state.keys()):
                 if str(k).startswith("prepared_one_export_street_list_pdf") or str(k).startswith("prepared_one_export_call_list_pdf") or str(k).startswith("prepared_one_export_mailing_labels_pdf"):
-                    st.session_state.pop(k, None)
-            st.session_state.pop("prepared_report_ready_key", None)
+                    _ = st.session_state.pop(k, None)
+            _ = st.session_state.pop("prepared_report_ready_key", None)
             with st.spinner(f"Building {report_kind}..."):
                 filename, data, mime, row_count = build_single_export(
                     active,
@@ -2844,7 +2873,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21za</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zc</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -2862,7 +2891,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21u — compact dashboard + restored output tabs")
+    st.caption("DEV final hybrid v21zc — street list layout + report workflow fix")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
