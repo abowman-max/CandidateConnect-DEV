@@ -2337,27 +2337,19 @@ def _contact_tracking_cols():
     return ["F", "A", "U", "NH", "Yard Sign"]
 
 def _build_street_pdf(active, call_mode=False):
-    """Build branded street/call list PDF matching the local working street-list format.
-
-    Layout goals:
-      - cover page with selected voter summary
-      - precinct counts summary
-      - precinct-section bookmarks/outlines
-      - precinct-separated detail pages
-      - street bars, house grouping, alternating shaded voter rows
-      - both mobile and landline shown with (m)/(l), applicant/unknown as (u)
-      - F/A/U/NH/Yard Sign/MB Perm tracking columns for street lists
+    """Build branded street/call list PDF without Streamlit magic side-effects.
+    All ReportLab drawing calls are assigned so Streamlit does not render repeated None values.
     """
     if canvas is None:
         return make_simple_pdf("PDF support unavailable", [], ["Message"])
 
     df = safe_filtered_df(active, 25000)
     df = normalize_download_df(df)
+    title = "Voter Call List" if call_mode else "Voter Contact List"
     if df.empty:
-        title = "Candidate Connect Call List" if call_mode else "Candidate Connect Street List"
-        return make_simple_pdf(title, [], ["Full Name", "Phone", "Party", "Age"])
+        return make_simple_pdf(title, [["No voters found"]], ["Message"])
 
-    # Normalize display fields used by the PDF.
+    df = df.copy()
     df["_name"] = df.apply(full_name, axis=1).map(smart_title)
     df["_phone"] = df.apply(phone_label, axis=1)
     df["_precinct"] = df.get("Precinct", "").astype(str).map(canonical_precinct_display).replace("", "Unassigned")
@@ -2365,10 +2357,9 @@ def _build_street_pdf(active, call_mode=False):
     if call_mode:
         df = df[df["_phone"].astype(str).str.strip().ne("")].copy()
     if df.empty:
-        return make_simple_pdf("Candidate Connect Call List", [["No voters with phone numbers found"]], ["Message"])
+        return make_simple_pdf(title, [["No voters with phone numbers found"]], ["Message"])
 
-    # Sort like the local list: precinct -> street -> house number -> last -> first.
-    df = df.copy()
+    # Sort: precinct -> street -> house number -> last -> first.
     df["_precinct_sort"] = df["_precinct"].astype(str).str.upper()
     df["_street_sort"] = df["_street"].astype(str).str.upper().str.replace(r"[^A-Z0-9 ]+", " ", regex=True).str.strip()
     df["_house_sort"] = pd.to_numeric(df.get("House Number", "").astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
@@ -2377,117 +2368,174 @@ def _build_street_pdf(active, call_mode=False):
     df = df.sort_values(["_precinct_sort", "_street_sort", "_house_sort", "_last_sort", "_first_sort"], kind="stable")
 
     bio = io.BytesIO()
-    c = _NumberedCanvas(bio, pagesize=letter)
+    c = canvas.Canvas(bio, pagesize=letter)
     w, h = letter
-    mar_l, mar_r = 28, 28
-    title = "Voter Call List" if call_mode else "Voter Contact List"
-    subtitle = ""
-    tracks = _contact_tracking_cols()
+    mar_l, mar_r = 20, 20
+    usable_w = w - mar_l - mar_r
+    page_no = 1
+    tracks = ["F", "A", "U", "NH", "YS"]
 
-    def safe_bookmark(name, title_text, level=0):
-        try:
-            c.bookmarkPage(name)
-            c.addOutlineEntry(title_text[:80], name, level=level, closed=False)
-        except Exception:
-            pass
+    def draw_page_no():
+        nonlocal page_no
+        _ = c.setFont("Helvetica-Bold", 7)
+        _ = c.setFillColorRGB(0.12, 0.12, 0.12)
+        _ = c.drawCentredString(w / 2.0, 18, f"Page {page_no}")
+        _ = c.drawRightString(w - 24, 18, f"Updated: {datetime.now().strftime('%m/%d/%Y')}")
 
-    # Cover page
-    safe_bookmark("cover", title, 0)
-    y = _draw_branded_header(c, title, subtitle)
-    c.setFont("Helvetica-Bold", 20)
-    c.setFillColorRGB(0.50, 0.05, 0.12)
-    c.drawString(40, y-8, title)
-    c.setFont("Helvetica-Bold", 11)
-    c.setFillColorRGB(0.15,0.15,0.15)
-    c.drawString(40, y-32, datetime.now().strftime("%m/%d/%Y"))
+    def finish_page():
+        nonlocal page_no
+        draw_page_no()
+        _ = c.showPage()
+        page_no += 1
+
+    def draw_header(header_title):
+        _ = c.setFillColorRGB(1, 1, 1)
+        left_logo = _pdf_logo_path(LOGO_CANDIDATE_CONNECT)
+        right_logo = _pdf_logo_path(LOGO_TPTC)
+        if left_logo:
+            try:
+                _ = c.drawImage(left_logo, 28, h-58, width=92, height=40, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+        if right_logo:
+            try:
+                _ = c.drawImage(right_logo, w-122, h-58, width=94, height=40, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+        _ = c.setFillColorRGB(0.50, 0.05, 0.12)
+        _ = c.setFont("Helvetica-Bold", 16)
+        _ = c.drawString(132, h-42, str(header_title)[:56])
+        _ = c.setStrokeColorRGB(0.78, 0.78, 0.78)
+        _ = c.line(28, h-66, w-28, h-66)
+        return h - 84
+
+    def draw_table_header(y):
+        _ = c.setFillColorRGB(0.56, 0.06, 0.13)
+        _ = c.roundRect(mar_l, y-12, usable_w, 14, 3, fill=1, stroke=0)
+        _ = c.setFillColorRGB(1, 1, 1)
+        _ = c.setFont("Helvetica-Bold", 7.0)
+        if call_mode:
+            for txt, x in [("Full Name", 34), ("Phone", 222), ("Party", 398), ("Sex", 426), ("Age", 452), ("Precinct", 478)]:
+                _ = c.drawString(x, y-8, txt)
+        else:
+            for txt, x in [("House", 34), ("Full Name", 80), ("Phone", 250), ("Party", 392), ("Sex", 418), ("Age", 442)]:
+                _ = c.drawString(x, y-8, txt)
+            for label, x in [("F", 468), ("A", 492), ("U", 516), ("NH", 540), ("YS", 566), ("MB", 590)]:
+                _ = c.drawCentredString(x, y-8, label)
+        return y - 24
+
+    def draw_street_bar(street, y):
+        # Bar occupies y-12 through y+2. Return a row top safely below it.
+        _ = c.setFillColorRGB(0.56, 0.06, 0.13)
+        _ = c.roundRect(mar_l, y-12, usable_w, 14, 3, fill=1, stroke=0)
+        _ = c.setFillColorRGB(1, 1, 1)
+        _ = c.setFont("Helvetica-Bold", 7.6)
+        _ = c.drawString(mar_l+5, y-8, str(street)[:78])
+        return y - 28
+
+    def new_detail_page(precinct, cont=False, bookmark=False):
+        if bookmark:
+            try:
+                name = "pct_" + re.sub(r"[^A-Za-z0-9]+", "_", precinct)[:60]
+                _ = c.bookmarkPage(name)
+                _ = c.addOutlineEntry(smart_title(precinct)[:80], name, level=1, closed=False)
+            except Exception:
+                pass
+        heading = f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}"
+        yy = draw_header(heading)
+        yy = draw_table_header(yy)
+        return yy
+
+    # Cover page.
+    try:
+        _ = c.bookmarkPage("cover")
+        _ = c.addOutlineEntry(title, "cover", level=0, closed=False)
+    except Exception:
+        pass
+    y = draw_header(title)
+    _ = c.setFont("Helvetica-Bold", 20)
+    _ = c.setFillColorRGB(0.50, 0.05, 0.12)
+    _ = c.drawString(40, y-8, title)
+    _ = c.setFont("Helvetica-Bold", 11)
+    _ = c.setFillColorRGB(0.15, 0.15, 0.15)
+    _ = c.drawString(40, y-32, datetime.now().strftime("%m/%d/%Y"))
     hh_key = (df.get("County", "").astype(str).str.upper()+"|"+df.get("Municipality", "").astype(str).str.upper()+"|"+df.get("House Number", "").astype(str).str.upper()+"|"+df.get("Street Name", "").astype(str).str.upper()+"|"+df.get("Apartment Number", "").astype(str).str.upper())
     households = int(hh_key.nunique()) if len(df) else 0
-    c.setFont("Helvetica-Bold", 13)
-    c.drawString(40, y-62, f"Individuals: {len(df):,}   Households: {households:,}")
-    lines = _selected_filter_lines(active)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(40, y-98, "Selected Voters")
-    c.setFont("Helvetica", 9)
+    _ = c.setFont("Helvetica-Bold", 13)
+    _ = c.drawString(40, y-62, f"Individuals: {len(df):,}   Households: {households:,}")
+    _ = c.setFont("Helvetica-Bold", 11)
+    _ = c.drawString(40, y-98, "Selected Voters")
+    _ = c.setFont("Helvetica", 9)
     yy = y-116
+    lines = _selected_filter_lines(active)
     if lines:
         for line in lines:
-            c.drawString(54, yy, u"• " + line[:88])
+            _ = c.drawString(54, yy, u"• " + line[:88])
             yy -= 15
     else:
-        c.drawString(54, yy, u"• All active selected voters")
+        _ = c.drawString(54, yy, u"• All active selected voters")
         yy -= 15
-    yy -= 16
-    c.setFillColorRGB(0.50, 0.05, 0.12)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(40, yy, "Legend")
+    yy -= 18
+    _ = c.setFillColorRGB(0.50, 0.05, 0.12)
+    _ = c.setFont("Helvetica-Bold", 11)
+    _ = c.drawString(40, yy, "Legend")
     yy -= 15
-    c.setFillColorRGB(0.15, 0.15, 0.15)
-    c.setFont("Helvetica", 8.5)
-    legend_lines = [
-        "Phones: (m) mobile, (l) landline, (u) applicant/unknown",
-        "Contact boxes: F = Favorable, A = Against, U = Undecided, NH = Not Home",
-        "Yard Sign is a tracking checkbox. MB Perm prints Y when the voter is a permanent mail ballot voter.",
-    ]
-    for line in legend_lines:
-        c.drawString(54, yy, u"• " + line)
+    _ = c.setFillColorRGB(0.15, 0.15, 0.15)
+    _ = c.setFont("Helvetica", 8.5)
+    for line in [
+        "Phone labels: (m) mobile, (l) landline, (u) applicant/unknown.",
+        "Contact boxes: F = Favorable, A = Against, U = Undecided, NH = Not Home, YS = Yard Sign.",
+        "MB prints Y when the voter is a permanent mail ballot voter.",
+    ]:
+        _ = c.drawString(54, yy, u"• " + line)
         yy -= 13
-    c.showPage()
+    finish_page()
 
-    # Precinct summary pages
-    safe_bookmark("precinct_summary", "Precinct Counts Summary", 0)
+    # Precinct summary.
+    try:
+        _ = c.bookmarkPage("precinct_summary")
+        _ = c.addOutlineEntry("Precinct Counts Summary", "precinct_summary", level=0, closed=False)
+    except Exception:
+        pass
     summary = df.groupby("_precinct", dropna=False).size().reset_index(name="Individuals")
     hh_sum = pd.DataFrame({"_precinct": df["_precinct"], "HH": hh_key}).groupby("_precinct")["HH"].nunique().reset_index(name="Households")
     summary = summary.merge(hh_sum, on="_precinct", how="left").sort_values("_precinct", kind="stable")
-    y = _draw_branded_header(c, "Precinct Counts Summary", subtitle)
-    _draw_section_bar(c, "Precinct Counts Summary", y); y -= 24
-    c.setFont("Helvetica-Bold", 8.5); c.setFillColorRGB(0.05,0.05,0.05)
-    c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=13
-    c.setFont("Helvetica", 8.2)
-    for _,r in summary.iterrows():
+    y = draw_header("Precinct Counts Summary")
+    y = draw_street_bar("Precinct Counts Summary", y)
+    _ = c.setFont("Helvetica-Bold", 8.5)
+    _ = c.setFillColorRGB(0.05,0.05,0.05)
+    _ = c.drawString(42,y,"Precinct")
+    _ = c.drawRightString(420,y,"Individuals")
+    _ = c.drawRightString(510,y,"Households")
+    y -= 13
+    _ = c.setFont("Helvetica", 8.2)
+    for _, rr in summary.iterrows():
         if y < 44:
-            c.showPage()
-            y = _draw_branded_header(c, "Precinct Counts Summary", subtitle)
-            _draw_section_bar(c, "Precinct Counts Summary", y); y -= 24
-            c.setFont("Helvetica-Bold", 8.5); c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=13
-            c.setFont("Helvetica", 8.2)
-        c.drawString(42,y, smart_title(r.get("_precinct", ""))[:56])
-        c.drawRightString(420,y, f"{int(r.get('Individuals',0)):,}")
-        c.drawRightString(510,y, f"{int(r.get('Households',0) or 0):,}")
-        y-=12
-    c.setFont("Helvetica-Bold",8.5)
-    c.drawString(42,y,"TOTAL"); c.drawRightString(420,y,f"{len(df):,}"); c.drawRightString(510,y,f"{households:,}")
-    c.showPage()
-
-    def new_detail_page(precinct, cont=False, first_for_precinct=False):
-        if first_for_precinct:
-            safe_bookmark("pct_" + re.sub(r"[^A-Za-z0-9]+", "_", precinct)[:60], smart_title(precinct), 1)
-        header_title = f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}"
-        yy = _draw_branded_header(c, header_title, subtitle)
-        c.setFillColorRGB(0.56,0.06,0.13)
-        c.roundRect(mar_l, yy-12, w-mar_l-mar_r, 14, 3, fill=1, stroke=0)
-        c.setFillColorRGB(1,1,1)
-        c.setFont("Helvetica-Bold", 6.8)
-        if call_mode:
-            headers=[("Full Name",34), ("Phone",210), ("Party",375), ("Sex",405), ("Age",433), ("Precinct",458)]
-            for txt,x in headers: c.drawString(x, yy-8, txt)
-        else:
-            headers=[("House",42), ("Full Name",78), ("Phone",250), ("Party",395), ("Sex",418), ("Age",440)]
-            for txt,x in headers: c.drawString(x, yy-8, txt)
-            x=462
-            for t in tracks:
-                label = "YS" if t == "Yard Sign" else t
-                c.drawCentredString(x, yy-8, label)
-                x += 22
-            c.setFont("Helvetica-Bold", 6.0)
-            c.drawCentredString(586, yy-8, "MB")
-        return yy-22
+            finish_page()
+            y = draw_header("Precinct Counts Summary")
+            y = draw_street_bar("Precinct Counts Summary", y)
+            _ = c.setFont("Helvetica-Bold", 8.5)
+            _ = c.drawString(42,y,"Precinct")
+            _ = c.drawRightString(420,y,"Individuals")
+            _ = c.drawRightString(510,y,"Households")
+            y -= 13
+            _ = c.setFont("Helvetica", 8.2)
+        _ = c.drawString(42,y, smart_title(rr.get("_precinct", ""))[:56])
+        _ = c.drawRightString(420,y, f"{int(rr.get('Individuals',0)):,}")
+        _ = c.drawRightString(510,y, f"{int(rr.get('Households',0) or 0):,}")
+        y -= 12
+    _ = c.setFont("Helvetica-Bold",8.5)
+    _ = c.drawString(42,y,"TOTAL")
+    _ = c.drawRightString(420,y,f"{len(df):,}")
+    _ = c.drawRightString(510,y,f"{households:,}")
+    finish_page()
 
     current_precinct = None
-    seen_precincts = set()
     current_street = None
+    seen_precincts = set()
     y = None
     row_count = 0
-    for _,r in df.iterrows():
+    for _, r in df.iterrows():
         precinct = cc_text(r.get("_precinct", "")) or "Unassigned"
         street = smart_title(r.get("_street", "")) or "Unknown Street"
         house_raw = cc_text(r.get("House Number", ""))
@@ -2498,58 +2546,74 @@ def _build_street_pdf(active, call_mode=False):
         if re.fullmatch(r"(?i)(?:apt|unit|ste|suite|#)?\s*[A-Z0-9-]{1,8}", apt_raw or "") and not re.search(r"(?i)\b(?:dr|rd|st|ave|ln|ct|cir|blvd|way|road|street|drive|lane)\b", apt_raw or ""):
             apt = re.sub(r"(?i)^(apt|unit|ste|suite)\s+", "", apt_raw).strip()
         house_text = (house + (f" Apt {apt}" if apt else "")).strip()
-        need_new_precinct = precinct != current_precinct
-        if y is None or need_new_precinct or y < 44:
+
+        new_precinct = precinct != current_precinct
+        if y is None or new_precinct or y < 56:
             if y is not None:
-                c.showPage()
-            first_for_precinct = precinct not in seen_precincts
-            y = new_detail_page(precinct, cont=(not need_new_precinct), first_for_precinct=first_for_precinct)
+                finish_page()
+            y = new_detail_page(precinct, cont=False, bookmark=(precinct not in seen_precincts))
             seen_precincts.add(precinct)
             current_precinct = precinct
             current_street = None
         if not call_mode and street != current_street:
-            if y < 62:
-                c.showPage(); y = new_detail_page(precinct, cont=True)
-            y = _draw_section_bar(c, street, y, x=mar_l, width=w-mar_l-mar_r)
-            y -= 6
+            if y < 82:
+                finish_page()
+                y = new_detail_page(precinct, cont=True, bookmark=False)
+            y = draw_street_bar(street, y)
             current_street = street
-        # alternating voter row shading
-        c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
-        row_h = 22 if (not call_mode and len(phone_entries(r)) > 1) else 15
-        c.rect(mar_l+6, y-6, w-mar_l-mar_r-12, row_h, fill=1, stroke=0)
-        c.setFillColorRGB(0.08,0.08,0.08)
-        if call_mode:
-            c.setFont("Helvetica", 6.7)
-            c.drawString(34, y, smart_title(r.get("_name", ""))[:39])
-            c.drawString(210, y, cc_text(r.get("_phone", ""))[:37])
-            c.drawString(378, y, cc_text(r.get("Party", ""))[:1])
-            c.drawString(408, y, cc_text(r.get("Gender", ""))[:1])
-            c.drawRightString(450, y, cc_text(r.get("Age", ""))[:3])
-            c.drawString(458, y, smart_title(precinct)[:23])
+
+        phone_lines = [f"{num} ({typ})" for num, typ in phone_entries(r)]
+        row_h = 28 if (not call_mode and len(phone_lines) > 1) else 18
+        if y - row_h < 34:
+            finish_page()
+            y = new_detail_page(precinct, cont=True, bookmark=False)
+            if not call_mode:
+                y = draw_street_bar(street, y)
+        # shaded row behind the text, aligned with this row only.
+        if row_count % 2 == 0:
+            _ = c.setFillColorRGB(0.965, 0.86, 0.88)
         else:
-            # Taller row so mobile/landline can be stacked instead of running into party/age columns.
-            phone_lines = [f"{num} ({typ})" for num, typ in phone_entries(r)]
-            c.setFont("Helvetica-Bold", 6.7)
-            c.drawString(42, y, house_text[:10])
-            c.setFont("Helvetica", 6.3)
-            c.drawString(78, y, smart_title(r.get("_name", ""))[:34])
-            py = y + 4 if len(phone_lines) > 1 else y
-            for ph in phone_lines[:2]:
-                c.drawString(250, py, ph[:31])
-                py -= 8
-            c.drawString(397, y, cc_text(r.get("Party", ""))[:1])
-            c.drawString(421, y, cc_text(r.get("Gender", ""))[:1])
-            c.drawRightString(454, y, cc_text(r.get("Age", ""))[:3])
-            x=462
-            for t in tracks:
-                c.rect(x-3, y-2, 6, 6, fill=0, stroke=1)
-                x += 22
-            if str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
-                c.setFont("Helvetica-Bold", 6.8)
-                c.drawCentredString(586, y, "Y")
-        y -= (25 if (not call_mode and len(phone_entries(r)) > 1) else 17)
+            _ = c.setFillColorRGB(1,1,1)
+        _ = c.rect(mar_l+6, y-row_h+4, usable_w-12, row_h, fill=1, stroke=0)
+        _ = c.setFillColorRGB(0.08,0.08,0.08)
+        baseline = y - 10
+        if call_mode:
+            _ = c.setFont("Helvetica", 6.7)
+            _ = c.drawString(34, baseline, smart_title(r.get("_name", ""))[:42])
+            _ = c.drawString(222, baseline, cc_text(r.get("_phone", ""))[:38])
+            _ = c.drawString(400, baseline, cc_text(r.get("Party", ""))[:1])
+            _ = c.drawString(428, baseline, cc_text(r.get("Gender", ""))[:1])
+            _ = c.drawRightString(466, baseline, cc_text(r.get("Age", ""))[:3])
+            _ = c.drawString(478, baseline, smart_title(precinct)[:22])
+        else:
+            _ = c.setFont("Helvetica-Bold", 6.5)
+            if len(house_text) > 11:
+                _ = c.setFont("Helvetica-Bold", 5.6)
+            _ = c.drawString(34, baseline, house_text[:14])
+            _ = c.setFont("Helvetica", 6.4)
+            _ = c.drawString(80, baseline, smart_title(r.get("_name", ""))[:36])
+            _ = c.setFont("Helvetica", 6.3)
+            if len(phone_lines) > 1:
+                _ = c.drawString(250, baseline+5, phone_lines[0][:30])
+                _ = c.drawString(250, baseline-4, phone_lines[1][:30])
+            elif phone_lines:
+                _ = c.drawString(250, baseline, phone_lines[0][:30])
+            _ = c.drawString(394, baseline, cc_text(r.get("Party", ""))[:1])
+            _ = c.drawString(420, baseline, cc_text(r.get("Gender", ""))[:1])
+            _ = c.drawRightString(456, baseline, cc_text(r.get("Age", ""))[:3])
+            for x in [468, 492, 516, 540, 566]:
+                _ = c.rect(x-3, baseline-2, 6, 6, fill=0, stroke=1)
+            mb_val = str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper()
+            if mb_val in {"Y", "YES", "1", "TRUE"}:
+                _ = c.setFont("Helvetica-Bold", 7.0)
+                _ = c.drawCentredString(590, baseline, "Y")
+        y -= row_h + 4
         row_count += 1
-    c.save(); bio.seek(0); return bio.getvalue()
+
+    draw_page_no()
+    _ = c.save()
+    bio.seek(0)
+    return bio.getvalue()
 
 def street_list_pdf(active):
     return _build_street_pdf(active, call_mode=False)
