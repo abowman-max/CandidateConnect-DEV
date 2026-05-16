@@ -2311,139 +2311,185 @@ def _contact_tracking_cols():
     return ["F", "A", "U", "NH", "Yard Sign", "MB Perm"]
 
 def _build_street_pdf(active, call_mode=False):
+    """Build branded street/call list PDF matching the local working street-list format.
+
+    Layout goals:
+      - cover page with selected voter summary
+      - precinct counts summary
+      - precinct-section bookmarks/outlines
+      - precinct-separated detail pages
+      - street bars, house grouping, alternating shaded voter rows
+      - both mobile and landline shown with (m)/(l), applicant/unknown as (u)
+      - F/A/U/NH/Yard Sign/MB Perm tracking columns for street lists
+    """
     if canvas is None:
-        return b"PDF support unavailable."
+        return make_simple_pdf("PDF support unavailable", [], ["Message"])
+
     df = safe_filtered_df(active, 25000)
     df = normalize_download_df(df)
     if df.empty:
         title = "Candidate Connect Call List" if call_mode else "Candidate Connect Street List"
-        return make_simple_pdf(title, [], ["Full Name","Phone","P","Age"] if call_mode else ["Street","House","Full Name","Phone","P","Age"])
+        return make_simple_pdf(title, [], ["Full Name", "Phone", "Party", "Age"])
+
+    # Normalize display fields used by the PDF.
     df["_name"] = df.apply(full_name, axis=1).map(smart_title)
     df["_phone"] = df.apply(phone_label, axis=1)
+    df["_precinct"] = df.get("Precinct", "").astype(str).map(canonical_precinct_display).replace("", "Unassigned")
+    df["_street"] = df.get("Street Name", "").astype(str).map(smart_title).replace("", "Unknown Street")
     if call_mode:
         df = df[df["_phone"].astype(str).str.strip().ne("")].copy()
-    df = _street_sort_key_df(df)
+    if df.empty:
+        return make_simple_pdf("Candidate Connect Call List", [["No voters with phone numbers found"]], ["Message"])
+
+    # Sort like the local list: precinct -> street -> house number -> last -> first.
+    df = df.copy()
+    df["_precinct_sort"] = df["_precinct"].astype(str).str.upper()
+    df["_street_sort"] = df["_street"].astype(str).str.upper().str.replace(r"[^A-Z0-9 ]+", " ", regex=True).str.strip()
+    df["_house_sort"] = pd.to_numeric(df.get("House Number", "").astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
+    df["_last_sort"] = df.get("LastName", "").astype(str).str.upper()
+    df["_first_sort"] = df.get("FirstName", "").astype(str).str.upper()
+    df = df.sort_values(["_precinct_sort", "_street_sort", "_house_sort", "_last_sort", "_first_sort"], kind="stable")
 
     bio = io.BytesIO()
     c = _NumberedCanvas(bio, pagesize=letter)
-    w,h = letter
-
-    title = "Candidate Connect Call List" if call_mode else "Candidate Connect Street List"
+    w, h = letter
+    mar_l, mar_r = 28, 28
+    title = "Voter Call List" if call_mode else "Voter Contact List"
     subtitle = "Phones: (m) mobile, (l) landline, (u) applicant/unknown"
+    tracks = _contact_tracking_cols()
+
+    def safe_bookmark(name, title_text, level=0):
+        try:
+            c.bookmarkPage(name)
+            c.addOutlineEntry(title_text[:80], name, level=level, closed=False)
+        except Exception:
+            pass
 
     # Cover page
+    safe_bookmark("cover", title, 0)
     y = _draw_branded_header(c, title, subtitle)
-    c.setFont("Helvetica-Bold", 18); c.setFillColorRGB(0.15,0.15,0.15)
-    c.drawString(40, y-15, title)
-    c.setFont("Helvetica", 10)
-    c.drawString(40, y-35, datetime.now().strftime("%m/%d/%Y"))
-    hh_key = (df.get("County","").astype(str).str.upper()+"|"+df.get("Municipality","").astype(str).str.upper()+"|"+df.get("House Number","").astype(str).str.upper()+"|"+df.get("Street Name","").astype(str).str.upper()+"|"+df.get("Apartment Number","").astype(str).str.upper())
-    households = int(hh_key.nunique()) if len(df) else 0
+    c.setFont("Helvetica-Bold", 20)
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.drawString(40, y-8, title)
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(40, y-62, f"Individuals: {len(df):,}    Households: {households:,}")
+    c.setFillColorRGB(0.15,0.15,0.15)
+    c.drawString(40, y-32, datetime.now().strftime("%m/%d/%Y"))
+    hh_key = (df.get("County", "").astype(str).str.upper()+"|"+df.get("Municipality", "").astype(str).str.upper()+"|"+df.get("House Number", "").astype(str).str.upper()+"|"+df.get("Street Name", "").astype(str).str.upper()+"|"+df.get("Apartment Number", "").astype(str).str.upper())
+    households = int(hh_key.nunique()) if len(df) else 0
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(40, y-62, f"Individuals: {len(df):,}   Households: {households:,}")
     lines = _selected_filter_lines(active)
-    c.setFont("Helvetica-Bold", 10); c.drawString(40, y-92, "Selected Voters")
-    c.setFont("Helvetica", 8.5)
-    yy = y-110
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y-98, "Selected Voters")
+    c.setFont("Helvetica", 9)
+    yy = y-116
     if lines:
         for line in lines:
-            c.drawString(54, yy, u"• " + line[:90]); yy -= 14
+            c.drawString(54, yy, u"• " + line[:88])
+            yy -= 15
     else:
         c.drawString(54, yy, u"• All active selected voters")
     c.showPage()
 
-    # Precinct count summary pages
-    if "Precinct" not in df.columns: df["Precinct"] = ""
-    summary = df.groupby("Precinct", dropna=False).size().reset_index(name="Individuals")
-    hh_tmp = pd.DataFrame({"Precinct": df["Precinct"], "HH": hh_key})
-    hh_sum = hh_tmp.groupby("Precinct")["HH"].nunique().reset_index(name="Households")
-    summary = summary.merge(hh_sum, on="Precinct", how="left").sort_values("Precinct")
+    # Precinct summary pages
+    safe_bookmark("precinct_summary", "Precinct Counts Summary", 0)
+    summary = df.groupby("_precinct", dropna=False).size().reset_index(name="Individuals")
+    hh_sum = pd.DataFrame({"_precinct": df["_precinct"], "HH": hh_key}).groupby("_precinct")["HH"].nunique().reset_index(name="Households")
+    summary = summary.merge(hh_sum, on="_precinct", how="left").sort_values("_precinct", kind="stable")
     y = _draw_branded_header(c, "Precinct Counts Summary", subtitle)
-    _draw_section_bar(c, "Precinct Counts Summary", y); y -= 22
-    c.setFont("Helvetica-Bold", 8); c.setFillColorRGB(0.05,0.05,0.05)
-    c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=12
-    c.setFont("Helvetica", 8)
+    _draw_section_bar(c, "Precinct Counts Summary", y); y -= 24
+    c.setFont("Helvetica-Bold", 8.5); c.setFillColorRGB(0.05,0.05,0.05)
+    c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=13
+    c.setFont("Helvetica", 8.2)
     for _,r in summary.iterrows():
         if y < 44:
-            c.showPage(); y = _draw_branded_header(c, "Precinct Counts Summary", subtitle); _draw_section_bar(c, "Precinct Counts Summary", y); y -= 22
-            c.setFont("Helvetica-Bold", 8); c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=12; c.setFont("Helvetica", 8)
-        c.drawString(42,y, smart_title(r.get("Precinct",""))[:54])
+            c.showPage()
+            y = _draw_branded_header(c, "Precinct Counts Summary", subtitle)
+            _draw_section_bar(c, "Precinct Counts Summary", y); y -= 24
+            c.setFont("Helvetica-Bold", 8.5); c.drawString(42,y,"Precinct"); c.drawRightString(420,y,"Individuals"); c.drawRightString(510,y,"Households"); y-=13
+            c.setFont("Helvetica", 8.2)
+        c.drawString(42,y, smart_title(r.get("_precinct", ""))[:56])
         c.drawRightString(420,y, f"{int(r.get('Individuals',0)):,}")
         c.drawRightString(510,y, f"{int(r.get('Households',0) or 0):,}")
-        y-=11
-    c.setFont("Helvetica-Bold",8); c.drawString(42,y,"TOTAL"); c.drawRightString(420,y,f"{len(df):,}"); c.drawRightString(510,y,f"{households:,}")
+        y-=12
+    c.setFont("Helvetica-Bold",8.5)
+    c.drawString(42,y,"TOTAL"); c.drawRightString(420,y,f"{len(df):,}"); c.drawRightString(510,y,f"{households:,}")
     c.showPage()
 
-    # Detail pages
-    current_precinct = None
-    current_street = None
-    y = None
-    tracks = _contact_tracking_cols()
-    def new_detail_page(precinct, cont=False):
-        yy = _draw_branded_header(c, f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}", subtitle)
-        # header row
-        c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(28, yy-12, w-56, 14, 3, fill=1, stroke=0)
-        c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 6.8)
+    def new_detail_page(precinct, cont=False, first_for_precinct=False):
+        if first_for_precinct:
+            safe_bookmark("pct_" + re.sub(r"[^A-Za-z0-9]+", "_", precinct)[:60], smart_title(precinct), 1)
+        header_title = f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}"
+        yy = _draw_branded_header(c, header_title, subtitle)
+        c.setFillColorRGB(0.56,0.06,0.13)
+        c.roundRect(mar_l, yy-12, w-mar_l-mar_r, 14, 3, fill=1, stroke=0)
+        c.setFillColorRGB(1,1,1)
+        c.setFont("Helvetica-Bold", 6.8)
         if call_mode:
-            headers=[("Full Name",34), ("Phone",190), ("Party",345), ("Sex",375), ("Age",402), ("Precinct",430)]
+            headers=[("Full Name",34), ("Phone",210), ("Party",375), ("Sex",405), ("Age",433), ("Precinct",458)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
         else:
-            headers=[("Full Name",72), ("Phone",240), ("Party",344), ("Sex",374), ("Age",402)]
+            headers=[("Full Name",72), ("Phone",238), ("Party",342), ("Sex",370), ("Age",398)]
             for txt,x in headers: c.drawString(x, yy-8, txt)
-            x=432
+            x=425
             for t in tracks:
                 c.drawCentredString(x, yy-8, t if len(t)<=3 else t[:8])
-                x += 27 if t != "Yard Sign" else 44
-        return yy-20
+                x += 25 if t != "Yard Sign" else 42
+        return yy-22
 
+    current_precinct = None
+    seen_precincts = set()
+    current_street = None
+    y = None
     row_count = 0
     for _,r in df.iterrows():
-        precinct = cc_text(r.get("Precinct","")) or "Unassigned"
-        street = smart_title(r.get("Street Name","")) or "Unknown Street"
-        house = cc_text(r.get("House Number",""))
-        apt = cc_text(r.get("Apartment Number",""))
+        precinct = cc_text(r.get("_precinct", "")) or "Unassigned"
+        street = smart_title(r.get("_street", "")) or "Unknown Street"
+        house = cc_text(r.get("House Number", ""))
+        apt = cc_text(r.get("Apartment Number", ""))
         house_text = (house + (f" Apt {apt}" if apt else "")).strip()
         need_new_precinct = precinct != current_precinct
         if y is None or need_new_precinct or y < 44:
-            if y is not None: c.showPage()
-            y = new_detail_page(precinct, cont=(not need_new_precinct))
+            if y is not None:
+                c.showPage()
+            first_for_precinct = precinct not in seen_precincts
+            y = new_detail_page(precinct, cont=(not need_new_precinct), first_for_precinct=first_for_precinct)
+            seen_precincts.add(precinct)
             current_precinct = precinct
             current_street = None
         if not call_mode and street != current_street:
             if y < 62:
                 c.showPage(); y = new_detail_page(precinct, cont=True)
-            y = _draw_section_bar(c, street, y, x=28, width=w-56)
+            y = _draw_section_bar(c, street, y, x=mar_l, width=w-mar_l-mar_r)
             current_street = street
-        if not call_mode:
-            c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
-            c.rect(34, y-2, w-68, 11, fill=1, stroke=0)
-            c.setFillColorRGB(0.08,0.08,0.08); c.setFont("Helvetica-Bold", 7)
+        # alternating voter row shading
+        c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
+        c.rect(mar_l+6, y-2, w-mar_l-mar_r-12, 11, fill=1, stroke=0)
+        c.setFillColorRGB(0.08,0.08,0.08)
+        if call_mode:
+            c.setFont("Helvetica", 6.7)
+            c.drawString(34, y, smart_title(r.get("_name", ""))[:39])
+            c.drawString(210, y, cc_text(r.get("_phone", ""))[:37])
+            c.drawString(378, y, cc_text(r.get("Party", ""))[:1])
+            c.drawString(408, y, cc_text(r.get("Gender", ""))[:1])
+            c.drawRightString(450, y, cc_text(r.get("Age", ""))[:3])
+            c.drawString(458, y, smart_title(precinct)[:23])
+        else:
+            c.setFont("Helvetica-Bold", 7)
             c.drawString(42, y, house_text[:17])
             c.setFont("Helvetica", 6.8)
-            c.drawString(72, y, smart_title(r.get("_name",""))[:33])
-            c.drawString(240, y, cc_text(r.get("_phone",""))[:28])
-            c.drawString(346, y, cc_text(r.get("Party",""))[:1])
-            c.drawString(376, y, cc_text(r.get("Gender",""))[:1])
-            c.drawRightString(420, y, cc_text(r.get("Age",""))[:3])
-            # checkbox squares
-            x=435
+            c.drawString(72, y, smart_title(r.get("_name", ""))[:34])
+            c.drawString(238, y, cc_text(r.get("_phone", ""))[:29])
+            c.drawString(344, y, cc_text(r.get("Party", ""))[:1])
+            c.drawString(372, y, cc_text(r.get("Gender", ""))[:1])
+            c.drawRightString(418, y, cc_text(r.get("Age", ""))[:3])
+            x=428
             for t in tracks:
                 c.rect(x, y-2, 6, 6, fill=0, stroke=1)
-                x += 27 if t != "Yard Sign" else 44
-            if str(r.get("MB_PERM","")).strip().upper() in {"Y","YES","1","TRUE"}:
+                x += 25 if t != "Yard Sign" else 42
+            if str(r.get("MB_PERM", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
                 c.drawString(574, y, "Y")
-            y -= 12
-        else:
-            c.setFillColorRGB(0.965, 0.86, 0.88) if row_count % 2 == 0 else c.setFillColorRGB(1,1,1)
-            c.rect(28, y-2, w-56, 11, fill=1, stroke=0)
-            c.setFillColorRGB(0.08,0.08,0.08); c.setFont("Helvetica", 6.7)
-            c.drawString(34, y, smart_title(r.get("_name",""))[:36])
-            c.drawString(190, y, cc_text(r.get("_phone",""))[:34])
-            c.drawString(348, y, cc_text(r.get("Party",""))[:1])
-            c.drawString(378, y, cc_text(r.get("Gender",""))[:1])
-            c.drawRightString(420, y, cc_text(r.get("Age",""))[:3])
-            c.drawString(430, y, smart_title(precinct)[:25])
-            y -= 12
+        y -= 12
         row_count += 1
     c.save(); bio.seek(0); return bio.getvalue()
 
@@ -2727,31 +2773,37 @@ def render_output_buttons(active):
 
     with tabs[2]:
         st.markdown("### Reports + Tracking")
-        st.caption("Street and call lists use the same voter order as the PDFs. Upload processing will be wired to the pipeline correction/contact update step after export QA is stable.")
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            st.download_button("Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv", width="stretch")
-        with r2:
-            st.download_button("Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv", width="stretch")
-        with r3:
-            uploaded = st.file_uploader("Upload completed contact results", type=["csv","xlsx"], key=special_key("contact_results_upload"))
+        st.caption("Prepare one PDF/report at a time. Street and call lists are sorted like the local list and include mobile/landline phone labels.")
+        rcols = st.columns([1.2, .8, 1.0])
+        with rcols[0]:
+            report_kind = st.selectbox("Report type", ["Street List PDF", "Call List PDF", "Mailing Labels PDF"], key=special_key("report_kind_clean"))
+        with rcols[1]:
+            st.selectbox("File type", ["PDF"], key=special_key("report_file_type_clean"))
+        report_key = prepared_key_for(report_kind, "PDF")
+        pcol, dcol = st.columns([1, 1])
+        with pcol:
+            if st.button("Prepare Report", width="stretch"):
+                with st.spinner(f"Building {report_kind}..."):
+                    filename, data, mime, row_count = build_single_export(active, report_kind, "PDF", st.session_state.get(special_key("mailing_mode"), "Not Householded"))
+                    st.session_state[report_key] = {"filename": filename, "data": data, "mime": mime, "rows": row_count}
+        with dcol:
+            if report_key in st.session_state:
+                item = st.session_state[report_key]
+                st.download_button(f"Download {item['filename']}", item["data"], item["filename"], item["mime"], width="stretch", on_click=mark_downloaded, args=(report_key,))
+            else:
+                st.button("Download Report", disabled=True, width="stretch")
+
+        st.markdown("---")
+        st.markdown("#### Contact Tracking")
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            st.download_button("Download Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv", width="stretch")
+        with t2:
+            st.download_button("Download Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv", width="stretch")
+        with t3:
+            uploaded = st.file_uploader("Upload completed contact results", type=["csv", "xlsx"], key=special_key("contact_results_upload_clean"))
             if uploaded is not None:
                 st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
-        st.markdown("---")
-        p1, p2, p3 = st.columns(3)
-        for label, func, key_name, fname in [
-            ("Street List PDF", street_list_pdf, "prepared_street_pdf", "candidate_connect_street_list.pdf"),
-            ("Call List PDF", call_list_pdf, "prepared_call_pdf", "candidate_connect_call_list.pdf"),
-            ("Mailing Labels PDF", labels_pdf, "prepared_labels_pdf", "candidate_connect_labels_avery5160.pdf"),
-        ]:
-            col = p1 if "Street" in label else (p2 if "Call" in label else p3)
-            with col:
-                if st.button(f"Prepare {label}", width="stretch"):
-                    with st.spinner(f"Building {label}..."):
-                        st.session_state[key_name] = func(active)
-                if key_name in st.session_state:
-                    st.download_button(f"Download {label}", st.session_state[key_name], fname, "application/pdf", width="stretch", on_click=mark_downloaded, args=(key_name,))
-
 
 st.markdown('<div class="cc-header">', unsafe_allow_html=True)
 h_logo, h_mid, h_power = st.columns([1.1, 2.8, 1.2])
@@ -2760,7 +2812,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21y</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21za</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
