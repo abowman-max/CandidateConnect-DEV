@@ -2774,32 +2774,64 @@ def render_output_buttons(active):
     with tabs[2]:
         st.markdown("### Reports + Tracking")
         st.caption("Prepare one PDF/report at a time. Street and call lists are sorted like the local list and include mobile/landline phone labels.")
-        rcols = st.columns([1.2, .8, 1.0])
-        with rcols[0]:
-            report_kind = st.selectbox("Report type", ["Street List PDF", "Call List PDF", "Mailing Labels PDF"], key=special_key("report_kind_clean"))
-        with rcols[1]:
-            st.selectbox("File type", ["PDF"], key=special_key("report_file_type_clean"))
+
+        # Clean report workflow: no stale download button and no wide, confusing buttons.
+        r1, r2, spacer = st.columns([1.25, .7, 2.2])
+        with r1:
+            report_kind = st.selectbox(
+                "Report type",
+                ["Street List PDF", "Call List PDF", "Mailing Labels PDF"],
+                key=special_key("report_kind_clean"),
+            )
+        with r2:
+            file_type = st.selectbox("File type", ["PDF"], key=special_key("report_file_type_clean"))
+
         report_key = prepared_key_for(report_kind, "PDF")
-        pcol, dcol = st.columns([1, 1])
-        with pcol:
-            if st.button("Prepare Report", width="stretch"):
-                with st.spinner(f"Building {report_kind}..."):
-                    filename, data, mime, row_count = build_single_export(active, report_kind, "PDF", st.session_state.get(special_key("mailing_mode"), "Not Householded"))
-                    st.session_state[report_key] = {"filename": filename, "data": data, "mime": mime, "rows": row_count}
-        with dcol:
-            if report_key in st.session_state:
+        # If the user changes the report type, do not show an older report download as if it were ready.
+        current_ready_key = st.session_state.get("prepared_report_ready_key")
+        report_is_ready = current_ready_key == report_key and report_key in st.session_state
+
+        b1, b2, b3 = st.columns([.9, 1.25, 3.0])
+        with b1:
+            prepare_clicked = st.button("Prepare Report", key=special_key("prepare_report_button"))
+        if prepare_clicked:
+            # Clear old report artifacts first so no stale download appears.
+            for k in list(st.session_state.keys()):
+                if str(k).startswith("prepared_one_export_street_list_pdf") or str(k).startswith("prepared_one_export_call_list_pdf") or str(k).startswith("prepared_one_export_mailing_labels_pdf"):
+                    st.session_state.pop(k, None)
+            st.session_state.pop("prepared_report_ready_key", None)
+            with st.spinner(f"Building {report_kind}..."):
+                filename, data, mime, row_count = build_single_export(
+                    active,
+                    report_kind,
+                    "PDF",
+                    st.session_state.get(special_key("mailing_mode"), "Not Householded"),
+                )
+                st.session_state[report_key] = {"filename": filename, "data": data, "mime": mime, "rows": row_count}
+                st.session_state["prepared_report_ready_key"] = report_key
+                report_is_ready = True
+            st.success(f"Prepared {filename}")
+
+        with b2:
+            if report_is_ready:
                 item = st.session_state[report_key]
-                st.download_button(f"Download {item['filename']}", item["data"], item["filename"], item["mime"], width="stretch", on_click=mark_downloaded, args=(report_key,))
-            else:
-                st.button("Download Report", disabled=True, width="stretch")
+                st.download_button(
+                    f"Download {item['filename']}",
+                    item["data"],
+                    item["filename"],
+                    item["mime"],
+                    key=special_key("download_prepared_report_button"),
+                    on_click=mark_downloaded,
+                    args=(report_key,),
+                )
 
         st.markdown("---")
         st.markdown("#### Contact Tracking")
-        t1, t2, t3 = st.columns(3)
+        t1, t2, t3 = st.columns([1.1, 1.1, 1.8])
         with t1:
-            st.download_button("Download Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv", width="stretch")
+            st.download_button("Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv")
         with t2:
-            st.download_button("Download Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv", width="stretch")
+            st.download_button("Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv")
         with t3:
             uploaded = st.file_uploader("Upload completed contact results", type=["csv", "xlsx"], key=special_key("contact_results_upload_clean"))
             if uploaded is not None:
