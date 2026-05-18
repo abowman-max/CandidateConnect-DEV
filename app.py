@@ -2194,6 +2194,119 @@ def remote_search_voters(term, max_rows=25):
     finally:
         con.close()
 
+
+def remote_voter_detail(voter_id: str) -> pd.Series:
+    """Fetch one full voter record from detail shards by voter_id, then normalize display fields."""
+    vid = cc_text(voter_id)
+    if not vid:
+        return pd.Series(dtype="object")
+    urls = detail_urls_from_manifest()
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        df = con.execute(
+            f"SELECT * FROM read_parquet({urls!r}, union_by_name=true) "
+            f"WHERE CAST({sql_ident('voter_id')} AS VARCHAR) = {sql_lit(vid)} LIMIT 1"
+        ).df()
+        if df.empty:
+            return pd.Series(dtype="object")
+        df = normalize_download_df(df)
+        return df.iloc[0]
+    finally:
+        con.close()
+
+
+def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
+    """Find likely household members by normalized address fields, using detail shards remotely."""
+    if row is None or len(row) == 0:
+        return pd.DataFrame(columns=report_columns())
+    conditions = []
+    for field in ["County", "Municipality", "House Number", "Street Name", "Apartment Number", "Zip"]:
+        val = cc_text(row.get(field, ""))
+        if val:
+            conditions.append(f"LOWER(CAST({sql_ident(field)} AS VARCHAR)) = {sql_lit(val.lower())}")
+    # Require at least house number + street, otherwise household lookup is too broad.
+    if not cc_text(row.get("House Number", "")) or not cc_text(row.get("Street Name", "")):
+        return pd.DataFrame(columns=report_columns())
+    urls = detail_urls_from_manifest()
+    cols = report_columns()
+    select_cols = ", ".join([f"CAST({sql_ident(c)} AS VARCHAR) AS {sql_ident(c)}" for c in cols])
+    where = " AND ".join(conditions)
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        df = con.execute(
+            f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) "
+            f"WHERE {where} ORDER BY {sql_ident('LastName')}, {sql_ident('FirstName')} LIMIT {int(max_rows)}"
+        ).df()
+        return normalize_download_df(df) if not df.empty else df
+    finally:
+        con.close()
+
+
+def correction_store() -> dict:
+    if "voter_corrections" not in st.session_state or not isinstance(st.session_state.get("voter_corrections"), dict):
+        st.session_state["voter_corrections"] = {}
+    return st.session_state["voter_corrections"]
+
+
+def correction_rows_df() -> pd.DataFrame:
+    rows = []
+    for vid, payload in correction_store().items():
+        base = {"voter_id": vid, "updated_at": payload.get("updated_at", ""), "notes": payload.get("notes", "")}
+        base.update(payload.get("fields", {}))
+        rows.append(base)
+    return pd.DataFrame(rows)
+
+
+def apply_local_correction(row: pd.Series) -> pd.Series:
+    vid = cc_text(row.get("voter_id", ""))
+    payload = correction_store().get(vid)
+    if not payload:
+        return row
+    out = row.copy()
+    for k, v in (payload.get("fields", {}) or {}).items():
+        out[k] = v
+    return out
+
+
+def render_election_history_table(row: pd.Series):
+    cols = election_columns_from_manifest()
+    if not cols:
+        return
+    general = []
+    primary = []
+    for col in cols:
+        meta = election_meta_from_col(col)
+        if not meta:
+            continue
+        raw = cc_text(row.get(col, ""))
+        method = normalize_vote_method(raw)
+        if not raw or method in {"", "Did Not Vote"}:
+            continue
+        item = {"Election": meta["year"], "Method": method, "Party": cc_text(row.get("Party", ""))}
+        if meta["type"] == "General":
+            general.append(item)
+        elif meta["type"] == "Primary":
+            primary.append(item)
+    if general or primary:
+        st.markdown("### Election History")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**General Elections**")
+            st.dataframe(pd.DataFrame(general).sort_values("Election", ascending=False) if general else pd.DataFrame(columns=["Election","Method","Party"]), hide_index=True, width="stretch")
+        with c2:
+            st.markdown("**Primary Elections**")
+            st.dataframe(pd.DataFrame(primary).sort_values("Election", ascending=False) if primary else pd.DataFrame(columns=["Election","Method","Party"]), hide_index=True, width="stretch")
+
 def safe_filtered_df(active, max_rows=5000):
     try:
         df = duckdb_detail_filtered_df(active or {}, active_special_filters(), max_rows)
@@ -2651,33 +2764,139 @@ def render_voter_lookup_workspace():
     q = st.session_state.get(special_key("lookup_query"), "")
     maxn = st.session_state.get(special_key("lookup_max"), 25)
     if not q:
-        st.info("Enter a search in the left pane."); return
+        st.info("Enter a voter name, address, PA ID, phone, or email in the left pane.")
+        return
+
     with st.spinner("Searching voters..."):
         df = remote_search_voters(q, maxn)
     st.caption(f"{len(df)} result(s) found for: {q}")
-    if df.empty: st.warning("No voters found."); return
-    if "lookup_selected_idx" not in st.session_state: st.session_state["lookup_selected_idx"] = 0
-    left,right = st.columns([.9,1.6])
+    if df.empty:
+        st.warning("No voters found.")
+        return
+
+    if "lookup_selected_id" not in st.session_state or st.session_state.get("lookup_selected_id") not in set(df.get("voter_id", pd.Series([], dtype=str)).astype(str)):
+        st.session_state["lookup_selected_id"] = cc_text(df.iloc[0].get("voter_id", ""))
+
+    left, right = st.columns([0.85, 1.8])
     with left:
         st.markdown("### Search Results")
-        for i,r in df.iterrows():
-            if st.button(f"{full_name(r)}\n{address_line(r)}\n{cc_text(r.get('County',''))} County", key=f"lookup_pick_{i}", width="stretch"):
-                st.session_state["lookup_selected_idx"] = int(i); st.rerun()
+        for i, r0 in df.iterrows():
+            vid = cc_text(r0.get("voter_id", ""))
+            label = f"{full_name(r0)}\n{address_line(r0)}\n{cc_text(r0.get('County',''))} County"
+            btn_type = "primary" if vid == st.session_state.get("lookup_selected_id") else "secondary"
+            if st.button(label, key=f"lookup_pick_{vid or i}", width="stretch", type=btn_type):
+                st.session_state["lookup_selected_id"] = vid
+                st.rerun()
+
     with right:
-        r = df.iloc[min(int(st.session_state.get("lookup_selected_idx",0)), len(df)-1)]
-        st.markdown(f"## {full_name(r)}")
-        st.write(address_line(r))
-        a,b,c1,d = st.columns(4)
-        a.metric("Party", cc_text(r.get("Party","")) or "—"); b.metric("Gender", cc_text(r.get("Gender","")) or "—"); c1.metric("Age", cc_text(r.get("Age","")) or "—"); d.metric("PA ID", cc_text(r.get("voter_id","")) or "—")
-        st.dataframe(pd.DataFrame([["County",r.get("County","")],["Municipality",r.get("Municipality","")],["Precinct",r.get("Precinct","")],["School District",r.get("School District","")],["Phone",phone_label(r)],["Email",r.get("Email","")],["Mail Ballot",r.get("MB_App","") or r.get("MIB_Applied","")],["Tags",r.get("Tags","")]], columns=["Field","Value"]), hide_index=True, width="stretch")
+        selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
+        detail = remote_voter_detail(selected_id)
+        if detail.empty:
+            match = df[df["voter_id"].astype(str) == selected_id]
+            detail = match.iloc[0] if not match.empty else df.iloc[0]
+        r = apply_local_correction(normalize_download_df(pd.DataFrame([detail])).iloc[0])
+
+        st.markdown(f"## {smart_title(full_name(r))}")
+        st.write(smart_title(address_line(r)))
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Party", cc_text(r.get("Party", "")) or "—")
+        m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
+        m3.metric("Age", cc_text(r.get("Age", "")) or "—")
+        m4.metric("PA ID", selected_id or "—")
+
+        d1, d2 = st.columns(2)
+        with d1:
+            st.markdown("### Voter Details")
+            voter_rows = [
+                ["Date of Birth", r.get("DOB", "")],
+                ["Registration Date", r.get("RegistrationDate", "")],
+                ["Registered Party", r.get("Party", "")],
+                ["County", r.get("County", "")],
+                ["Municipality", r.get("Municipality", "")],
+                ["Precinct", r.get("Precinct", "")],
+                ["Congressional", r.get("USC", "")],
+                ["State Senate", r.get("STS", "")],
+                ["State House", r.get("STH", "")],
+                ["School District", r.get("School District", "")],
+                ["School Region", r.get("School Region", "")],
+            ]
+            st.dataframe(pd.DataFrame(voter_rows, columns=["Field", "Value"]), hide_index=True, width="stretch")
+        with d2:
+            st.markdown("### Contact + Mail Ballot")
+            contact_rows = [
+                ["Mobile", format_phone_number(r.get("Mobile", ""))],
+                ["Landline", format_phone_number(r.get("Landline", ""))],
+                ["Applicant Phone", format_phone_number(r.get("Current_ApplicantPhone", ""))],
+                ["Email", r.get("Email", "")],
+                ["Mail Ballot Applied", r.get("MB_App", "")],
+                ["Application Status", r.get("MB_App_Status", "")],
+                ["Ballot Sent", r.get("MB_Sent", "")],
+                ["Ballot Status", r.get("MB_Status", "")],
+                ["Permanent MB", r.get("MB_PERM", "")],
+                ["Tags", r.get("Tags", "")],
+            ]
+            st.dataframe(pd.DataFrame(contact_rows, columns=["Field", "Value"]), hide_index=True, width="stretch")
+
         with st.expander("Edit / Correct This Voter Record", expanded=False):
-            st.info("Download the correction JSON and place it in the pipeline correction workflow if needed.")
-            edits={}
-            cols=st.columns(4)
-            for j,field in enumerate(["FirstName","MiddleName","LastName","NameSuffix","Gender","Party","DOB","RegistrationDate","House Number","Street Name","Apartment Number","City","State","Zip","Municipality","Precinct","School District","School Region","Mobile","Landline","Email","MB_App","MB_Status","Tags"]):
-                with cols[j%4]: edits[field]=st.text_input(field, value=cc_text(r.get(field,"")), key=f"edit_{field}_{r.get('voter_id','')}")
-            payload={"voter_id": cc_text(r.get("voter_id","")), "updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": st.text_area("Correction Notes")}
-            st.download_button("Download Correction JSON", json.dumps(payload, indent=2).encode(), file_name=f"voter_correction_{payload['voter_id'] or 'unknown'}.json", mime="application/json")
+            if selected_id in correction_store():
+                st.info("This voter currently has a saved correction in this browser session. Download the correction CSV and place it in the pipeline correction folder before the next pipeline run.")
+            else:
+                st.caption("Corrections are stored in this browser session and can be downloaded as a CSV for the pipeline correction workflow.")
+
+            fields = [
+                "FirstName", "MiddleName", "LastName", "NameSuffix",
+                "Gender", "Party", "DOB", "RegistrationDate",
+                "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2", "City", "State", "Zip",
+                "County", "Municipality", "Precinct", "School District", "School Region", "USC", "STS", "STH",
+                "Mobile", "Landline", "Current_ApplicantPhone", "Email",
+                "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags",
+            ]
+            existing_payload = correction_store().get(selected_id, {})
+            existing_fields = existing_payload.get("fields", {}) or {}
+            edits = {}
+            group_specs = [
+                ("Name", fields[0:4]),
+                ("Voter Details", fields[4:8]),
+                ("Address", fields[8:16]),
+                ("Geography", fields[16:24]),
+                ("Contact + Mail Ballot", fields[24:]),
+            ]
+            for title, group_fields in group_specs:
+                st.markdown(f"**{title}**")
+                cols = st.columns(4)
+                for j, field in enumerate(group_fields):
+                    val = cc_text(existing_fields.get(field, r.get(field, "")))
+                    with cols[j % 4]:
+                        edits[field] = st.text_input(field, value=val, key=f"edit_{selected_id}_{field}")
+            notes = st.text_area("Correction Notes", value=existing_payload.get("notes", ""), key=f"edit_{selected_id}_notes")
+            ca, cb, cc = st.columns([1, 1, 1])
+            with ca:
+                if st.button("Save Voter Correction", type="primary", key=f"save_corr_{selected_id}"):
+                    correction_store()[selected_id] = {"updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": notes}
+                    st.success("Correction saved in this browser session. Download the correction CSV before running the pipeline.")
+                    st.rerun()
+            with cb:
+                if st.button("Remove Saved Correction", key=f"remove_corr_{selected_id}"):
+                    correction_store().pop(selected_id, None)
+                    st.success("Saved correction removed.")
+                    st.rerun()
+            with cc:
+                one_payload = {"voter_id": selected_id, "updated_at": datetime.now().isoformat(timespec="seconds"), "notes": notes, **edits}
+                st.download_button("Download This Correction", pd.DataFrame([one_payload]).to_csv(index=False).encode(), file_name=f"voter_correction_{selected_id or 'unknown'}.csv", mime="text/csv")
+
+            all_corr = correction_rows_df()
+            if not all_corr.empty:
+                st.download_button("Download All Saved Corrections CSV", all_corr.to_csv(index=False).encode(), file_name="candidate_connect_voter_corrections.csv", mime="text/csv", width="stretch")
+
+        hh = remote_household_members(r)
+        if not hh.empty:
+            st.markdown("### Household Members")
+            view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
+            if "FullName" not in view.columns:
+                view["FullName"] = hh.apply(full_name, axis=1)
+            st.dataframe(view, hide_index=True, width="stretch")
+
+        render_election_history_table(r)
 
 def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
@@ -3040,8 +3259,18 @@ with st.sidebar:
             else: st.caption("No saved universes saved yet.")
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
+        st.caption("Search the full statewide active voter file by name, address, PA ID, phone, or email.")
         st.text_input("Search voters", key=special_key("lookup_query"), placeholder="Name, county, address, PA ID, phone, email")
         st.selectbox("Max Results", [10,25,50,100], index=1, key=special_key("lookup_max"))
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("Search", key=special_key("lookup_search_btn"), width="stretch"):
+                st.rerun()
+        with cb:
+            if st.button("Clear Lookup", key=special_key("lookup_clear_btn"), width="stretch"):
+                for k in [special_key("lookup_query"), "lookup_selected_id"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
         st.checkbox("Start from current main universe", value=True, key=special_key("mb_start_current"))
