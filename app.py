@@ -2772,6 +2772,58 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
         con.close()
 
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def remote_voter_search_exact_by_id(voter_id: str) -> pd.Series:
+    """Fetch a thin search-card row by voter_id from the fast last-name shards.
+
+    This is used as a name fallback for household cards because the household
+    shard is intentionally thin and older speed builds may have blank FullName
+    for non-selected household members.
+    """
+    vid = cc_text(voter_id)
+    if not vid:
+        return pd.Series(dtype="object")
+    urls = voter_search_all_urls() or voter_lookup_or_detail_urls()
+    if not urls:
+        return pd.Series(dtype="object")
+    existing_cols = remote_parquet_columns(urls)
+    aliases = source_alias_candidates()
+    id_col = first_existing_column(existing_cols, aliases.get("voter_id", ["voter_id"])) or "voter_id"
+    cols = [
+        "voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "Party", "Gender", "Age", "DOB", "House Number", "Street Name", "City", "State", "Zip",
+        "County", "Municipality", "Precinct", "HH_LOOKUP_KEY"
+    ]
+    select_cols = safe_remote_select_exprs(existing_cols, cols)
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        df = con.execute(
+            f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) "
+            f"WHERE CAST({sql_ident(id_col)} AS VARCHAR) = {sql_lit(vid)} LIMIT 1"
+        ).df()
+        if df.empty:
+            return pd.Series(dtype="object")
+        for c in ["FirstName", "MiddleName", "LastName", "NameSuffix", "FullName", "Name", "Street Name", "City", "Municipality", "County", "Precinct"]:
+            if c in df.columns:
+                df[c] = df[c].map(smart_title)
+        if "NameSuffix" in df.columns:
+            df["NameSuffix"] = df["NameSuffix"].map(normalize_name_suffix)
+        rebuilt = df.apply(full_name, axis=1).map(smart_title)
+        if "FullName" not in df.columns:
+            df["FullName"] = rebuilt
+        else:
+            bad = df["FullName"].astype(str).str.strip().eq("") | df["FullName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
+            df.loc[bad, "FullName"] = rebuilt.loc[bad]
+        return df.iloc[0]
+    finally:
+        con.close()
+
 def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
     """Branded voter lookup report with full available vote history."""
     if canvas is None:
@@ -3127,6 +3179,17 @@ def render_election_history_table(row: pd.Series):
             return "R"
         if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
             return "D"
+        # If the vote-history column stores method only (POLL/MB/PROV), still
+        # show the voter's registered party for years with a vote. This restores
+        # the visible party row without pretending blank/no-vote years are votes.
+        if not _blank_vote_value(raw) and normalize_vote_method(raw):
+            p = cc_text(row.get("Party", "")).upper()
+            if p in {"R", "D"}:
+                return p
+            if p in {"REP", "REPUBLICAN"}:
+                return "R"
+            if p in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
+                return "D"
         return ""
 
     def draw(label, group_cols):
@@ -3381,11 +3444,13 @@ def render_voter_lookup_workspace():
                         continue
                     nm = ""
                     try:
-                        detail_name_row = remote_voter_lookup_detail(hvid_for_name)
-                        nm = smart_title(full_name(detail_name_row))
-                        if not nm or nm.lower() in {"unnamed voter", "unnamed", "nan", "none", "null"}:
-                            detail_name_row = remote_voter_detail(hvid_for_name)
+                        # Fastest name fallback first: search-card shard by exact voter_id.
+                        # Then try the detail hash, and finally the older full detail shards.
+                        for fetcher in (remote_voter_search_exact_by_id, remote_voter_lookup_detail, remote_voter_detail):
+                            detail_name_row = fetcher(hvid_for_name)
                             nm = smart_title(full_name(detail_name_row))
+                            if nm and nm.lower() not in {"unnamed voter", "unnamed", "nan", "none", "null"} and not nm.lower().startswith("voter "):
+                                break
                     except Exception:
                         nm = ""
                     if nm and nm.lower() not in {"unnamed voter", "unnamed", "nan", "none", "null"}:
