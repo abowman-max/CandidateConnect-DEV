@@ -2636,10 +2636,36 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             y-=13
         return y
 
-    y_top = y
-    y1 = draw_hist("General", general, 36, y_top)
-    y2 = draw_hist("Primary", primary, 310, y_top)
-    y = min(y1, y2) - 6
+    def draw_hist_wide(title, items, y, max_cols=18):
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 8); c.drawString(36, y, title); y -= 12
+        if not items:
+            c.setFont("Helvetica", 6.5); c.drawString(36, y, "No history found."); return y - 12
+        usable_w = 500
+        left_label_w = 42
+        step = min(26, (usable_w - left_label_w) / max(1, min(max_cols, len(items))))
+        for start in range(0, len(items), max_cols):
+            chunk = items[start:start+max_cols]
+            if y < 58:
+                c.showPage(); y = _draw_branded_header(c, "Voter Lookup Report", "Election History") - 18
+            x0 = 36 + left_label_w
+            c.setFont("Helvetica-Bold", 6.3)
+            for i,it in enumerate(chunk):
+                c.drawCentredString(x0+i*step, y, it[1])
+            y -= 10
+            c.drawString(36, y, "Party")
+            c.setFont("Helvetica-Bold", 6.3)
+            for i,it in enumerate(chunk):
+                c.drawCentredString(x0+i*step, y, it[2])
+            y -= 10
+            c.setFont("Helvetica-Bold", 6.3); c.drawString(36, y, "Method")
+            c.setFont("Helvetica", 6.3)
+            for i,it in enumerate(chunk):
+                c.drawCentredString(x0+i*step, y, it[3])
+            y -= 16
+        return y
+
+    y = draw_hist_wide("General", general, y, max_cols=18) - 4
+    y = draw_hist_wide("Primary", primary, y, max_cols=18) - 6
     if y < 36:
         c.showPage(); y = 70
     c.setFont("Helvetica", 6.3); c.setFillColorRGB(0.25,0.25,0.25)
@@ -2837,11 +2863,11 @@ def _looks_like_method_value(v) -> bool:
 
 
 def _history_payload(row: pd.Series, limit: int | None = None):
-    """Return one clean record per election: year, label, party, method icon.
+    """Return one clean record per election, including did-not-vote years.
 
-    Blank/0/no-vote values are treated as empty. A party value like R/D means the
-    voter has a record for that election and defaults to At Poll unless a separate
-    method column says mail/provisional/etc.
+    Every election column in the manifest creates a visible year cell. Blank/O/0/no-record
+    values display as blank instead of disappearing. A real R/D party value displays the
+    party and defaults the method to At Poll unless a method column says otherwise.
     """
     cols = election_columns_from_manifest()
     grouped = {}
@@ -2865,17 +2891,11 @@ def _history_payload(row: pd.Series, limit: int | None = None):
             nm = normalize_vote_method(val)
             if nm:
                 grouped[key]["method"] = nm
-        else:
-            nm = normalize_vote_method(val)
-            if nm:
-                grouped[key]["method"] = nm
 
     def build(kind):
         rows=[]
         for (typ, year), d in grouped.items():
             if typ != kind:
-                continue
-            if not d.get("party") and not d.get("method"):
                 continue
             label = ("G" if kind == "General" else "P") + str(year)[-2:]
             rows.append((year, label, d.get("party", ""), vote_method_icon(d.get("method", ""))))
@@ -3393,10 +3413,12 @@ def render_voter_lookup_workspace():
         selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
         match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
         index_row = match.iloc[0] if not match.empty else df.iloc[0]
-        # Search results stay lightweight, but once a card is selected we fetch a single
-        # exact voter detail row so DOB, districts, and election fields are complete.
-        detail = remote_voter_lookup_detail(selected_id) if selected_id else pd.Series(dtype="object")
-        if detail is None or len(detail) == 0:
+        # Keep the selected voter view fast: use the lightweight lookup row first.
+        # Full detail/election history/PDF are loaded only when the user asks for them.
+        detail_key = f"lookup_detail_row_{selected_id}"
+        if detail_key in st.session_state and isinstance(st.session_state.get(detail_key), dict):
+            detail = pd.Series(st.session_state[detail_key])
+        else:
             detail = index_row
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
@@ -3407,17 +3429,32 @@ def render_voter_lookup_workspace():
         m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
         m3.metric("Age", cc_text(r.get("Age", "")) or "—")
         m4.metric("PA ID", selected_id or "—")
-        try:
-            pdf_hh = remote_household_members(r)
-        except Exception:
-            pdf_hh = None
-        st.download_button(
-            "Download PDF Report",
-            make_voter_lookup_pdf(r, pdf_hh),
-            file_name=f"candidate_connect_voter_report_{selected_id or 'voter'}.pdf",
-            mime="application/pdf",
-            key=f"download_voter_pdf_{selected_id}",
-        )
+        pdf_key = f"voter_pdf_bytes_{selected_id}"
+        pdf_name_key = f"voter_pdf_name_{selected_id}"
+        pc1, pc2 = st.columns([0.35, 1.65])
+        with pc1:
+            if st.button("Prepare PDF Report", key=f"prepare_voter_pdf_{selected_id}"):
+                with st.spinner("Building voter PDF..."):
+                    full_r = remote_voter_lookup_detail(selected_id) if selected_id else r
+                    if full_r is None or len(full_r) == 0:
+                        full_r = r
+                    full_r = apply_local_correction(pd.DataFrame([full_r]).iloc[0])
+                    try:
+                        pdf_hh = remote_household_members(full_r)
+                    except Exception:
+                        pdf_hh = None
+                    st.session_state[pdf_key] = make_voter_lookup_pdf(full_r, pdf_hh)
+                    st.session_state[pdf_name_key] = f"candidate_connect_voter_report_{selected_id or 'voter'}.pdf"
+                    st.rerun()
+        if st.session_state.get(pdf_key):
+            with pc2:
+                st.download_button(
+                    "Download PDF Report",
+                    st.session_state[pdf_key],
+                    file_name=st.session_state.get(pdf_name_key, f"candidate_connect_voter_report_{selected_id or 'voter'}.pdf"),
+                    mime="application/pdf",
+                    key=f"download_voter_pdf_{selected_id}",
+                )
 
         d1, d2 = st.columns(2)
         with d1:
@@ -3488,7 +3525,8 @@ def render_voter_lookup_workspace():
             with ca:
                 if st.button("Save Voter Correction", type="primary", key=f"save_corr_{selected_id}"):
                     correction_store()[selected_id] = {"updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": notes}
-                    st.success("Correction saved in this browser session. Download the correction CSV before running the pipeline.")
+                    persist_corrections()
+                    st.success("Correction saved in DEV state and is available for correction CSV download.")
                     st.rerun()
             with cb:
                 if st.button("Remove Saved Correction", key=f"remove_corr_{selected_id}"):
@@ -3505,19 +3543,20 @@ def render_voter_lookup_workspace():
                 st.download_button("Download All Saved Corrections CSV", all_corr.to_csv(index=False).encode(), file_name="candidate_connect_voter_corrections.csv", mime="text/csv", width="stretch")
 
         st.markdown("### Household Members")
+        hh_key = f"hh_df_{selected_id}"
         if st.button("Load Household Members", key=f"load_hh_{selected_id}"):
-            st.session_state[f"hh_loaded_{selected_id}"] = True
-        if st.session_state.get(f"hh_loaded_{selected_id}"):
             with st.spinner("Loading household members..."):
-                hh = remote_household_members(r)
+                st.session_state[hh_key] = remote_household_members(r).to_dict("records")
+        if st.session_state.get(hh_key):
+            hh = pd.DataFrame(st.session_state.get(hh_key) or [])
             if not hh.empty:
                 view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
-                # Always rebuild missing/blank names from segmented fields.
                 rebuilt_names = hh.apply(full_name, axis=1).map(smart_title)
                 if "FullName" not in view.columns:
                     view["FullName"] = rebuilt_names
                 else:
                     view["FullName"] = view["FullName"].where(view["FullName"].astype(str).str.strip().ne(""), rebuilt_names)
+                view["FullName"] = view["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
                 view.insert(0, "Current", view.get("voter_id", "").astype(str).eq(str(selected_id)).map(lambda x: "✓" if x else ""))
                 st.dataframe(view, hide_index=True, width="stretch")
             else:
@@ -3526,10 +3565,17 @@ def render_voter_lookup_workspace():
             st.caption("Click Load Household Members only when needed so lookup stays fast.")
 
         st.markdown("### Election History")
+        vh_key = f"vote_history_row_{selected_id}"
         if st.button("Load Vote History", key=f"load_vote_history_{selected_id}"):
-            st.session_state[f"vote_history_loaded_{selected_id}"] = True
-        if st.session_state.get(f"vote_history_loaded_{selected_id}"):
-            render_election_history_table(r)
+            with st.spinner("Loading vote history..."):
+                full_r = remote_voter_lookup_detail(selected_id) if selected_id else r
+                if full_r is None or len(full_r) == 0:
+                    full_r = r
+                st.session_state[vh_key] = pd.DataFrame([full_r]).iloc[0].to_dict()
+                st.session_state[detail_key] = st.session_state[vh_key]
+                st.rerun()
+        if st.session_state.get(vh_key):
+            render_election_history_table(pd.Series(st.session_state[vh_key]))
         else:
             st.caption("Click Load Vote History only when needed so lookup stays fast.")
 
