@@ -3534,19 +3534,39 @@ def render_mail_ballot_workspace():
     age = c3.multiselect("Age Range", field_options(filter_options, "Age_Range", base), default=base.get("Age_Range", []), key=special_key("mb_age"))
     score = c4.slider("MB Probability Score", 0, 4, st.session_state.get(special_key("mb_score_center"), (0, 4)), key=special_key("mb_score_center"))
 
-    c5, c6, c7, c8 = st.columns(4)
-    app = c5.multiselect("Application Status", field_options(filter_options, "MB_App_Status", base), key=special_key("mb_app_status"))
-    sent = c6.multiselect("Ballot Sent", field_options(filter_options, "MB_Sent", base), key=special_key("mb_sent"))
-    ret = c7.multiselect("Ballot Status", field_options(filter_options, "MB_Status", base), key=special_key("mb_status"))
-    perm = c8.multiselect("Permanent MB", field_options(filter_options, "MB_PERM", base), key=special_key("mb_perm"))
+    # Separate "did they apply?" from "what status is the application?"
+    # This matters for cultivation work: users need to target DNA / Not Applied voters
+    # without accidentally selecting Approved or Declined application statuses.
+    def _default_mb_vals(field, candidates):
+        valid = list(field_options(filter_options, field, base))
+        return [v for v in (candidates or []) if v in valid]
 
-    c9, c10, c11 = st.columns(3)
-    v4a = c9.multiselect("Vote History - All", field_options(filter_options, "V4A", base), key=special_key("mb_v4a"))
-    v4g = c10.multiselect("Vote History - General", field_options(filter_options, "V4G", base), key=special_key("mb_v4g"))
-    v4p = c11.multiselect("Vote History - Primary", field_options(filter_options, "V4P", base), key=special_key("mb_v4p"))
+    c5, c6, c7, c8, c9 = st.columns(5)
+    app_filed = c5.multiselect(
+        "Mail Ballot Application",
+        field_options(filter_options, "MB_App", base),
+        default=_default_mb_vals("MB_App", mission_defaults.get("MB_App", [])),
+        key=special_key("mb_app_filed"),
+        help="Use this for application cultivation. Choose DNA / No / Not Applied to exclude voters who already applied.",
+    )
+    app = c6.multiselect(
+        "Application Status",
+        field_options(filter_options, "MB_App_Status", base),
+        default=_default_mb_vals("MB_App_Status", mission_defaults.get("MB_App_Status", [])),
+        key=special_key("mb_app_status"),
+        help="Use this after an application exists, for example Approved or Declined.",
+    )
+    sent = c7.multiselect("Ballot Sent", field_options(filter_options, "MB_Sent", base), key=special_key("mb_sent"))
+    ret = c8.multiselect("Ballot Status", field_options(filter_options, "MB_Status", base), key=special_key("mb_status"))
+    perm = c9.multiselect("Permanent MB", field_options(filter_options, "MB_PERM", base), key=special_key("mb_perm"))
+
+    c10, c11, c12 = st.columns(3)
+    v4a = c10.multiselect("Vote History - All", field_options(filter_options, "V4A", base), key=special_key("mb_v4a"))
+    v4g = c11.multiselect("Vote History - General", field_options(filter_options, "V4G", base), key=special_key("mb_v4g"))
+    v4p = c12.multiselect("Vote History - Primary", field_options(filter_options, "V4P", base), key=special_key("mb_v4p"))
 
     mb_active = dict(base)
-    for fld, vals in {"Party": party, "Gender": gender, "Age_Range": age, "MB_App_Status": app, "MB_Sent": sent, "MB_Status": ret, "MB_PERM": perm, "V4A": v4a, "V4G": v4g, "V4P": v4p}.items():
+    for fld, vals in {"Party": party, "Gender": gender, "Age_Range": age, "MB_App": app_filed, "MB_App_Status": app, "MB_Sent": sent, "MB_Status": ret, "MB_PERM": perm, "V4A": v4a, "V4G": v4g, "V4P": v4p}.items():
         if vals:
             mb_active[fld] = vals
     for fld, vals in mission_defaults.items():
@@ -3610,6 +3630,7 @@ def render_mail_ballot_workspace():
     with tabs[2]:
         st.markdown("### Build Mail Ballot Files")
         st.caption("Files are prepared only when you click a button, so the page stays fast. Each file respects the Mail Ballot Center filters currently shown above.")
+        st.info("For application cultivation, use the Mail Ballot Application filter above and choose DNA / No / Not Applied. Application Status is for voters who already have an application record, such as Approved or Declined.")
         f1, f2, f3 = st.columns(3)
         with f1:
             st.markdown("**Application Cultivation File**")
