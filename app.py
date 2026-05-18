@@ -403,6 +403,62 @@ def count_cube_url() -> str:
     return r2_url(key)
 
 
+def _count_cube_expanded_values(field: str, vals) -> list[str]:
+    """Expand user-facing MB yes/no selections to the canonical values that may exist in count_cube.
+
+    This is especially important for MB_PERM. In some SURE-derived files permanent MB
+    is stored as Y/blank, in others as Y/N or Yes/No. Selecting N should mean
+    "not permanent," including blank/no/false/0 variants.
+    """
+    raw = [str(v).strip() for v in (vals or []) if str(v).strip()]
+    if not raw:
+        return []
+
+    yes = {"Y", "YES", "TRUE", "T", "1", "APPLIED", "SENT", "VOTED", "RETURNED", "PERMANENT"}
+    no = {"N", "NO", "FALSE", "F", "0", "DNA", "DID NOT APPLY", "NOT APPLIED", "NOT SENT", "NOT VOTED", "NOT RETURNED", "NOT PERMANENT", "NON PERMANENT", "NON-PERMANENT"}
+
+    expanded = []
+    for v in raw:
+        u = v.upper()
+        if field in {"MB_PERM", "MB_App", "MB_Sent", "MB_Status"}:
+            if u in yes:
+                expanded.extend([v, "Y", "Yes", "YES", "True", "TRUE", "1"])
+                if field == "MB_App":
+                    expanded.extend(["Applied"])
+                if field == "MB_Sent":
+                    expanded.extend(["Sent"])
+                if field == "MB_Status":
+                    expanded.extend(["Voted", "Returned"])
+                if field == "MB_PERM":
+                    expanded.extend(["Permanent"])
+            elif u in no:
+                expanded.extend([v, "", "N", "No", "NO", "False", "FALSE", "0"])
+                if field == "MB_App":
+                    expanded.extend(["DNA", "Not Applied", "Did Not Apply"])
+                if field == "MB_Sent":
+                    expanded.extend(["Not Sent"])
+                if field == "MB_Status":
+                    expanded.extend(["Not Voted", "Not Returned"])
+                if field == "MB_PERM":
+                    expanded.extend(["Not Permanent", "Non Permanent", "Non-Permanent"])
+            else:
+                expanded.append(v)
+        elif field == "MB_App_Status":
+            # Application status is not a yes/no field, but keep common capitalization variants.
+            expanded.extend([v, v.title(), u])
+        else:
+            expanded.append(v)
+
+    out = []
+    seen = set()
+    for x in expanded:
+        sx = str(x)
+        if sx not in seen:
+            seen.add(sx)
+            out.append(sx)
+    return out
+
+
 def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
     clauses = []
     for field, vals in (active or {}).items():
@@ -410,10 +466,11 @@ def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
             continue
         if field == "Tags":
             continue
-        cleaned = [str(v) for v in vals if str(v).strip()]
+        cleaned = _count_cube_expanded_values(field, vals)
         if not cleaned:
             continue
-        clauses.append(f"CAST({sql_ident(field)} AS VARCHAR) IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
+        expr = f"COALESCE(CAST({sql_ident(field)} AS VARCHAR), '')"
+        clauses.append(f"{expr} IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
 
     special = special or {}
     for field, rule in special.items():
