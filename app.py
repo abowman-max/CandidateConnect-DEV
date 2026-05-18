@@ -2798,24 +2798,32 @@ def _is_election_party_col(col: str) -> bool:
 
 
 def _is_party_value(v) -> bool:
+    """Election-history party value.
+
+    In the SURE/history fields we have in these shards, a value of O/0/blank is
+    not a reliable third-party vote marker; it usually means no recorded vote.
+    Treat only R/D (and spelled-out equivalents) as actual party history so
+    did-not-vote years stay blank and do not produce an At Poll icon.
+    """
     if _blank_vote_value(v):
         return False
     s = cc_text(v).strip().upper()
-    return s in {"R", "D", "O", "I", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
+    return s in {"R", "D", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
 
 
 def _party_display(v) -> str:
+    """Display party for election history only.
+
+    Do not display O/0/NP/I in vote-history cells because those values are
+    showing up as did-not-vote/no-record markers in the lookup data.
+    """
     if _blank_vote_value(v):
         return ""
     s = cc_text(v).strip().upper()
-    if s in {"REP", "REPUBLICAN"}:
+    if s in {"REP", "REPUBLICAN", "R"}:
         return "R"
-    if s in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
+    if s in {"DEM", "DEMOCRAT", "DEMOCRATIC", "D"}:
         return "D"
-    if s in {"NP", "I", "O"}:
-        return "O"
-    if s in {"R", "D"}:
-        return s
     return ""
 
 
