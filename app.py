@@ -1221,6 +1221,43 @@ def active_filters() -> dict:
     return out
 
 
+def universe_label_from_filters(filters: dict) -> str:
+    """Build a short human label for the currently applied universe."""
+    filters = filters or {}
+    priority = ["County", "Municipality", "Precinct", "School District", "School Region", "USC", "STS", "STH", "Party", "Gender", "Age_Range"]
+    parts = []
+    for field in priority:
+        vals = filters.get(field) or []
+        if vals:
+            label = DISPLAY_LABELS.get(field, field)
+            shown = ", ".join(map(str, vals[:3]))
+            if len(vals) > 3:
+                shown += f" +{len(vals)-3} more"
+            parts.append(f"{label}: {shown}")
+        if len(parts) >= 3:
+            break
+    return " | ".join(parts) if parts else "Statewide"
+
+
+def save_current_universe(filters: dict, summary: dict | None = None, source: str = "Create Universe"):
+    """Persist the latest applied Create Universe so other workspaces can use it."""
+    clean_filters = {str(k): list(v or []) for k, v in (filters or {}).items() if v}
+    st.session_state["current_universe_filters"] = clean_filters
+    st.session_state["current_universe_label"] = universe_label_from_filters(clean_filters)
+    st.session_state["current_universe_source"] = source
+    st.session_state["current_universe_updated"] = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+    if summary is not None:
+        st.session_state["current_universe_summary"] = summary
+
+
+def get_current_universe_filters() -> dict:
+    return dict(st.session_state.get("current_universe_filters") or {})
+
+
+def has_current_universe() -> bool:
+    return bool(get_current_universe_filters())
+
+
 def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
@@ -3455,13 +3492,15 @@ def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
     st.caption("Strategic mail ballot operations: cultivate applications, message applicants, chase outstanding ballots, and build targeted files.")
 
-    # Sidebar already owns this checkbox. Read its value here to avoid duplicate Streamlit widget keys.
-    start_from_current = bool(st.session_state.get(special_key("mb_start_current"), True))
-    base = active_filters() if start_from_current else {}
-    if start_from_current and base:
-        st.info("Mail Ballot Center is starting from your current Create Universe filters.")
-    elif start_from_current and not base:
-        st.warning("Start-from-universe is checked, but no Create Universe filters are active yet. Showing statewide mail-ballot data.")
+    # Sidebar owns this checkbox. Mail Ballot Center reads the last applied Create Universe,
+    # not whatever happens to be visible in the Create Universe widgets.
+    start_from_current = bool(st.session_state.get(special_key("mb_start_current"), False))
+    saved_universe = get_current_universe_filters()
+    base = dict(saved_universe) if (start_from_current and saved_universe) else {}
+    if start_from_current and saved_universe:
+        st.info(f"Starting from current universe: {st.session_state.get('current_universe_label', 'Selected universe')}")
+    elif start_from_current and not saved_universe:
+        st.warning("No current universe has been applied yet. Showing statewide mail-ballot data.")
 
     preset = st.selectbox(
         "Mail ballot mission",
@@ -3884,7 +3923,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zi</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zs</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -3902,7 +3941,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zj — street list stable + sharded fast voter lookup")
+    st.caption("DEV final hybrid v21zs — current-universe handoff + mail ballot cleanup")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
@@ -3972,8 +4011,18 @@ with st.sidebar:
                 st.rerun()
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
-        st.checkbox("Use Create Universe filters as the starting universe", value=False, key=special_key("mb_start_current"))
-        st.caption("Leave unchecked to analyze statewide mail-ballot data. Check it only after building a main universe in Create Universe.")
+        _has_universe = has_current_universe()
+        _label = st.session_state.get("current_universe_label", "None")
+        st.checkbox(
+            f"Use current universe: {_label}",
+            value=_has_universe,
+            disabled=not _has_universe,
+            key=special_key("mb_start_current"),
+        )
+        if _has_universe:
+            st.caption(f"Last applied from Create Universe: {st.session_state.get('current_universe_updated', '')}")
+        else:
+            st.caption("Build a universe in Create Universe, click Update Counts, then return here to use it as your Mail Ballot base.")
     elif st.session_state.get("left_section") == "area_intelligence":
         st.markdown("### Area Intelligence")
         st.caption("Select the area on the right.")
@@ -4015,8 +4064,14 @@ with a1:
     if st.button("Update Counts", width="stretch"):
         with st.spinner("Updating counts..."):
             summary, mode, err = update_counts(active)
-        if err: st.warning("Counts are unavailable for this filter combination."); st.caption(str(err)[:500])
-        else: st.session_state["quick_summary"]=summary; st.session_state["count_mode"]=mode
+        if err:
+            st.warning("Counts are unavailable for this filter combination.")
+            st.caption(str(err)[:500])
+        else:
+            st.session_state["quick_summary"] = summary
+            st.session_state["count_mode"] = mode
+            save_current_universe(active, summary, source="Create Universe")
+            st.success(f"Current universe saved: {st.session_state.get('current_universe_label', 'Selected universe')}")
 with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
 if st.session_state.get("quick_summary"):
     st.caption("Counts updated. Use the Output Center tabs below for the overview, exports, and reports.")
