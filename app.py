@@ -3304,50 +3304,248 @@ def render_voter_lookup_workspace():
                 st.rerun()
         render_election_history_table(pd.Series(st.session_state[vh_key]))
 
+
+def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
+    active = active or {}
+    special = active_special_filters() if "active_special_filters" in globals() else {}
+    try:
+        df = duckdb_detail_filtered_df(active, special, int(max_rows))
+    except Exception as exc:
+        st.warning(f"Could not prepare filtered voter file: {exc}")
+        return pd.DataFrame()
+    try:
+        return normalize_download_df(df)
+    except Exception:
+        return df
+
+
+def _mb_total_from_summary(summary: dict | None) -> int:
+    if not summary:
+        return 0
+    for k in ["total", "Total", "TOTAL", "voters", "Voters"]:
+        try:
+            if k in summary:
+                return int(float(summary.get(k) or 0))
+        except Exception:
+            pass
+    try:
+        return int(float(summary.get("R", 0) or 0) + float(summary.get("D", 0) or 0) + float(summary.get("O", 0) or 0))
+    except Exception:
+        return 0
+
+
+def _mb_count(active: dict, extra: dict | None = None) -> int:
+    a = dict(active or {})
+    for k, v in (extra or {}).items():
+        a[k] = v if isinstance(v, list) else [v]
+    try:
+        summary, _mode, _err = update_counts(a)
+        return _mb_total_from_summary(summary)
+    except Exception:
+        return 0
+
+
+def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
+    try:
+        special = active_special_filters()
+        df = duckdb_count_cube_group_filtered(
+            json.dumps(count_safe_filters(active or {}), sort_keys=True),
+            json.dumps(special or {}, sort_keys=True),
+            field,
+            limit,
+        )
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Category", "Voters", "%"])
+        df = df.rename(columns={"label": "Category"}).copy()
+        df["Category"] = df["Category"].astype(str).replace({"": "(blank)", "nan": "(blank)", "None": "(blank)"})
+        df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
+        total = max(1, int(df["Voters"].sum()))
+        df["%"] = (df["Voters"] / total * 100).map(lambda x: f"{x:.1f}%")
+        return df[["Category", "Voters", "%"]]
+    except Exception:
+        return pd.DataFrame(columns=["Category", "Voters", "%"])
+
+
+def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
+    st.markdown(
+        f"""
+        <div class="cc-icon-metric {color_class}">
+          <div>
+            <div class="cc-icon-label">{label}</div>
+            <div class="cc-icon-value">{int(value or 0):,}</div>
+            <div class="cc-icon-sub">{note}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _mb_prepare_download(active: dict, label: str, file_prefix: str, max_rows: int = 50000):
+    key = special_key("mb_export_" + re.sub(r"[^a-z0-9]+", "_", file_prefix.lower()))
+    if st.button(f"Prepare {label}", key=key + "_btn", width="stretch"):
+        with st.spinner(f"Preparing {label}..."):
+            df = safe_filtered_df(active, max_rows)
+            keep = [c for c in [
+                "voter_id", "FirstName", "MiddleName", "LastName", "NameSuffix", "FullName",
+                "Party", "Gender", "Age", "Age_Range", "County", "Municipality", "Precinct",
+                "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2", "City", "State", "Zip",
+                "Email", "Mobile", "Landline", "Current_ApplicantPhone",
+                "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "MB_Prob_Score",
+                "Current_App_Return_Date", "Current_Ballot_Sent_Date", "Current_Ballot_Returned_Date", "Tags"
+            ] if c in df.columns]
+            if keep:
+                df = df[keep].copy()
+            st.session_state[key + "_csv"] = df.to_csv(index=False).encode()
+            st.session_state[key + "_rows"] = len(df)
+    if key + "_csv" in st.session_state:
+        st.download_button(
+            f"Download {label} ({st.session_state.get(key + '_rows', 0):,} rows)",
+            st.session_state[key + "_csv"],
+            f"{file_prefix}.csv",
+            "text/csv",
+            width="stretch",
+        )
+
+
 def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
-    st.caption("Strategic mail ballot operations, targeting, and follow-up workspace.")
-    base = active_filters() if st.session_state.get(special_key("mb_start_current"), True) else {}
-    c1,c2,c3,c4 = st.columns(4)
-    app = c1.multiselect("Application Status", field_options(filter_options,"MB_App_Status",base), key=special_key("mb_app_status"))
-    sent = c2.multiselect("Ballot Sent", field_options(filter_options,"MB_Sent",base), key=special_key("mb_sent"))
-    ret = c3.multiselect("Ballot Status", field_options(filter_options,"MB_Status",base), key=special_key("mb_status"))
-    score = c4.slider("MB Probability Score",0,4,(0,4),key=special_key("mb_score_center"))
+    st.caption("Strategic mail ballot operations: cultivate applications, message applicants, chase outstanding ballots, and build targeted files.")
+
+    start_from_current = st.sidebar.checkbox("Start from current main universe", value=st.session_state.get(special_key("mb_start_current"), True), key=special_key("mb_start_current"))
+    base = active_filters() if start_from_current else {}
+
+    preset = st.selectbox(
+        "Mail ballot mission",
+        [
+            "Snapshot / Custom",
+            "Cultivate new mail ballot applications",
+            "Message ballot applicants",
+            "Chase sent ballots not returned",
+            "Cure / problem ballot follow-up",
+            "Permanent mail ballot growth",
+        ],
+        key=special_key("mb_mission"),
+        help="This changes only the Mail Ballot Center filters. It does not send you back to Create Universe.",
+    )
+
+    mission_defaults = {}
+    if preset == "Cultivate new mail ballot applications":
+        mission_defaults = {"MB_App": ["No", "N", "DNA", "Not Applied"]}
+    elif preset == "Message ballot applicants":
+        mission_defaults = {"MB_App": ["Yes", "Y", "Applied"], "MB_Sent": ["No", "N", "Not Sent"]}
+    elif preset == "Chase sent ballots not returned":
+        mission_defaults = {"MB_Sent": ["Yes", "Y", "Sent"], "MB_Status": ["Not Voted", "Not Returned", "No", "N"]}
+    elif preset == "Cure / problem ballot follow-up":
+        mission_defaults = {"MB_Status": ["Cancelled", "Pending", "Rejected", "Challenged", "Cure", "Problem"]}
+    elif preset == "Permanent mail ballot growth":
+        mission_defaults = {"MB_PERM": ["No", "N", "0", "False"]}
+
+    c1, c2, c3, c4 = st.columns(4)
+    party = c1.multiselect("Party", field_options(filter_options, "Party", base), default=base.get("Party", []), key=special_key("mb_party"))
+    gender = c2.multiselect("Gender", field_options(filter_options, "Gender", base), default=base.get("Gender", []), key=special_key("mb_gender"))
+    age = c3.multiselect("Age Range", field_options(filter_options, "Age_Range", base), default=base.get("Age_Range", []), key=special_key("mb_age"))
+    score = c4.slider("MB Probability Score", 0, 4, st.session_state.get(special_key("mb_score_center"), (0, 4)), key=special_key("mb_score_center"))
+
+    c5, c6, c7, c8 = st.columns(4)
+    app = c5.multiselect("Application Status", field_options(filter_options, "MB_App_Status", base), key=special_key("mb_app_status"))
+    sent = c6.multiselect("Ballot Sent", field_options(filter_options, "MB_Sent", base), key=special_key("mb_sent"))
+    ret = c7.multiselect("Ballot Status", field_options(filter_options, "MB_Status", base), key=special_key("mb_status"))
+    perm = c8.multiselect("Permanent MB", field_options(filter_options, "MB_PERM", base), key=special_key("mb_perm"))
+
+    c9, c10, c11 = st.columns(3)
+    v4a = c9.multiselect("Vote History - All", field_options(filter_options, "V4A", base), key=special_key("mb_v4a"))
+    v4g = c10.multiselect("Vote History - General", field_options(filter_options, "V4G", base), key=special_key("mb_v4g"))
+    v4p = c11.multiselect("Vote History - Primary", field_options(filter_options, "V4P", base), key=special_key("mb_v4p"))
+
     mb_active = dict(base)
-    if app: mb_active["MB_App_Status"] = app
-    if sent: mb_active["MB_Sent"] = sent
-    if ret: mb_active["MB_Status"] = ret
+    for fld, vals in {"Party": party, "Gender": gender, "Age_Range": age, "MB_App_Status": app, "MB_Sent": sent, "MB_Status": ret, "MB_PERM": perm, "V4A": v4a, "V4G": v4g, "V4P": v4p}.items():
+        if vals:
+            mb_active[fld] = vals
+    for fld, vals in mission_defaults.items():
+        if fld not in mb_active or not mb_active.get(fld):
+            valid = set(field_options(filter_options, fld, base))
+            matched = [v for v in vals if v in valid]
+            if matched:
+                mb_active[fld] = matched
+
     st.session_state[special_key("mb_prob_score_range")] = score
-    if st.button("Apply Mail Ballot Filters", width="stretch"):
-        st.session_state.update({filter_key(k):v for k,v in mb_active.items()})
-        st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
+    if st.button("Apply Mail Ballot Center Filters", width="stretch", type="primary"):
+        st.session_state[special_key("mb_last_active")] = mb_active
+        st.success("Mail Ballot Center filters applied here. Create Universe filters were not changed.")
+
     summary, mode, err = update_counts(mb_active)
-    if summary: render_metrics(summary)
-    tabs=st.tabs(["Operations","Exports","Analysis","Notes"])
+    total = _mb_total_from_summary(summary)
+    applied = _mb_count(mb_active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(mb_active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
+    not_applied = _mb_count(mb_active, {"MB_App": ["No", "N", "DNA", "Not Applied"]}) or max(0, total - applied)
+    sent_count = _mb_count(mb_active, {"MB_Sent": ["Yes", "Y", "Sent"]})
+    returned = _mb_count(mb_active, {"MB_Status": ["Voted", "Returned", "Ballot Returned"]})
+    chase = max(0, sent_count - returned) if sent_count else _mb_count(mb_active, {"MB_Status": ["Not Voted", "Not Returned"]})
+
+    st.markdown("### Mail Ballot Snapshot")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    with m1: _mb_render_metric("Current Universe", total, "After MB Center filters", "")
+    with m2: _mb_render_metric("Likely App Targets", not_applied, "No/DNA/not applied", "green")
+    with m3: _mb_render_metric("Applicants", applied, "Applied/approved/pending", "blue")
+    with m4: _mb_render_metric("Ballots Sent", sent_count, "Sent to voters", "gold")
+    with m5: _mb_render_metric("Chase Universe", chase, "Sent minus returned", "")
+
+    tabs = st.tabs(["Plan", "Analyze", "Build Files", "Notes"])
+
     with tabs[0]:
-        st.info("Use presets here to build chase, cure, and growth universes. Counts use the same remote quick-count/index engine.")
+        st.markdown("### Recommended workflow")
+        st.markdown("""
+**1. Cultivate applications:** start with high MB probability voters who have not applied. Prioritize reliable general-election voters and voters with phones/email.  
+**2. Message applicants:** voters who applied but have not yet been sent a ballot need status updates and reminders.  
+**3. Chase ballots:** voters with ballots sent but not returned are the highest-priority follow-up universe.  
+**4. Cure/problem follow-up:** isolate rejected, pending, challenged, or cure-status ballots and handle separately.  
+**5. Permanent MB growth:** after the election cycle, identify strong MB users who are not permanent.
+""")
+        st.info("This section stays inside Mail Ballot Center. It does not overwrite the main Create Universe filters unless we intentionally add a Send to Universe button later.")
+
     with tabs[1]:
-        st.caption("Prepare the CSV only when needed so the Mail Ballot Center does not scan detail shards on every page load.")
-        mb_export_key = "prepared_mail_ballot_center_csv"
-        if st.button("Prepare MB CSV", key="prepare_mb_center_csv", width="stretch"):
-            with st.spinner("Preparing mail ballot CSV..."):
-                out = safe_filtered_df(mb_active, 50000)
-                st.session_state[mb_export_key] = out.to_csv(index=False).encode()
-                st.session_state[mb_export_key + "_rows"] = len(out)
-        if mb_export_key in st.session_state:
-            st.download_button(
-                f"Download MB CSV ({st.session_state.get(mb_export_key + '_rows', 0):,} rows)",
-                st.session_state[mb_export_key],
-                "mail_ballot_universe.csv",
-                "text/csv",
-                width="stretch",
-            )
-        else:
-            st.button("Download MB CSV", disabled=True, width="stretch")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Party")
+            st.dataframe(_mb_group_df(mb_active, "Party", 10), hide_index=True, width="stretch")
+            st.markdown("#### Gender")
+            st.dataframe(_mb_group_df(mb_active, "Gender", 10), hide_index=True, width="stretch")
+            st.markdown("#### Application Status")
+            st.dataframe(_mb_group_df(mb_active, "MB_App_Status", 12), hide_index=True, width="stretch")
+        with right:
+            st.markdown("#### Age Range")
+            st.dataframe(_mb_group_df(mb_active, "Age_Range", 12), hide_index=True, width="stretch")
+            st.markdown("#### Vote History - General")
+            st.dataframe(_mb_group_df(mb_active, "V4G", 8), hide_index=True, width="stretch")
+            st.markdown("#### Ballot Status")
+            st.dataframe(_mb_group_df(mb_active, "MB_Status", 12), hide_index=True, width="stretch")
+
     with tabs[2]:
-        st.write("Mail ballot analysis workspace restored for DEV testing.")
+        st.markdown("### Build Mail Ballot Files")
+        st.caption("Files are prepared only when you click a button, so the page stays fast.")
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            cultivate = dict(mb_active)
+            if "MB_App" not in cultivate and "MB_App_Status" not in cultivate:
+                cultivate["MB_App"] = [v for v in ["No", "N", "DNA", "Not Applied"] if v in field_options(filter_options, "MB_App", base)] or cultivate.get("MB_App", [])
+            _mb_prepare_download(cultivate, "Application Cultivation File", "mail_ballot_cultivate_apps", 50000)
+        with f2:
+            applicants = dict(mb_active)
+            if "MB_App" not in applicants and "MB_App_Status" not in applicants:
+                applicants["MB_App"] = [v for v in ["Yes", "Y", "Applied"] if v in field_options(filter_options, "MB_App", base)] or applicants.get("MB_App", [])
+            _mb_prepare_download(applicants, "Applicant Messaging File", "mail_ballot_applicant_message", 50000)
+        with f3:
+            chase_active = dict(mb_active)
+            if "MB_Sent" not in chase_active:
+                chase_active["MB_Sent"] = [v for v in ["Yes", "Y", "Sent"] if v in field_options(filter_options, "MB_Sent", base)] or chase_active.get("MB_Sent", [])
+            if "MB_Status" not in chase_active:
+                chase_active["MB_Status"] = [v for v in ["Not Voted", "Not Returned", "No", "N"] if v in field_options(filter_options, "MB_Status", base)] or chase_active.get("MB_Status", [])
+            _mb_prepare_download(chase_active, "Ballot Chase File", "mail_ballot_chase", 50000)
+        st.divider()
+        _mb_prepare_download(mb_active, "Current Mail Ballot Center Universe", "mail_ballot_center_current_universe", 100000)
+
     with tabs[3]:
-        st.text_area("Notes")
+        st.text_area("Mail ballot notes / plan", key=special_key("mb_notes"), height=180)
 
 def render_area_intelligence_workspace():
     st.markdown("## Area Intelligence")
