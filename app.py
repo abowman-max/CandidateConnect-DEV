@@ -3412,7 +3412,8 @@ def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
     st.caption("Strategic mail ballot operations: cultivate applications, message applicants, chase outstanding ballots, and build targeted files.")
 
-    start_from_current = st.sidebar.checkbox("Start from current main universe", value=st.session_state.get(special_key("mb_start_current"), True), key=special_key("mb_start_current"))
+    # Sidebar already owns this checkbox. Read its value here to avoid duplicate Streamlit widget keys.
+    start_from_current = bool(st.session_state.get(special_key("mb_start_current"), True))
     base = active_filters() if start_from_current else {}
 
     preset = st.selectbox(
