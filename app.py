@@ -3381,12 +3381,78 @@ def _mb_total_from_summary(summary: dict | None) -> int:
         return 0
 
 
+def _mb_special_filters() -> dict:
+    """Mail Ballot Center-only special filters.
+
+    Do not use the Create Universe/global special filters here, because this
+    workspace should be controlled by the Mail Ballot widgets shown on this page.
+    """
+    special = {}
+    score = st.session_state.get(special_key("mb_score_center"), (0, 4))
+    try:
+        lo, hi = int(score[0]), int(score[1])
+        if lo > 0 or hi < 4:
+            special["MB_Prob_Score"] = {"min": lo, "max": hi}
+    except Exception:
+        pass
+    return special
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _mb_index_group_cached(active_json: str, special_json: str, field: str, limit: int = 12) -> pd.DataFrame:
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    urls = index_urls_from_manifest()
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    where = index_where_sql(active or {}, special or {})
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
+        q = f"""
+            SELECT CAST({sql_ident(field)} AS VARCHAR) AS Category, COUNT(*) AS Voters
+            FROM read_parquet({url_list}, union_by_name=true)
+            {where}
+            GROUP BY CAST({sql_ident(field)} AS VARCHAR)
+            ORDER BY Voters DESC
+            LIMIT {int(limit)}
+        """
+        return con.execute(q).df()
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+
+def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
+    """Use index shards for Mail Ballot counts so every visible MB filter works.
+
+    The count cube is great for broad Create Universe counts, but the Mail Ballot
+    Center combines MB status, V4 history fields, and MB probability score. The
+    index shards have those fields and are still fast enough for this workspace.
+    """
+    try:
+        summary = duckdb_index_summary(
+            json.dumps(active or {}, sort_keys=True),
+            json.dumps(_mb_special_filters(), sort_keys=True),
+        )
+        return summary, "mail-ballot-index", None
+    except Exception as e:
+        return None, "unavailable", e
+
+
 def _mb_count(active: dict, extra: dict | None = None) -> int:
     a = dict(active or {})
     for k, v in (extra or {}).items():
         a[k] = v if isinstance(v, list) else [v]
     try:
-        summary, _mode, _err = update_counts(a)
+        summary, _mode, _err = _mb_summary(a)
         return _mb_total_from_summary(summary)
     except Exception:
         return 0
@@ -3394,16 +3460,15 @@ def _mb_count(active: dict, extra: dict | None = None) -> int:
 
 def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
     try:
-        special = active_special_filters()
-        df = duckdb_count_cube_group_filtered(
-            json.dumps(count_safe_filters(active or {}), sort_keys=True),
-            json.dumps(special or {}, sort_keys=True),
+        df = _mb_index_group_cached(
+            json.dumps(active or {}, sort_keys=True),
+            json.dumps(_mb_special_filters(), sort_keys=True),
             field,
             limit,
         )
         if df is None or df.empty:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
-        df = df.rename(columns={"label": "Category"}).copy()
+        df = df.copy()
         df["Category"] = df["Category"].astype(str).replace({"": "(blank)", "nan": "(blank)", "None": "(blank)"})
         df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
         total = max(1, int(df["Voters"].sum()))
@@ -3411,7 +3476,6 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
         return df[["Category", "Voters", "%"]]
     except Exception:
         return pd.DataFrame(columns=["Category", "Voters", "%"])
-
 
 
 def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None):
@@ -3465,7 +3529,7 @@ def _mb_prepare_download(active: dict, label: str, file_prefix: str, max_rows: i
     key = special_key("mb_export_" + re.sub(r"[^a-z0-9]+", "_", file_prefix.lower()))
     if st.button(f"Prepare {label}", key=key + "_btn", width="stretch"):
         with st.spinner(f"Preparing {label}..."):
-            df = safe_filtered_df(active, max_rows)
+            df = duckdb_detail_filtered_df(active, _mb_special_filters(), int(max_rows))
             keep = [c for c in [
                 "voter_id", "FirstName", "MiddleName", "LastName", "NameSuffix", "FullName",
                 "Party", "Gender", "Age", "Age_Range", "County", "Municipality", "Precinct",
@@ -3581,7 +3645,7 @@ def render_mail_ballot_workspace():
         st.session_state[special_key("mb_last_active")] = mb_active
         st.success("Mail Ballot Center filters applied here. Create Universe filters were not changed.")
 
-    summary, mode, err = update_counts(mb_active)
+    summary, mode, err = _mb_summary(mb_active)
     total = _mb_total_from_summary(summary)
     applied = _mb_count(mb_active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(mb_active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
     not_applied = _mb_count(mb_active, {"MB_App": ["No", "N", "DNA", "Not Applied"]}) or max(0, total - applied)
