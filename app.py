@@ -551,6 +551,37 @@ def voter_detail_lookup_urls_for_id(voter_id: str) -> list[str]:
     return [u] if u else detail_urls_from_manifest()
 
 
+def _hh_norm(value) -> str:
+    s = cc_text(value).upper().strip()
+    s = re.sub(r"\bSTREET\b", "ST", s)
+    s = re.sub(r"\bROAD\b", "RD", s)
+    s = re.sub(r"\bDRIVE\b", "DR", s)
+    s = re.sub(r"\bAVENUE\b", "AVE", s)
+    s = re.sub(r"\bLANE\b", "LN", s)
+    s = re.sub(r"\bCOURT\b", "CT", s)
+    s = re.sub(r"\bTOWNSHIP\b", "TWP", s)
+    s = re.sub(r"\bBOROUGH\b", "BORO", s)
+    s = re.sub(r"[^A-Z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+def household_lookup_key(row) -> str:
+    parts = [
+        row.get("County", ""), row.get("House Number", ""), row.get("Street Name", ""),
+        row.get("Apartment Number", ""), row.get("Zip", ""),
+    ]
+    return "|".join(_hh_norm(x) for x in parts)
+
+def household_hash_bucket_from_key(key: str, buckets: int = 64) -> int:
+    return int(hashlib.md5(cc_text(key).encode("utf-8")).hexdigest(), 16) % int(buckets)
+
+def voter_household_lookup_url(row) -> str:
+    key = cc_text(row.get("HH_LOOKUP_KEY", "")) or household_lookup_key(row)
+    if not key or key.count("|") < 4:
+        return ""
+    bucket = household_hash_bucket_from_key(key)
+    return speed_table_url(f"voter_household_hash_{bucket:02d}")
+
+
 def voter_lookup_urls_from_manifest() -> list[str]:
     """Backward-compatible helper for older lookup builds."""
     key = speed_table_key("voter_lookup")
@@ -2419,7 +2450,7 @@ def remote_search_voters(term, max_rows=25):
         "Party", "Gender", "DOB", "RegistrationDate", "Age",
         "USC", "STS", "STH", "School District", "School Region",
         "Mobile", "Landline", "Current_ApplicantPhone", "Email",
-        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags", "HH_LOOKUP_KEY"
     ]
     # Keep the search row intentionally small and fast. Vote history is loaded on demand.
     lookup_cols = base_lookup_cols
@@ -2565,7 +2596,7 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
         "City", "State", "Zip", "Precinct", "Municipality", "County",
         "Party", "Gender", "DOB", "RegistrationDate", "Age",
         "USC", "STS", "STH", "School District", "School Region",
-        "HH_ID", "Household_ID", "Household_Party", "HouseholdCount",
+        "HH_ID", "Household_ID", "Household_Party", "HouseholdCount", "HH_LOOKUP_KEY",
         "Mobile", "Landline", "Current_ApplicantPhone", "Email",
         "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
     ]
@@ -2757,39 +2788,56 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     c.save(); bio.seek(0); return bio.getvalue()
 
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
-    """Find household members from the thin search shards by normalized address.
+    """Find household members from one household-hash shard.
 
-    This avoids scanning the large detail shards and still includes segmented names
-    needed to avoid Unnamed Voter rows.
+    Step 8 v23 writes speed/voter_household_hash_00..63.parquet with HH_LOOKUP_KEY.
+    That avoids scanning every last-name shard just to find people at the same address.
     """
-    urls = voter_search_all_urls() or voter_lookup_or_detail_urls()
-    existing_cols = remote_parquet_columns(urls)
-    aliases = source_alias_candidates()
-    conditions = []
-    for field in ["County", "House Number", "Street Name", "Zip"]:
-        val = cc_text(row.get(field, ""))
-        src = first_existing_column(existing_cols, aliases.get(field, [field]))
-        if val and src:
-            conditions.append(f"LOWER(CAST({sql_ident(src)} AS VARCHAR)) = {sql_lit(val.lower())}")
-    apt_val = cc_text(row.get("Apartment Number", ""))
-    apt_src = first_existing_column(existing_cols, aliases.get("Apartment Number", ["Apartment Number"]))
-    if apt_val and apt_src:
-        conditions.append(f"LOWER(CAST({sql_ident(apt_src)} AS VARCHAR)) = {sql_lit(apt_val.lower())}")
-    if len(conditions) < 3:
-        return pd.DataFrame(columns=["voter_id", "FullName", "Party", "Gender", "Age"])
+    hh_key_value = cc_text(row.get("HH_LOOKUP_KEY", "")) or household_lookup_key(row)
     cols = [
         "voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix",
         "Party", "Gender", "Age", "DOB", "House Number", "Street Name", "Apartment Number",
-        "City", "State", "Zip", "County", "Municipality", "Precinct"
+        "City", "State", "Zip", "County", "Municipality", "Precinct", "HH_LOOKUP_KEY"
     ]
+    if not hh_key_value or hh_key_value.count("|") < 4:
+        return pd.DataFrame(columns=cols)
+
+    hh_url = voter_household_lookup_url(row)
+    if hh_url:
+        urls = [hh_url]
+        existing_cols = remote_parquet_columns(urls)
+        key_col = first_existing_column(existing_cols, ["HH_LOOKUP_KEY"])
+        if key_col:
+            where = f"CAST({sql_ident(key_col)} AS VARCHAR) = {sql_lit(hh_key_value)}"
+        else:
+            where = "FALSE"
+    else:
+        # Fallback for an older shard build: slower, but still works.
+        urls = voter_search_all_urls() or voter_lookup_or_detail_urls()
+        existing_cols = remote_parquet_columns(urls)
+        aliases = source_alias_candidates()
+        conditions = []
+        for field in ["County", "House Number", "Street Name", "Zip"]:
+            val = cc_text(row.get(field, ""))
+            src = first_existing_column(existing_cols, aliases.get(field, [field]))
+            if val and src:
+                conditions.append(f"LOWER(CAST({sql_ident(src)} AS VARCHAR)) = {sql_lit(val.lower())}")
+        apt_val = cc_text(row.get("Apartment Number", ""))
+        apt_src = first_existing_column(existing_cols, aliases.get("Apartment Number", ["Apartment Number"]))
+        if apt_val and apt_src:
+            conditions.append(f"LOWER(CAST({sql_ident(apt_src)} AS VARCHAR)) = {sql_lit(apt_val.lower())}")
+        if len(conditions) < 3:
+            return pd.DataFrame(columns=cols)
+        where = " AND ".join(conditions)
+
     select_cols = safe_remote_select_exprs(existing_cols, cols)
+    aliases = source_alias_candidates()
     order_parts = []
     for out in ["LastName", "FirstName"]:
         src = first_existing_column(existing_cols, aliases.get(out, [out]))
         if src:
             order_parts.append(sql_ident(src))
     order_sql = (" ORDER BY " + ", ".join(order_parts)) if order_parts else ""
-    where = " AND ".join(conditions)
     con = duckdb.connect(database=':memory:')
     try:
         try:
@@ -2803,12 +2851,7 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
         ).df()
         if df.empty:
             return df
-        try:
-            df = normalize_download_df(df)
-        except Exception:
-            pass
-        # Light normalization and robust name rebuild.
-        for c in ["FirstName", "MiddleName", "LastName", "FullName", "Street Name", "City", "Municipality", "County", "Precinct"]:
+        for c in ["FirstName", "MiddleName", "LastName", "NameSuffix", "FullName", "Name", "Street Name", "City", "Municipality", "County", "Precinct"]:
             if c in df.columns:
                 df[c] = df[c].map(smart_title)
         if "NameSuffix" in df.columns:
@@ -2816,9 +2859,11 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
         rebuilt = df.apply(full_name, axis=1).map(smart_title)
         existing_full = df.get("FullName", pd.Series([""]*len(df), index=df.index)).astype(str).str.strip()
         df["FullName"] = existing_full
-        mask = df["FullName"].eq("") | df["FullName"].str.lower().isin(["unnamed voter", "nan", "none"])
+        mask = df["FullName"].eq("") | df["FullName"].str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
         df.loc[mask, "FullName"] = rebuilt.loc[mask]
-        df["FullName"] = df["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter", "Nan": "Unnamed Voter", "None": "Unnamed Voter"})
+        # If the name still is not available, show a useful address/person label instead of repeating Unnamed Voter.
+        missing = df["FullName"].astype(str).str.strip().eq("") | df["FullName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
+        df.loc[missing, "FullName"] = df.loc[missing].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
         return df
     finally:
         con.close()
@@ -2920,6 +2965,57 @@ def vote_method_pdf_label(method_or_icon: str) -> str:
         return "PROV"
     return ""
 
+
+
+def render_election_history_table(row: pd.Series):
+    """Draw visible blank/no-vote years and method labels for the selected voter."""
+    row = row if isinstance(row, pd.Series) else pd.Series(row or {})
+    cols = election_columns_from_manifest()
+    # Fallback to columns present in the loaded row.
+    if not cols:
+        cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
+    general = sorted([c for c in cols if str(c).upper().startswith("G")], reverse=True)
+    primary = sorted([c for c in cols if str(c).upper().startswith("P")], reverse=True)
+
+    def method_for(col):
+        raw = row.get(col, "")
+        method = normalize_vote_method(raw)
+        if not method and not _blank_vote_value(raw):
+            # Some history fields only store party. Use POLL as the visual method
+            # because it means voted but the file did not carry an explicit method.
+            if cc_text(raw).upper() in {"R","D","O","I","NP","REP","DEM","REPUBLICAN","DEMOCRAT","DEMOCRATIC"}:
+                method = "At Poll"
+        return method
+
+    def party_for(col):
+        raw = cc_text(row.get(col, "")).upper()
+        if raw in {"R","D"}:
+            return raw
+        if raw in {"REP","REPUBLICAN"}:
+            return "R"
+        if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
+            return "D"
+        return ""
+
+    def draw(label, group_cols):
+        st.markdown(f"**{label} Elections**")
+        if not group_cols:
+            st.caption("No election history columns available in this shard build.")
+            return
+        data = []
+        party_row = {"Row": "Party"}
+        method_row = {"Row": "Method"}
+        for c in group_cols:
+            short = str(c).split("_")[0].upper()
+            party_row[short] = party_for(c)
+            m = method_for(c)
+            method_row[short] = vote_method_pdf_label(m)
+        data.extend([party_row, method_row])
+        hist_df = pd.DataFrame(data)
+        st.dataframe(hist_df, hide_index=True, width="stretch")
+    draw("General", general)
+    draw("Primary", primary)
+    st.caption("Legend: MB = Mail Ballot · POLL = At Poll · PROV = Provisional · blank = Did Not Vote / no record")
 
 def render_voter_lookup_workspace():
     st.markdown("## Voter Lookup")
@@ -3139,29 +3235,37 @@ def render_voter_lookup_workspace():
         if st.session_state.get(hh_key):
             hh = pd.DataFrame(st.session_state.get(hh_key) or [])
             if not hh.empty:
-                view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "Party", "Gender", "Age"] if c in hh.columns]].copy()
+                view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "Party", "Gender", "Age", "County", "City", "State"] if c in hh.columns]].copy()
                 rebuilt_names = hh.apply(full_name, axis=1).map(smart_title)
-                view["FullName"] = rebuilt_names.replace({"Unnamed Voter": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
-                view.insert(0, "Current", view.get("voter_id", "").astype(str).eq(str(selected_id)).map(lambda x: "✓" if x else ""))
-                display_cols = [c for c in ["Current", "voter_id", "FullName", "Party", "Gender", "Age"] if c in view.columns]
-                st.dataframe(view[display_cols], hide_index=True, width="stretch")
-                st.caption("Open another household member:")
+                view["FullName"] = rebuilt_names
+                missing_names = view["FullName"].astype(str).str.strip().eq("") | view["FullName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
+                view.loc[missing_names, "FullName"] = view.loc[missing_names].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
+                st.markdown("""
+                <style>
+                .hh-card {border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px 12px; margin:6px 0; background:#0b1220;}
+                .hh-card-current {border-color:#f2b84b; background:#111827;}
+                .hh-name {font-weight:900; color:#fff;} .hh-sub {color:#cbd5e1; font-size:12px;}
+                </style>
+                """, unsafe_allow_html=True)
                 for j, hhrow in view.iterrows():
                     hvid = cc_text(hhrow.get("voter_id", ""))
-                    hname = smart_title(cc_text(hhrow.get("FullName", ""))) or hvid
-                    if not hvid or hvid == selected_id:
-                        continue
-                    if st.button(f"Open {hname}", key=f"open_household_{selected_id}_{hvid}"):
-                        st.session_state["lookup_selected_id"] = hvid
-                        try:
-                            hd = remote_voter_lookup_detail(hvid)
-                            st.session_state[f"lookup_detail_row_{hvid}"] = pd.DataFrame([hd]).iloc[0].to_dict()
-                        except Exception:
-                            pass
-                        for k in list(st.session_state.keys()):
-                            if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
-                                st.session_state.pop(k, None)
-                        st.rerun()
+                    hname = smart_title(cc_text(hhrow.get("FullName", ""))) or hvid or "Household Voter"
+                    is_current = hvid == selected_id
+                    sub = " · ".join([x for x in [cc_text(hhrow.get("Party","")), cc_text(hhrow.get("Gender","")), ("Age " + cc_text(hhrow.get("Age","")) if cc_text(hhrow.get("Age","")) else "")] if x])
+                    cls = "hh-card hh-card-current" if is_current else "hh-card"
+                    st.markdown(f'<div class="{cls}"><div class="hh-name">{"✓ " if is_current else ""}{hname}</div><div class="hh-sub">{sub}</div></div>', unsafe_allow_html=True)
+                    if hvid and not is_current:
+                        if st.button(f"Open {hname}", key=f"open_household_{selected_id}_{hvid}", width="stretch"):
+                            st.session_state["lookup_selected_id"] = hvid
+                            try:
+                                hd = remote_voter_lookup_detail(hvid)
+                                st.session_state[f"lookup_detail_row_{hvid}"] = pd.DataFrame([hd]).iloc[0].to_dict()
+                            except Exception:
+                                pass
+                            for k in list(st.session_state.keys()):
+                                if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
+                                    st.session_state.pop(k, None)
+                            st.rerun()
             else:
                 st.caption("No household members found from the selected address.")
         else:
