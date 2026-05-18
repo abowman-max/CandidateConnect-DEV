@@ -348,6 +348,16 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 .cc-scroll-table { max-height: 245px; overflow-y: auto; border:1px solid rgba(148,163,184,.20); border-radius:10px; }
 .cc-section-tabs { display:flex; gap:8px; margin: 12px 0 10px 0; }
 
+
+
+/* v21zr table readability polish */
+[data-testid="stDataFrame"] div[role="gridcell"],
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    text-align: center !important;
+}
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    font-weight: 900 !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -3366,6 +3376,39 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
         return pd.DataFrame(columns=["Category", "Voters", "%"])
 
 
+
+def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None):
+    """Readable sortable Streamlit table with comma-formatted numbers.
+
+    Streamlit's dataframe grid already gives sortable headers and sticky headers
+    when a height is provided. This wrapper adds comma formatting and consistent
+    centered styling for the tables we show across workspaces.
+    """
+    if df is None:
+        df = pd.DataFrame()
+    show = df.copy()
+    # Format common numeric columns with commas while preserving sort where possible
+    fmt_cols = {}
+    for col in show.columns:
+        if col in {"Voters", "Total", "Count", "Rows", "Households"} or str(col).lower().endswith(" voters"):
+            show[col] = pd.to_numeric(show[col], errors="coerce")
+            fmt_cols[col] = "{:,.0f}"
+        elif pd.api.types.is_integer_dtype(show[col]) or pd.api.types.is_float_dtype(show[col]):
+            # Keep percentage-like columns alone; format other large numeric columns.
+            if str(col).strip() not in {"%", "Percent", "Pct"}:
+                fmt_cols[col] = "{:,.0f}"
+    try:
+        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center"}).set_table_styles([
+            {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900")]},
+            {"selector": "td", "props": [("text-align", "center")]},
+        ])
+        return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key)
+    except Exception:
+        # Safe fallback: pre-format values as strings.
+        for col, spec in fmt_cols.items():
+            show[col] = show[col].map(lambda x: "" if pd.isna(x) else format(float(x), ",.0f"))
+        return st.dataframe(show, hide_index=True, width="stretch", height=height, key=key)
+
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
     st.markdown(
         f"""
@@ -3415,6 +3458,10 @@ def render_mail_ballot_workspace():
     # Sidebar already owns this checkbox. Read its value here to avoid duplicate Streamlit widget keys.
     start_from_current = bool(st.session_state.get(special_key("mb_start_current"), True))
     base = active_filters() if start_from_current else {}
+    if start_from_current and base:
+        st.info("Mail Ballot Center is starting from your current Create Universe filters.")
+    elif start_from_current and not base:
+        st.warning("Start-from-universe is checked, but no Create Universe filters are active yet. Showing statewide mail-ballot data.")
 
     preset = st.selectbox(
         "Mail ballot mission",
@@ -3508,34 +3555,40 @@ def render_mail_ballot_workspace():
         left, right = st.columns(2)
         with left:
             st.markdown("#### Party")
-            st.dataframe(_mb_group_df(mb_active, "Party", 10), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "Party", 10), height=220, key=special_key("mb_tbl_party"))
             st.markdown("#### Gender")
-            st.dataframe(_mb_group_df(mb_active, "Gender", 10), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "Gender", 10), height=220, key=special_key("mb_tbl_gender"))
             st.markdown("#### Application Status")
-            st.dataframe(_mb_group_df(mb_active, "MB_App_Status", 12), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "MB_App_Status", 12), height=240, key=special_key("mb_tbl_app_status"))
         with right:
             st.markdown("#### Age Range")
-            st.dataframe(_mb_group_df(mb_active, "Age_Range", 12), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "Age_Range", 12), height=240, key=special_key("mb_tbl_age"))
             st.markdown("#### Vote History - General")
-            st.dataframe(_mb_group_df(mb_active, "V4G", 8), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "V4G", 8), height=220, key=special_key("mb_tbl_v4g"))
             st.markdown("#### Ballot Status")
-            st.dataframe(_mb_group_df(mb_active, "MB_Status", 12), hide_index=True, width="stretch")
+            cc_table(_mb_group_df(mb_active, "MB_Status", 12), height=240, key=special_key("mb_tbl_mb_status"))
 
     with tabs[2]:
         st.markdown("### Build Mail Ballot Files")
-        st.caption("Files are prepared only when you click a button, so the page stays fast.")
+        st.caption("Files are prepared only when you click a button, so the page stays fast. Each file respects the Mail Ballot Center filters currently shown above.")
         f1, f2, f3 = st.columns(3)
         with f1:
+            st.markdown("**Application Cultivation File**")
+            st.caption("Voters who look like good mail-ballot prospects but have not applied. Use for application mail, calls, texts, or digital follow-up.")
             cultivate = dict(mb_active)
             if "MB_App" not in cultivate and "MB_App_Status" not in cultivate:
                 cultivate["MB_App"] = [v for v in ["No", "N", "DNA", "Not Applied"] if v in field_options(filter_options, "MB_App", base)] or cultivate.get("MB_App", [])
             _mb_prepare_download(cultivate, "Application Cultivation File", "mail_ballot_cultivate_apps", 50000)
         with f2:
+            st.markdown("**Applicant Messaging File**")
+            st.caption("Voters with an application/applicant status. Use for education, reminders, and ballot-arrival messaging.")
             applicants = dict(mb_active)
             if "MB_App" not in applicants and "MB_App_Status" not in applicants:
                 applicants["MB_App"] = [v for v in ["Yes", "Y", "Applied"] if v in field_options(filter_options, "MB_App", base)] or applicants.get("MB_App", [])
             _mb_prepare_download(applicants, "Applicant Messaging File", "mail_ballot_applicant_message", 50000)
         with f3:
+            st.markdown("**Ballot Chase File**")
+            st.caption("Voters with ballots sent but not yet marked returned/voted. Use for chase calls, texts, and door follow-up.")
             chase_active = dict(mb_active)
             if "MB_Sent" not in chase_active:
                 chase_active["MB_Sent"] = [v for v in ["Yes", "Y", "Sent"] if v in field_options(filter_options, "MB_Sent", base)] or chase_active.get("MB_Sent", [])
@@ -3543,6 +3596,8 @@ def render_mail_ballot_workspace():
                 chase_active["MB_Status"] = [v for v in ["Not Voted", "Not Returned", "No", "N"] if v in field_options(filter_options, "MB_Status", base)] or chase_active.get("MB_Status", [])
             _mb_prepare_download(chase_active, "Ballot Chase File", "mail_ballot_chase", 50000)
         st.divider()
+        st.markdown("**Current Mail Ballot Center Universe**")
+        st.caption("A general-purpose export of exactly the current Mail Ballot Center universe after your mission and quick filters.")
         _mb_prepare_download(mb_active, "Current Mail Ballot Center Universe", "mail_ballot_center_current_universe", 100000)
 
     with tabs[3]:
@@ -3693,7 +3748,7 @@ def render_output_buttons(active):
                         area_df_ov[area_level_ov] = area_df_ov[area_level_ov].map(canonical_precinct_display)
                         area_df_ov = area_df_ov.groupby(area_level_ov, as_index=False)["Voters"].sum()
                     area_df_ov = area_df_ov.sort_values(area_level_ov, kind="stable")
-                    st.dataframe(area_df_ov, hide_index=True, width="stretch", height=260)
+                    cc_table(area_df_ov, height=260, key=special_key("output_overview_area_table_display"))
         elif err:
             st.warning(err)
 
@@ -3917,7 +3972,8 @@ with st.sidebar:
                 st.rerun()
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
-        st.checkbox("Start from current main universe", value=True, key=special_key("mb_start_current"))
+        st.checkbox("Use Create Universe filters as the starting universe", value=False, key=special_key("mb_start_current"))
+        st.caption("Leave unchecked to analyze statewide mail-ballot data. Check it only after building a main universe in Create Universe.")
     elif st.session_state.get("left_section") == "area_intelligence":
         st.markdown("### Area Intelligence")
         st.caption("Select the area on the right.")
@@ -3963,25 +4019,7 @@ with a1:
         else: st.session_state["quick_summary"]=summary; st.session_state["count_mode"]=mode
 with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
 if st.session_state.get("quick_summary"):
-    st.markdown("### Current Counts")
-    render_metrics(st.session_state["quick_summary"])
-    render_party_chart(st.session_state["quick_summary"], "Party Breakdown")
-    cgender, cage = st.columns(2)
-    with cgender:
-        render_group_bar(active, "Gender", "Gender Breakdown", ["F", "M", "U"])
-    with cage:
-        render_group_bar(active, "Age_Range", "Age Range Breakdown", ["18-24", "25-34", "35-44", "45-54", "55-64", "65+", "65-74", "75-84", "85+"])
-    st.markdown("### Counts by Area")
-    area_choice = st.selectbox("Area table level", ["County", "Municipality", "Precinct", "School District", "School Region", "USC", "STS", "STH"], key=special_key("counts_area_table_level"))
-    area_df = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_choice, 200)
-    if not area_df.empty:
-        area_df = area_df.rename(columns={"label": area_choice})
-        area_df["Voters"] = area_df["Voters"].fillna(0).astype(int)
-        if area_choice == "Precinct":
-            area_df[area_choice] = area_df[area_choice].map(canonical_precinct_display)
-            area_df = area_df.groupby(area_choice, as_index=False)["Voters"].sum()
-        area_df = area_df.sort_values(area_choice, kind="stable")
-        st.dataframe(area_df, hide_index=True, width="stretch", height=280)
+    st.caption("Counts updated. Use the Output Center tabs below for the overview, exports, and reports.")
 
 st.markdown("## Output Center")
 render_output_buttons(active)
