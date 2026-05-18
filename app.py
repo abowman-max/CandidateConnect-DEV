@@ -2262,28 +2262,31 @@ def safe_search_blob_expr(existing_cols):
 def report_columns():
     return list(DEFAULT_EXPORT_COLUMNS)
 
+@st.cache_data(ttl=600, show_spinner=False)
 def remote_search_voters(term, max_rows=25):
-    """Faster schema-safe voter lookup using ONLY lightweight index shards.
+    """Fast lookup against lightweight index shards using structured predicates.
 
-    v21zj change:
-    - select only lookup/result columns instead of the full export schema
-    - if a PA county name is typed (example: "Elmer Bowman York"), use it as a
-      real County predicate instead of searching it in the text blob
-    - avoid normalize_download_df() inside the search loop, which was doing
-      export cleanup work the lookup page does not need
+    This avoids the slow all-column CONCAT/LIKE scan that made Voter Lookup feel stuck.
+    For searches like "Elmer Bowman York", York is treated as a county filter,
+    and first/last name predicates are applied directly when those columns exist.
     """
     urls = index_urls_from_manifest()
     raw_term = str(term or "").strip()
-    if not raw_term:
-        return pd.DataFrame(columns=[])
-
-    lookup_cols = [
+    base_lookup_cols = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
-        "House Number", "Street Name", "Apartment Number", "Address Line 2",
+        "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2",
         "City", "State", "Zip", "Precinct", "Municipality", "County",
-        "Party", "Gender", "DOB", "Age", "Mobile", "Landline", "Email",
+        "Party", "Gender", "DOB", "RegistrationDate", "Age",
+        "USC", "STS", "STH", "School District", "School Region",
+        "Mobile", "Landline", "Current_ApplicantPhone", "Email",
         "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
     ]
+    # Pull election columns from the lightweight index when present so lookup can
+    # show vote history without scanning the detail shards.
+    election_cols = election_columns_from_manifest()
+    lookup_cols = base_lookup_cols + [c for c in election_cols if c not in base_lookup_cols]
+    if not raw_term:
+        return pd.DataFrame(columns=lookup_cols)
 
     county_names = {
         "adams","allegheny","armstrong","beaver","bedford","berks","blair","bradford","bucks","butler",
@@ -2294,45 +2297,70 @@ def remote_search_voters(term, max_rows=25):
         "northumberland","perry","philadelphia","pike","potter","schuylkill","snyder","somerset","sullivan",
         "susquehanna","tioga","union","venango","warren","washington","wayne","westmoreland","wyoming","york"
     }
-
-    raw_tokens = [t.strip().lower().replace("'", "''") for t in re.split(r"\s+", raw_term) if t.strip()]
-    county_token = next((t for t in raw_tokens if t in county_names), "")
-    tokens = [t for t in raw_tokens if t != county_token]
-    if not tokens and county_token:
-        tokens = [county_token]
-        county_token = ""
+    raw_tokens = [t.strip() for t in re.split(r"\s+", raw_term) if t.strip()]
+    tokens_lower = [t.lower().replace("'", "''") for t in raw_tokens]
+    county_token = next((t for t in tokens_lower if t in county_names), "")
+    search_tokens = [t for t in tokens_lower if t != county_token]
 
     existing_cols = remote_parquet_columns(urls)
+    aliases = source_alias_candidates()
     select_cols = safe_remote_select_exprs(existing_cols, lookup_cols)
 
-    aliases = source_alias_candidates()
-    searchable_outs = [
-        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
-        "Municipality", "Precinct", "Street Name", "House Number", "City", "Zip",
-        "Mobile", "Landline", "Email"
-    ]
-    search_srcs = []
-    seen = set()
-    for out in searchable_outs:
-        src = first_existing_column(existing_cols, aliases.get(out, [out]))
-        if src and src.lower() not in seen:
-            search_srcs.append(src)
-            seen.add(src.lower())
-    if not search_srcs:
+    def src(out_name):
+        return first_existing_column(existing_cols, aliases.get(out_name, [out_name]))
+
+    c_voter = src("voter_id")
+    c_full = src("FullName")
+    c_first = src("FirstName")
+    c_middle = src("MiddleName")
+    c_last = src("LastName")
+    c_county = src("County")
+    c_house = src("House Number")
+    c_street = src("Street Name")
+    c_city = src("City")
+    c_zip = src("Zip")
+    c_mobile = src("Mobile")
+    c_land = src("Landline")
+    c_email = src("Email")
+
+    where_parts = []
+    if county_token and c_county:
+        where_parts.append(f"LOWER(CAST({sql_ident(c_county)} AS VARCHAR)) = {sql_lit(county_token)}")
+
+    digits = re.sub(r"\D+", "", raw_term)
+    if len(digits) >= 6 and c_voter:
+        where_parts.append(f"CAST({sql_ident(c_voter)} AS VARCHAR) LIKE {sql_lit('%' + digits + '%')}")
+    elif "@" in raw_term and c_email:
+        email_term = raw_term.lower().replace("'", "''")
+        where_parts.append(f"LOWER(CAST({sql_ident(c_email)} AS VARCHAR)) LIKE {sql_lit('%' + email_term + '%')}")
+    elif len(digits) >= 7 and (c_mobile or c_land):
+        phone_parts = []
+        for pc in [c_mobile, c_land]:
+            if pc:
+                phone_parts.append(f"REGEXP_REPLACE(CAST({sql_ident(pc)} AS VARCHAR), '[^0-9]', '', 'g') LIKE {sql_lit('%' + digits + '%')}")
+        if phone_parts:
+            where_parts.append("(" + " OR ".join(phone_parts) + ")")
+    elif search_tokens:
+        # Name-first search. Two tokens usually means first + last.
+        if len(search_tokens) >= 2 and c_first and c_last:
+            first_t = search_tokens[0]
+            last_t = search_tokens[-1]
+            where_parts.append(f"LOWER(CAST({sql_ident(c_first)} AS VARCHAR)) LIKE {sql_lit(first_t + '%')}")
+            where_parts.append(f"LOWER(CAST({sql_ident(c_last)} AS VARCHAR)) LIKE {sql_lit(last_t + '%')}")
+        else:
+            searchable = [c_full, c_first, c_middle, c_last, c_house, c_street, c_city, c_zip]
+            searchable = [c for c in searchable if c]
+            if searchable:
+                blob = "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in searchable]) + ")"
+                for t in search_tokens:
+                    where_parts.append(f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}")
+
+    if not where_parts:
         return pd.DataFrame(columns=lookup_cols)
 
-    blob = "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in search_srcs]) + ")"
-    where_parts = []
-    if county_token:
-        county_src = first_existing_column(existing_cols, aliases.get("County", ["County"]))
-        if county_src:
-            where_parts.append(f"LOWER(CAST({sql_ident(county_src)} AS VARCHAR)) = {sql_lit(county_token)}")
-    for t in tokens:
-        where_parts.append(f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}")
-    where = " AND ".join(where_parts) or "1=1"
-
-    order_col = first_existing_column(existing_cols, aliases.get("LastName", ["LastName"])) or first_existing_column(existing_cols, aliases.get("FullName", ["FullName"]))
-    order_sql = f" ORDER BY {sql_ident(order_col)}" if order_col else ""
+    order_parts = [c for c in [c_last, c_first, c_house, c_street] if c]
+    order_sql = (" ORDER BY " + ", ".join(sql_ident(c) for c in order_parts)) if order_parts else ""
+    where = " AND ".join(where_parts)
 
     con = duckdb.connect(database=':memory:')
     try:
@@ -2345,13 +2373,20 @@ def remote_search_voters(term, max_rows=25):
                 pass
         query = f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where}{order_sql} LIMIT {int(max_rows)}"
         df = con.execute(query).df()
-        return df if not df.empty else pd.DataFrame(columns=lookup_cols)
+        if df.empty:
+            return pd.DataFrame(columns=lookup_cols)
+        # Light normalization only; do not run export cleanup here.
+        for c in df.columns:
+            if c in {"FirstName","MiddleName","LastName","NameSuffix","FullName","Street Name","City","Municipality","County","Precinct"}:
+                df[c] = df[c].map(smart_title)
+        return df
     except Exception as e:
         st.error(f"Lookup query failed quickly instead of hanging: {e}")
         return pd.DataFrame(columns=lookup_cols)
     finally:
         con.close()
 
+@st.cache_data(ttl=600, show_spinner=False)
 def remote_voter_detail(voter_id: str) -> pd.Series:
     """Fetch one full voter record from detail shards by voter_id, then normalize display fields."""
     vid = cc_text(voter_id)
@@ -2377,6 +2412,7 @@ def remote_voter_detail(voter_id: str) -> pd.Series:
         con.close()
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
     """Find likely household members by normalized address fields, using detail shards remotely."""
     if row is None or len(row) == 0:
@@ -2387,12 +2423,18 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
     conditions = []
-    for field in ["County", "Municipality", "House Number", "Street Name", "Apartment Number", "Zip"]:
+    # Use stable household keys only. Municipality/precinct labels can differ between
+    # index/detail tables, which caused false "no household members" results.
+    for field in ["County", "House Number", "Street Name", "Zip"]:
         val = cc_text(row.get(field, ""))
         src = first_existing_column(existing_cols, aliases.get(field, [field]))
         if val and src:
             conditions.append(f"LOWER(CAST({sql_ident(src)} AS VARCHAR)) = {sql_lit(val.lower())}")
-    if not conditions:
+    apt_val = cc_text(row.get("Apartment Number", ""))
+    apt_src = first_existing_column(existing_cols, aliases.get("Apartment Number", ["Apartment Number"]))
+    if apt_val and apt_src:
+        conditions.append(f"LOWER(CAST({sql_ident(apt_src)} AS VARCHAR)) = {sql_lit(apt_val.lower())}")
+    if len(conditions) < 3:
         return pd.DataFrame(columns=report_columns())
     cols = report_columns()
     select_cols = safe_remote_select_exprs(existing_cols, cols)
@@ -2983,11 +3025,22 @@ def render_voter_lookup_workspace():
 
     with right:
         selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
-        # Use the already-returned index row immediately. Fetching full detail shards here
-        # made lookup feel like it was stuck. Detail shards stay available for exports/reports.
         match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
-        detail = match.iloc[0] if not match.empty else df.iloc[0]
+        index_row = match.iloc[0] if not match.empty else df.iloc[0]
+        # Keep lookup instant: use the lightweight index row for the main display
+        # and election history. Full detail shards are only scanned if the user asks.
+        if selected_id and st.session_state.get(f"lookup_full_detail_{selected_id}"):
+            detail = remote_voter_detail(selected_id)
+            if detail is None or len(detail) == 0:
+                detail = index_row
+        else:
+            detail = index_row
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
+
+        if selected_id and not st.session_state.get(f"lookup_full_detail_{selected_id}"):
+            if st.button("Load Full Voter Detail", key=f"load_full_detail_{selected_id}"):
+                st.session_state[f"lookup_full_detail_{selected_id}"] = True
+                st.rerun()
 
         st.markdown(f"## {smart_title(full_name(r))}")
         st.write(smart_title(address_line(r)))
@@ -3404,7 +3457,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zi — street list stable + fast voter lookup")
+    st.caption("DEV final hybrid v21zi — street list stable + fast index voter lookup + vote history")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
