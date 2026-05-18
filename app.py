@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21s HOME_DESIGN_RESTORE
+# Candidate Connect DEV — Final Hybrid Cloud App v21zj FAST_LOOKUP_UI_NOTE
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
@@ -2263,26 +2263,53 @@ def report_columns():
     return list(DEFAULT_EXPORT_COLUMNS)
 
 def remote_search_voters(term, max_rows=25):
-    """Fast, schema-safe voter lookup using the lightweight index shards only.
+    """Faster schema-safe voter lookup using ONLY lightweight index shards.
 
-    Important: this avoids reading detail shards and avoids expensive full-schema
-    scans across every shard before the search.
+    v21zj change:
+    - select only lookup/result columns instead of the full export schema
+    - if a PA county name is typed (example: "Elmer Bowman York"), use it as a
+      real County predicate instead of searching it in the text blob
+    - avoid normalize_download_df() inside the search loop, which was doing
+      export cleanup work the lookup page does not need
     """
     urls = index_urls_from_manifest()
     raw_term = str(term or "").strip()
     if not raw_term:
-        return pd.DataFrame(columns=report_columns())
+        return pd.DataFrame(columns=[])
 
-    tokens = [t.strip().lower().replace("'", "''") for t in re.split(r"\s+", raw_term) if t.strip()]
-    cols = report_columns()
+    lookup_cols = [
+        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "House Number", "Street Name", "Apartment Number", "Address Line 2",
+        "City", "State", "Zip", "Precinct", "Municipality", "County",
+        "Party", "Gender", "DOB", "Age", "Mobile", "Landline", "Email",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
+    ]
+
+    county_names = {
+        "adams","allegheny","armstrong","beaver","bedford","berks","blair","bradford","bucks","butler",
+        "cambria","cameron","carbon","centre","chester","clarion","clearfield","clinton","columbia","crawford",
+        "cumberland","dauphin","delaware","elk","erie","fayette","forest","franklin","fulton","greene",
+        "huntingdon","indiana","jefferson","juniata","lackawanna","lancaster","lawrence","lebanon","lehigh",
+        "luzerne","lycoming","mckean","mercer","mifflin","monroe","montgomery","montour","northampton",
+        "northumberland","perry","philadelphia","pike","potter","schuylkill","snyder","somerset","sullivan",
+        "susquehanna","tioga","union","venango","warren","washington","wayne","westmoreland","wyoming","york"
+    }
+
+    raw_tokens = [t.strip().lower().replace("'", "''") for t in re.split(r"\s+", raw_term) if t.strip()]
+    county_token = next((t for t in raw_tokens if t in county_names), "")
+    tokens = [t for t in raw_tokens if t != county_token]
+    if not tokens and county_token:
+        tokens = [county_token]
+        county_token = ""
+
     existing_cols = remote_parquet_columns(urls)
-    select_cols = safe_remote_select_exprs(existing_cols, cols)
+    select_cols = safe_remote_select_exprs(existing_cols, lookup_cols)
 
     aliases = source_alias_candidates()
     searchable_outs = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
-        "County", "Municipality", "Precinct", "Street Name", "House Number",
-        "City", "Zip", "Mobile", "Landline", "Email"
+        "Municipality", "Precinct", "Street Name", "House Number", "City", "Zip",
+        "Mobile", "Landline", "Email"
     ]
     search_srcs = []
     seen = set()
@@ -2292,10 +2319,17 @@ def remote_search_voters(term, max_rows=25):
             search_srcs.append(src)
             seen.add(src.lower())
     if not search_srcs:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=lookup_cols)
 
     blob = "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in search_srcs]) + ")"
-    where = " AND ".join([f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}" for t in tokens]) or "1=1"
+    where_parts = []
+    if county_token:
+        county_src = first_existing_column(existing_cols, aliases.get("County", ["County"]))
+        if county_src:
+            where_parts.append(f"LOWER(CAST({sql_ident(county_src)} AS VARCHAR)) = {sql_lit(county_token)}")
+    for t in tokens:
+        where_parts.append(f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}")
+    where = " AND ".join(where_parts) or "1=1"
 
     order_col = first_existing_column(existing_cols, aliases.get("LastName", ["LastName"])) or first_existing_column(existing_cols, aliases.get("FullName", ["FullName"]))
     order_sql = f" ORDER BY {sql_ident(order_col)}" if order_col else ""
@@ -2305,17 +2339,18 @@ def remote_search_voters(term, max_rows=25):
         try:
             con.execute('INSTALL httpfs; LOAD httpfs;')
         except Exception:
-            try: con.execute('LOAD httpfs;')
-            except Exception: pass
+            try:
+                con.execute('LOAD httpfs;')
+            except Exception:
+                pass
         query = f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where}{order_sql} LIMIT {int(max_rows)}"
         df = con.execute(query).df()
-        return normalize_download_df(df) if not df.empty else df
+        return df if not df.empty else pd.DataFrame(columns=lookup_cols)
     except Exception as e:
         st.error(f"Lookup query failed quickly instead of hanging: {e}")
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=lookup_cols)
     finally:
         con.close()
-
 
 def remote_voter_detail(voter_id: str) -> pd.Series:
     """Fetch one full voter record from detail shards by voter_id, then normalize display fields."""
@@ -2926,7 +2961,7 @@ def render_voter_lookup_workspace():
         # made lookup feel like it was stuck. Detail shards stay available for exports/reports.
         match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
         detail = match.iloc[0] if not match.empty else df.iloc[0]
-        r = apply_local_correction(normalize_download_df(pd.DataFrame([detail])).iloc[0])
+        r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
         st.write(smart_title(address_line(r)))
