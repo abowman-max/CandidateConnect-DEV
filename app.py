@@ -14,7 +14,7 @@ import duckdb
 import requests
 import streamlit as st
 try:
-    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.pagesizes import letter, landscape
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import inch
 except Exception:
@@ -2530,8 +2530,8 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     if canvas is None:
         return b"PDF support unavailable."
     bio = io.BytesIO()
-    c = canvas.Canvas(bio, pagesize=letter)
-    w, h = letter
+    c = canvas.Canvas(bio, pagesize=landscape(letter))
+    w, h = landscape(letter)
     y = _draw_branded_header(c, "Voter Lookup Report", datetime.now().strftime("%m/%d/%Y")) - 18
 
     name = smart_title(full_name(row)) or "Selected Voter"
@@ -2581,12 +2581,12 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
         ("Ballot Sent", row.get("MB_Sent", "")), ("Ballot Status", row.get("MB_Status", "")),
         ("Permanent MB", row.get("MB_PERM", "")), ("Tags", row.get("Tags", "")),
     ]
-    y_left = table_box("Voter Details", details, 36, y, 250)
-    y_right = table_box("Contact + Mail Ballot", contact, 310, y, 250)
+    y_left = table_box("Voter Details", details, 36, y, 340)
+    y_right = table_box("Contact + Mail Ballot", contact, 410, y, 340)
     y = min(y_left, y_right) - 12
 
     if household is not None and not household.empty and y > 105:
-        c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
+        c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, w-72, 15, 3, fill=1, stroke=0)
         c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Household Members")
         y -= 18
         c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 6.5)
@@ -2612,7 +2612,7 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
 
     general, primary = _history_payload(row, limit=None)
     ensure_space(115)
-    c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
+    c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, w-72, 15, 3, fill=1, stroke=0)
     c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Full Election History")
     y -= 22
 
@@ -2640,9 +2640,9 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
         c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 8); c.drawString(36, y, title); y -= 12
         if not items:
             c.setFont("Helvetica", 6.5); c.drawString(36, y, "No history found."); return y - 12
-        usable_w = 500
+        usable_w = w - 92
         left_label_w = 42
-        step = min(26, (usable_w - left_label_w) / max(1, min(max_cols, len(items))))
+        step = min(34, (usable_w - left_label_w) / max(1, min(max_cols, len(items))))
         for start in range(0, len(items), max_cols):
             chunk = items[start:start+max_cols]
             if y < 58:
@@ -2664,8 +2664,8 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             y -= 16
         return y
 
-    y = draw_hist_wide("General", general, y, max_cols=18) - 4
-    y = draw_hist_wide("Primary", primary, y, max_cols=18) - 6
+    y = draw_hist_wide("General", general, y, max_cols=22) - 4
+    y = draw_hist_wide("Primary", primary, y, max_cols=22) - 6
     if y < 36:
         c.showPage(); y = 70
     c.setFont("Helvetica", 6.3); c.setFillColorRGB(0.25,0.25,0.25)
@@ -2673,12 +2673,13 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     c.save(); bio.seek(0); return bio.getvalue()
 
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
-    """Find likely household members by normalized address fields using the lightweight index.
+    """Find likely household members by normalized address fields.
 
-    The previous detail-shard lookup sometimes returned blank segmented names. The
-    index has the name/address display fields needed here and is much faster.
+    Use detail shards here, not the lightweight index, because the index may omit
+    household member segmented names. This runs only after the user clicks Load
+    Household Members, so correctness is more important than instant load.
     """
-    urls = index_urls_from_manifest()
+    urls = detail_urls_from_manifest()
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
     conditions = []
@@ -2719,6 +2720,10 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
         ).df()
         if df.empty:
             return df
+        try:
+            df = normalize_download_df(df)
+        except Exception:
+            pass
         # Light normalization and robust name rebuild.
         for c in ["FirstName", "MiddleName", "LastName", "FullName", "Street Name", "City", "Municipality", "County", "Precinct"]:
             if c in df.columns:
@@ -2726,8 +2731,11 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
         if "NameSuffix" in df.columns:
             df["NameSuffix"] = df["NameSuffix"].map(normalize_name_suffix)
         rebuilt = df.apply(full_name, axis=1).map(smart_title)
-        df["FullName"] = rebuilt.where(rebuilt.astype(str).str.lower().ne("unnamed voter"), df.get("FullName", ""))
-        df["FullName"] = df["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
+        existing_full = df.get("FullName", pd.Series([""]*len(df), index=df.index)).astype(str).str.strip()
+        df["FullName"] = existing_full
+        mask = df["FullName"].eq("") | df["FullName"].str.lower().isin(["unnamed voter", "nan", "none"])
+        df.loc[mask, "FullName"] = rebuilt.loc[mask]
+        df["FullName"] = df["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter", "Nan": "Unnamed Voter", "None": "Unnamed Voter"})
         return df
     finally:
         con.close()
@@ -2993,7 +3001,7 @@ class _NumberedCanvas(canvas.Canvas if canvas else object):
         super().save()
 
 def _draw_branded_header(c, title, subtitle=""):
-    w, h = letter
+    w, h = getattr(c, "_pagesize", letter)
     c.setFillColorRGB(1, 1, 1)
     # logos
     left_logo = _pdf_logo_path(LOGO_CANDIDATE_CONNECT)
@@ -3016,7 +3024,7 @@ def _draw_branded_header(c, title, subtitle=""):
     return h-78
 
 def _draw_section_bar(c, text, y, x=28, width=None):
-    w, h = letter
+    w, h = getattr(c, "_pagesize", letter)
     width = width or (w - 56)
     c.setFillColorRGB(0.56, 0.06, 0.13)
     c.roundRect(x, y-11, width, 13, 3, fill=1, stroke=0)
@@ -3102,8 +3110,8 @@ def _build_street_pdf(active, call_mode=False):
     df = df.sort_values(["_precinct_sort", "_street_sort", "_house_sort", "_last_sort", "_first_sort"], kind="stable")
 
     bio = io.BytesIO()
-    c = canvas.Canvas(bio, pagesize=letter)
-    w, h = letter
+    c = canvas.Canvas(bio, pagesize=landscape(letter))
+    w, h = landscape(letter)
     mar_l, mar_r = 20, 20
     usable_w = w - mar_l - mar_r
     page_no = 1
@@ -3401,9 +3409,28 @@ def render_voter_lookup_workspace():
     left, right = st.columns([0.85, 1.8])
     with left:
         st.markdown("### Search Results")
+        st.markdown("""
+        <style>
+        div[data-testid="stButton"] > button[kind="primary"],
+        div[data-testid="stButton"] > button[kind="secondary"] {
+            white-space: normal !important;
+            height: auto !important;
+            min-height: 58px !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            line-height: 1.15 !important;
+            padding: 8px 10px !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         for i, r0 in df.iterrows():
             vid = cc_text(r0.get("voter_id", ""))
-            label = f"{full_name(r0)}\n{address_line(r0)}\n{cc_text(r0.get('County',''))} County"
+            nm = smart_title(full_name(r0))
+            age = cc_text(r0.get("Age", ""))
+            first_line = f"{nm}, {age}" if age else nm
+            addr = smart_title(address_line(r0))
+            county = cc_text(r0.get('County',''))
+            label = f"{first_line}\n{addr}\n{county} County"
             btn_type = "primary" if vid == st.session_state.get("lookup_selected_id") else "secondary"
             if st.button(label, key=f"lookup_pick_{vid or i}", width="stretch", type=btn_type):
                 st.session_state["lookup_selected_id"] = vid
