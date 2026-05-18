@@ -2210,7 +2210,11 @@ def source_alias_candidates():
         "Tags": ["Tags", "tags", "Tag", "tag"],
     }
 
+@st.cache_data(ttl=900, show_spinner=False)
 def remote_parquet_columns(urls) -> list[str]:
+    # Fast schema check: shard schemas are consistent, so inspect only the first URL.
+    # The old version inspected the full URL list, which made voter lookup feel stuck.
+    one_url = urls[0] if isinstance(urls, (list, tuple)) and urls else urls
     con = duckdb.connect(database=':memory:')
     try:
         try:
@@ -2218,7 +2222,7 @@ def remote_parquet_columns(urls) -> list[str]:
         except Exception:
             try: con.execute('LOAD httpfs;')
             except Exception: pass
-        df0 = con.execute(f"SELECT * FROM read_parquet({urls!r}, union_by_name=true) LIMIT 0").df()
+        df0 = con.execute(f"SELECT * FROM read_parquet({one_url!r}, union_by_name=true) LIMIT 0").df()
         return list(df0.columns)
     finally:
         con.close()
@@ -2259,16 +2263,43 @@ def report_columns():
     return list(DEFAULT_EXPORT_COLUMNS)
 
 def remote_search_voters(term, max_rows=25):
+    """Fast, schema-safe voter lookup using the lightweight index shards only.
+
+    Important: this avoids reading detail shards and avoids expensive full-schema
+    scans across every shard before the search.
+    """
     urls = index_urls_from_manifest()
     raw_term = str(term or "").strip()
     if not raw_term:
         return pd.DataFrame(columns=report_columns())
+
     tokens = [t.strip().lower().replace("'", "''") for t in re.split(r"\s+", raw_term) if t.strip()]
     cols = report_columns()
     existing_cols = remote_parquet_columns(urls)
     select_cols = safe_remote_select_exprs(existing_cols, cols)
-    blob = safe_search_blob_expr(existing_cols)
+
+    aliases = source_alias_candidates()
+    searchable_outs = [
+        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "County", "Municipality", "Precinct", "Street Name", "House Number",
+        "City", "Zip", "Mobile", "Landline", "Email"
+    ]
+    search_srcs = []
+    seen = set()
+    for out in searchable_outs:
+        src = first_existing_column(existing_cols, aliases.get(out, [out]))
+        if src and src.lower() not in seen:
+            search_srcs.append(src)
+            seen.add(src.lower())
+    if not search_srcs:
+        return pd.DataFrame(columns=cols)
+
+    blob = "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in search_srcs]) + ")"
     where = " AND ".join([f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}" for t in tokens]) or "1=1"
+
+    order_col = first_existing_column(existing_cols, aliases.get("LastName", ["LastName"])) or first_existing_column(existing_cols, aliases.get("FullName", ["FullName"]))
+    order_sql = f" ORDER BY {sql_ident(order_col)}" if order_col else ""
+
     con = duckdb.connect(database=':memory:')
     try:
         try:
@@ -2276,8 +2307,12 @@ def remote_search_voters(term, max_rows=25):
         except Exception:
             try: con.execute('LOAD httpfs;')
             except Exception: pass
-        df = con.execute(f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where} LIMIT {int(max_rows)}").df()
+        query = f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where}{order_sql} LIMIT {int(max_rows)}"
+        df = con.execute(query).df()
         return normalize_download_df(df) if not df.empty else df
+    except Exception as e:
+        st.error(f"Lookup query failed quickly instead of hanging: {e}")
+        return pd.DataFrame(columns=cols)
     finally:
         con.close()
 
@@ -2887,10 +2922,10 @@ def render_voter_lookup_workspace():
 
     with right:
         selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
-        detail = remote_voter_detail(selected_id)
-        if detail.empty:
-            match = df[df["voter_id"].astype(str) == selected_id]
-            detail = match.iloc[0] if not match.empty else df.iloc[0]
+        # Use the already-returned index row immediately. Fetching full detail shards here
+        # made lookup feel like it was stuck. Detail shards stay available for exports/reports.
+        match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
+        detail = match.iloc[0] if not match.empty else df.iloc[0]
         r = apply_local_correction(normalize_download_df(pd.DataFrame([detail])).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
@@ -2985,13 +3020,21 @@ def render_voter_lookup_workspace():
             if not all_corr.empty:
                 st.download_button("Download All Saved Corrections CSV", all_corr.to_csv(index=False).encode(), file_name="candidate_connect_voter_corrections.csv", mime="text/csv", width="stretch")
 
-        hh = remote_household_members(r)
-        if not hh.empty:
-            st.markdown("### Household Members")
-            view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
-            if "FullName" not in view.columns:
-                view["FullName"] = hh.apply(full_name, axis=1)
-            st.dataframe(view, hide_index=True, width="stretch")
+        st.markdown("### Household Members")
+        if st.button("Load Household Members", key=f"load_hh_{selected_id}"):
+            st.session_state[f"hh_loaded_{selected_id}"] = True
+        if st.session_state.get(f"hh_loaded_{selected_id}"):
+            with st.spinner("Loading household members..."):
+                hh = remote_household_members(r)
+            if not hh.empty:
+                view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
+                if "FullName" not in view.columns:
+                    view["FullName"] = hh.apply(full_name, axis=1)
+                st.dataframe(view, hide_index=True, width="stretch")
+            else:
+                st.caption("No household members found from the lightweight lookup row.")
+        else:
+            st.caption("Click Load Household Members only when needed so lookup stays fast.")
 
         render_election_history_table(r)
 
@@ -3282,7 +3325,7 @@ with h_logo:
     else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
 with h_mid:
     st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zd</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zi</div>', unsafe_allow_html=True)
 with h_power:
     if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
     else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
@@ -3300,7 +3343,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zd — street list padding + magic none fix")
+    st.caption("DEV final hybrid v21zi — street list stable + fast voter lookup")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
