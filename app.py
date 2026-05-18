@@ -2172,25 +2172,112 @@ def drop_all_blank_optional_columns(df: pd.DataFrame, required: list[str] | None
     return df[keep]
 
 
+
+def source_alias_candidates():
+    return {
+        "voter_id": ["voter_id", "VoterID", "Voter ID", "IDNumber", "ID Number", "PA ID Number", "PA_ID_Number", "SURE_ID", "StateVoterID"],
+        "County": ["County", "county", "CountyName"],
+        "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
+        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
+        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName", "first", "FIRST"],
+        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial", "middle_initial", "MName"],
+        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName", "last", "LAST"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix", "surnsuffix", "SurnSuffix"],
+        "FullName": ["FullName", "Full Name", "Name", "name"],
+        "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
+        "Gender": ["Gender", "gender", "Sex", "sex"],
+        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "dob"],
+        "Age": ["Age", "age", "Age_Calc"],
+        "Age_Range": ["Age_Range", "age_group", "Age Group"],
+        "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
+        "House Number": ["House Number", "HouseNumber", "house_number", "res_house_number", "house_num", "street_number"],
+        "House Number Suffix": ["House Number Suffix", "HouseNumberSuffix", "house_number_suffix"],
+        "Street Name": ["Street Name", "StreetName", "street_name", "res_street_name", "street", "address_street"],
+        "Apartment Number": ["Apartment Number", "ApartmentNumber", "Unit", "Apt", "apartment_number"],
+        "Address Line 2": ["Address Line 2", "AddressLine2", "Address2", "address_line_2"],
+        "City": ["City", "city", "res_city", "Mail City"],
+        "State": ["State", "state", "res_state", "Mail State"],
+        "Zip": ["Zip", "ZIP", "ZipCode", "zipcode", "res_zip", "Mail Zip"],
+        "Email": ["Email", "EMAIL", "Current_Email", "email"],
+        "Mobile": ["Mobile", "MobilePhone", "mobile_phone", "Cell", "CellPhone"],
+        "Landline": ["Landline", "Phone", "phone", "HomePhone"],
+        "Current_ApplicantPhone": ["Current_ApplicantPhone", "ApplicantPhone", "Applicant Phone"],
+        "MB_PERM": ["MB_PERM", "MB Perm", "MBPerm", "PermanentMB", "MB_Perm"],
+        "MB_App": ["MB_App", "MB App"],
+        "MB_App_Status": ["MB_App_Status", "MB App Status"],
+        "MB_Sent": ["MB_Sent", "MB Sent"],
+        "MB_Status": ["MB_Status", "MB Status"],
+        "Tags": ["Tags", "tags", "Tag", "tag"],
+    }
+
+def remote_parquet_columns(urls) -> list[str]:
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        df0 = con.execute(f"SELECT * FROM read_parquet({urls!r}, union_by_name=true) LIMIT 0").df()
+        return list(df0.columns)
+    finally:
+        con.close()
+
+def first_existing_column(existing_cols, candidates):
+    existing_map = {str(c).lower(): c for c in existing_cols}
+    for cand in candidates:
+        if str(cand).lower() in existing_map:
+            return existing_map[str(cand).lower()]
+    return None
+
+def safe_remote_select_exprs(existing_cols, out_cols):
+    aliases = source_alias_candidates()
+    exprs = []
+    for out_col in out_cols:
+        src = first_existing_column(existing_cols, aliases.get(out_col, [out_col]))
+        if src:
+            exprs.append(f"CAST({sql_ident(src)} AS VARCHAR) AS {sql_ident(out_col)}")
+        else:
+            exprs.append(f"CAST(NULL AS VARCHAR) AS {sql_ident(out_col)}")
+    return ", ".join(exprs)
+
+def safe_search_blob_expr(existing_cols):
+    aliases = source_alias_candidates()
+    search_out = ["FullName", "FirstName", "MiddleName", "LastName", "NameSuffix", "County", "Municipality", "Precinct", "voter_id", "Mobile", "Landline", "Email", "Street Name", "City", "Zip"]
+    srcs = []
+    seen = set()
+    for out in search_out:
+        src = first_existing_column(existing_cols, aliases.get(out, [out]))
+        if src and src.lower() not in seen:
+            srcs.append(src)
+            seen.add(src.lower())
+    if not srcs:
+        return "''"
+    return "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in srcs]) + ")"
+
 def report_columns():
     return list(DEFAULT_EXPORT_COLUMNS)
 
 def remote_search_voters(term, max_rows=25):
     urls = index_urls_from_manifest()
-    term = str(term or "").strip().replace("'", "''")
-    if not term: return pd.DataFrame(columns=report_columns())
-    like = f"%{term.lower()}%"
+    raw_term = str(term or "").strip()
+    if not raw_term:
+        return pd.DataFrame(columns=report_columns())
+    tokens = [t.strip().lower().replace("'", "''") for t in re.split(r"\s+", raw_term) if t.strip()]
     cols = report_columns()
-    select_cols = ", ".join([f"CAST({sql_ident(c)} AS VARCHAR) AS {sql_ident(c)}" for c in cols])
-    searchable = ["FullName","Name","FirstName","LastName","County","Municipality","Precinct","voter_id","Mobile","Landline","Email","Street Name","City","Zip"]
-    where = " OR ".join([f"LOWER(CAST({sql_ident(c)} AS VARCHAR)) LIKE {sql_lit(like)}" for c in searchable])
+    existing_cols = remote_parquet_columns(urls)
+    select_cols = safe_remote_select_exprs(existing_cols, cols)
+    blob = safe_search_blob_expr(existing_cols)
+    where = " AND ".join([f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}" for t in tokens]) or "1=1"
     con = duckdb.connect(database=':memory:')
     try:
-        try: con.execute('INSTALL httpfs; LOAD httpfs;')
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
         except Exception:
             try: con.execute('LOAD httpfs;')
             except Exception: pass
-        return con.execute(f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where} LIMIT {int(max_rows)}").df()
+        df = con.execute(f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) WHERE {where} LIMIT {int(max_rows)}").df()
+        return normalize_download_df(df) if not df.empty else df
     finally:
         con.close()
 
@@ -2224,17 +2311,27 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     """Find likely household members by normalized address fields, using detail shards remotely."""
     if row is None or len(row) == 0:
         return pd.DataFrame(columns=report_columns())
-    conditions = []
-    for field in ["County", "Municipality", "House Number", "Street Name", "Apartment Number", "Zip"]:
-        val = cc_text(row.get(field, ""))
-        if val:
-            conditions.append(f"LOWER(CAST({sql_ident(field)} AS VARCHAR)) = {sql_lit(val.lower())}")
-    # Require at least house number + street, otherwise household lookup is too broad.
     if not cc_text(row.get("House Number", "")) or not cc_text(row.get("Street Name", "")):
         return pd.DataFrame(columns=report_columns())
     urls = detail_urls_from_manifest()
+    existing_cols = remote_parquet_columns(urls)
+    aliases = source_alias_candidates()
+    conditions = []
+    for field in ["County", "Municipality", "House Number", "Street Name", "Apartment Number", "Zip"]:
+        val = cc_text(row.get(field, ""))
+        src = first_existing_column(existing_cols, aliases.get(field, [field]))
+        if val and src:
+            conditions.append(f"LOWER(CAST({sql_ident(src)} AS VARCHAR)) = {sql_lit(val.lower())}")
+    if not conditions:
+        return pd.DataFrame(columns=report_columns())
     cols = report_columns()
-    select_cols = ", ".join([f"CAST({sql_ident(c)} AS VARCHAR) AS {sql_ident(c)}" for c in cols])
+    select_cols = safe_remote_select_exprs(existing_cols, cols)
+    order_parts = []
+    for out in ["LastName", "FirstName"]:
+        src = first_existing_column(existing_cols, aliases.get(out, [out]))
+        if src:
+            order_parts.append(sql_ident(src))
+    order_sql = (" ORDER BY " + ", ".join(order_parts)) if order_parts else ""
     where = " AND ".join(conditions)
     con = duckdb.connect(database=':memory:')
     try:
@@ -2245,7 +2342,7 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
             except Exception: pass
         df = con.execute(
             f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) "
-            f"WHERE {where} ORDER BY {sql_ident('LastName')}, {sql_ident('FirstName')} LIMIT {int(max_rows)}"
+            f"WHERE {where}{order_sql} LIMIT {int(max_rows)}"
         ).df()
         return normalize_download_df(df) if not df.empty else df
     finally:
