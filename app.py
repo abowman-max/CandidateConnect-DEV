@@ -2445,6 +2445,32 @@ def apply_local_correction(row: pd.Series) -> pd.Series:
     return out
 
 
+
+def normalize_vote_method(val):
+    """Normalize SURE/election vote-method values for voter lookup election history."""
+    if val is None:
+        return ""
+    try:
+        import pandas as _pd
+        if _pd.isna(val):
+            return ""
+    except Exception:
+        pass
+    v = str(val).strip()
+    if not v or v.lower() in {"nan", "none", "null"}:
+        return ""
+    vu = v.upper()
+    mapping = {
+        "M": "Mail", "MAIL": "Mail", "MB": "Mail", "MAIL BALLOT": "Mail",
+        "A": "Absentee", "ABSENTEE": "Absentee",
+        "I": "In Person", "IP": "In Person", "IN PERSON": "In Person",
+        "P": "Provisional", "PROV": "Provisional", "PROVISIONAL": "Provisional",
+        "E": "Early", "EARLY": "Early",
+        "Y": "Voted", "VOTED": "Voted",
+        "N": "Did Not Vote", "DNV": "Did Not Vote", "DID NOT VOTE": "Did Not Vote",
+    }
+    return mapping.get(vu, v.title())
+
 def render_election_history_table(row: pd.Series):
     cols = election_columns_from_manifest()
     if not cols:
