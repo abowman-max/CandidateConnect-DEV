@@ -3563,6 +3563,10 @@ with st.sidebar:
 
 active = active_filters()
 section = st.session_state.get("left_section")
+
+def render_enhanced_home():
+    render_statewide_snapshot()
+
 if section == "voter_lookup": render_voter_lookup_workspace(); st.stop()
 if section == "mail_ballot_center": render_mail_ballot_workspace(); st.stop()
 if section == "area_intelligence": render_area_intelligence_workspace(); st.stop()
