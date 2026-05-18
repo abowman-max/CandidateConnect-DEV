@@ -2181,12 +2181,26 @@ def household_for_mail(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["_HH_KEY"], errors="ignore")
 
 def full_name(row):
+    """Best voter display name, with strong fallbacks for lookup/household cards."""
     def usable(v):
         t = cc_text(v).strip()
-        return "" if t.lower() in {"unnamed voter", "unknown", "none", "nan", "null"} else t
+        return "" if t.lower() in {"unnamed voter", "unnamed", "unknown", "none", "nan", "null"} else t
+
+    # Prefer already-canonical display names if present. This prevents blank/partial
+    # segmented fields from overriding a good FullName/Name value in the speed shards.
+    for c in ["FullName", "Full Name", "Name", "VoterName", "Voter Name"]:
+        val = usable(row.get(c, ""))
+        if val:
+            return val
+
     parts = [usable(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
     name = " ".join([p for p in parts if p]).strip()
-    return name or usable(row.get("FullName", "")) or usable(row.get("Name", "")) or "Unnamed voter"
+    if name:
+        return name
+
+    # Last-resort fallbacks that are still better than showing repeated Unnamed Voter.
+    vid = usable(row.get("voter_id", ""))
+    return f"Voter {vid}" if vid else "Household Voter"
 
 def address_line(row):
     hn = cc_text(row.get("House Number", ""))
@@ -2270,11 +2284,11 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name"],
-        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI"],
-        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name", "Voter First Name", "VoterFirstName", "Registrant First Name", "Given", "Given_Name"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "Voter Middle Name", "VoterMiddleName", "Registrant Middle Name"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name", "Voter Last Name", "VoterLastName", "Registrant Last Name", "Surname"],
         "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
-        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter Full Name", "VoterFullName", "Registrant Name", "RegistrantName"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
         "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
@@ -2350,11 +2364,11 @@ def source_alias_candidates():
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name"],
-        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI"],
-        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name", "Voter First Name", "VoterFirstName", "Registrant First Name", "Given", "Given_Name"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "Voter Middle Name", "VoterMiddleName", "Registrant Middle Name"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name", "Voter Last Name", "VoterLastName", "Registrant Last Name", "Surname"],
         "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
-        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter Full Name", "VoterFullName", "Registrant Name", "RegistrantName"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
         "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
@@ -3236,26 +3250,32 @@ def render_voter_lookup_workspace():
             hh = pd.DataFrame(st.session_state.get(hh_key) or [])
             if not hh.empty:
                 view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "Party", "Gender", "Age", "County", "City", "State"] if c in hh.columns]].copy()
-                rebuilt_names = hh.apply(full_name, axis=1).map(smart_title)
-                view["FullName"] = rebuilt_names
-                missing_names = view["FullName"].astype(str).str.strip().eq("") | view["FullName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
-                view.loc[missing_names, "FullName"] = view.loc[missing_names].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
+                # Do not show a table here. Build household member cards and make each
+                # non-current card directly clickable to load that voter.
+                view["DisplayName"] = hh.apply(full_name, axis=1).map(smart_title)
+                view["DisplayName"] = view["DisplayName"].replace({"Unnamed Voter": "", "Unnamed voter": ""})
+                missing_names = view["DisplayName"].astype(str).str.strip().eq("") | view["DisplayName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
+                view.loc[missing_names, "DisplayName"] = view.loc[missing_names].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
+
                 st.markdown("""
                 <style>
-                .hh-card {border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px 12px; margin:6px 0; background:#0b1220;}
-                .hh-card-current {border-color:#f2b84b; background:#111827;}
-                .hh-name {font-weight:900; color:#fff;} .hh-sub {color:#cbd5e1; font-size:12px;}
+                div[data-testid="stButton"] button p { white-space: pre-line !important; line-height: 1.2 !important; }
+                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 54px !important; text-align: left !important; justify-content: flex-start !important; }
                 </style>
                 """, unsafe_allow_html=True)
+
+                st.caption("Household members — click a card to open that voter.")
                 for j, hhrow in view.iterrows():
                     hvid = cc_text(hhrow.get("voter_id", ""))
-                    hname = smart_title(cc_text(hhrow.get("FullName", ""))) or hvid or "Household Voter"
+                    hname = smart_title(cc_text(hhrow.get("DisplayName", ""))) or hvid or "Household Voter"
                     is_current = hvid == selected_id
-                    sub = " · ".join([x for x in [cc_text(hhrow.get("Party","")), cc_text(hhrow.get("Gender","")), ("Age " + cc_text(hhrow.get("Age","")) if cc_text(hhrow.get("Age","")) else "")] if x])
-                    cls = "hh-card hh-card-current" if is_current else "hh-card"
-                    st.markdown(f'<div class="{cls}"><div class="hh-name">{"✓ " if is_current else ""}{hname}</div><div class="hh-sub">{sub}</div></div>', unsafe_allow_html=True)
-                    if hvid and not is_current:
-                        if st.button(f"Open {hname}", key=f"open_household_{selected_id}_{hvid}", width="stretch"):
+                    sub_bits = [x for x in [cc_text(hhrow.get("Party", "")), cc_text(hhrow.get("Gender", "")), ("Age " + cc_text(hhrow.get("Age", "")) if cc_text(hhrow.get("Age", "")) else "")] if x]
+                    sub = " · ".join(sub_bits)
+                    label = ("✓ " if is_current else "Open ") + hname + (f"\n{sub}" if sub else "")
+                    if is_current:
+                        st.button(label, key=f"hh_current_{selected_id}_{j}_{hvid}", width="stretch", disabled=True)
+                    else:
+                        if st.button(label, key=f"open_household_card_{selected_id}_{j}_{hvid}", width="stretch"):
                             st.session_state["lookup_selected_id"] = hvid
                             try:
                                 hd = remote_voter_lookup_detail(hvid)
@@ -3266,7 +3286,6 @@ def render_voter_lookup_workspace():
                                 if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
                                     st.session_state.pop(k, None)
                             st.rerun()
-            else:
                 st.caption("No household members found from the selected address.")
         else:
             st.caption("No household members found from the selected address.")
