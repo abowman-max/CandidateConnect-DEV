@@ -2281,10 +2281,8 @@ def remote_search_voters(term, max_rows=25):
         "Mobile", "Landline", "Current_ApplicantPhone", "Email",
         "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
     ]
-    # Pull election columns from the lightweight index when present so lookup can
-    # show vote history without scanning the detail shards.
-    election_cols = election_columns_from_manifest()
-    lookup_cols = base_lookup_cols + [c for c in election_cols if c not in base_lookup_cols]
+    # Keep the search row intentionally small and fast. Vote history is loaded on demand.
+    lookup_cols = base_lookup_cols
     if not raw_term:
         return pd.DataFrame(columns=lookup_cols)
 
@@ -2488,6 +2486,7 @@ def apply_local_correction(row: pd.Series) -> pd.Series:
 
 
 
+
 def normalize_vote_method(val):
     """Normalize SURE/election vote-method values for voter lookup election history."""
     if val is None:
@@ -2502,45 +2501,118 @@ def normalize_vote_method(val):
     if not v or v.lower() in {"nan", "none", "null"}:
         return ""
     vu = v.upper()
-    mapping = {
-        "M": "Mail", "MAIL": "Mail", "MB": "Mail", "MAIL BALLOT": "Mail",
-        "A": "Absentee", "ABSENTEE": "Absentee",
-        "I": "In Person", "IP": "In Person", "IN PERSON": "In Person",
-        "P": "Provisional", "PROV": "Provisional", "PROVISIONAL": "Provisional",
-        "E": "Early", "EARLY": "Early",
-        "Y": "Voted", "VOTED": "Voted",
-        "N": "Did Not Vote", "DNV": "Did Not Vote", "DID NOT VOTE": "Did Not Vote",
-    }
-    return mapping.get(vu, v.title())
+    if vu in {"M", "MAIL", "MB", "MAIL BALLOT"} or "MAIL" in vu:
+        return "Mail Ballot"
+    if vu in {"A", "AP", "AT POLL", "POLL", "IN PERSON", "IP", "VOTED"} or "POLL" in vu or "PERSON" in vu:
+        return "At Poll"
+    if vu in {"P", "PROV", "PROVISIONAL"} or "PROV" in vu:
+        return "Provisional"
+    if vu in {"N", "DNV", "DID NOT VOTE", "NO"}:
+        return "Did Not Vote"
+    return v.title()
+
+
+def vote_method_icon(method: str) -> str:
+    m = normalize_vote_method(method)
+    if m == "Mail Ballot":
+        return "✉️"
+    if m == "At Poll":
+        return "🗳️"
+    if m == "Provisional":
+        return "🟨"
+    if m == "Did Not Vote":
+        return ""
+    return m or ""
+
+
+def _election_key_from_col(col: str):
+    meta = election_meta_from_col(col)
+    if not meta:
+        return None
+    return (meta["type"], meta["year"])
+
+
+def _is_election_party_col(col: str) -> bool:
+    u = str(col or "").upper()
+    return any(tok in u for tok in ["PARTY", "PTY", "_PAR", " VOTE_PARTY", "VOTEPARTY"])
+
+
+def _is_election_method_col(col: str) -> bool:
+    if not election_meta_from_col(col):
+        return False
+    u = str(col or "").upper()
+    # These columns describe party, not vote method. Treating them as method caused
+    # duplicate rows like 2025/Ap and 2025/R.
+    if _is_election_party_col(u):
+        return False
+    return True
+
 
 def render_election_history_table(row: pd.Series):
+    """Render the original compact election-history grid: one Party row and one Method row per election."""
     cols = election_columns_from_manifest()
     if not cols:
+        st.caption("Election history is not available in the lookup row. Click Load Vote History if available.")
         return
-    general = []
-    primary = []
+
+    grouped = {}
     for col in cols:
         meta = election_meta_from_col(col)
         if not meta:
             continue
-        raw = cc_text(row.get(col, ""))
-        method = normalize_vote_method(raw)
-        if not raw or method in {"", "Did Not Vote"}:
-            continue
-        item = {"Election": meta["year"], "Method": method, "Party": cc_text(row.get("Party", ""))}
-        if meta["type"] == "General":
-            general.append(item)
-        elif meta["type"] == "Primary":
-            primary.append(item)
-    if general or primary:
-        st.markdown("### Election History")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**General Elections**")
-            st.dataframe(pd.DataFrame(general).sort_values("Election", ascending=False) if general else pd.DataFrame(columns=["Election","Method","Party"]), hide_index=True, width="stretch")
-        with c2:
-            st.markdown("**Primary Elections**")
-            st.dataframe(pd.DataFrame(primary).sort_values("Election", ascending=False) if primary else pd.DataFrame(columns=["Election","Method","Party"]), hide_index=True, width="stretch")
+        key = (meta["type"], meta["year"])
+        grouped.setdefault(key, {"meta": meta, "method_cols": [], "party_cols": []})
+        if _is_election_party_col(col):
+            grouped[key]["party_cols"].append(col)
+        elif _is_election_method_col(col):
+            grouped[key]["method_cols"].append(col)
+
+    def first_value(candidates):
+        for c in candidates:
+            v = cc_text(row.get(c, ""))
+            if v and v.lower() not in {"nan", "none", "null"}:
+                return v
+        return ""
+
+    def build_grid(kind):
+        items = []
+        for (typ, year), payload in grouped.items():
+            if typ != kind:
+                continue
+            method_raw = first_value(payload.get("method_cols", []))
+            if not method_raw or normalize_vote_method(method_raw) == "Did Not Vote":
+                # Still show recent elections as blank cells if the party column exists.
+                party_raw = first_value(payload.get("party_cols", []))
+                if not party_raw:
+                    continue
+            else:
+                party_raw = first_value(payload.get("party_cols", [])) or cc_text(row.get("Party", ""))
+            yy = str(year)[-2:]
+            label = ("G" if kind == "General" else "P") + yy
+            items.append((int(year), label, party_raw[:1].upper() if party_raw else "", vote_method_icon(method_raw)))
+        items.sort(key=lambda x: x[0], reverse=True)
+        return items[:10]
+
+    general = build_grid("General")
+    primary = build_grid("Primary")
+    if not general and not primary:
+        st.caption("No election history found for this voter.")
+        return
+
+    st.markdown("### Election History")
+    c1, c2 = st.columns(2)
+    for title, items, col in [("General Elections", general, c1), ("Primary Elections", primary, c2)]:
+        with col:
+            st.markdown(f"**{title}**")
+            if not items:
+                st.caption("No history found.")
+                continue
+            headers = [it[1] for it in items]
+            party_row = [it[2] for it in items]
+            method_row = [it[3] for it in items]
+            grid = pd.DataFrame([party_row, method_row], index=["Party", "Method"], columns=headers)
+            st.dataframe(grid, width="stretch")
+    st.caption("✉️ Mail Ballot &nbsp;&nbsp; 🗳️ At Poll &nbsp;&nbsp; 🟨 Provisional &nbsp;&nbsp; blank = Did Not Vote / no record")
 
 def safe_filtered_df(active, max_rows=5000):
     try:
@@ -3150,7 +3222,18 @@ def render_voter_lookup_workspace():
         else:
             st.caption("Click Load Household Members only when needed so lookup stays fast.")
 
-        render_election_history_table(r)
+        st.markdown("### Election History")
+        if st.button("Load Vote History", key=f"load_vote_history_{selected_id}"):
+            st.session_state[f"vote_history_loaded_{selected_id}"] = True
+        if st.session_state.get(f"vote_history_loaded_{selected_id}"):
+            with st.spinner("Loading vote history..."):
+                hist_row = remote_voter_detail(selected_id)
+            if hist_row is None or len(hist_row) == 0:
+                st.warning("Vote history could not be loaded for this voter.")
+            else:
+                render_election_history_table(hist_row)
+        else:
+            st.caption("Click Load Vote History only when needed so lookup stays fast.")
 
 def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
