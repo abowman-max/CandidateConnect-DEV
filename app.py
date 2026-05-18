@@ -3431,20 +3431,28 @@ def _mb_index_group_cached(active_json: str, special_json: str, field: str, limi
 
 
 def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
-    """Use index shards for Mail Ballot counts so every visible MB filter works.
+    """Use the prebuilt count cube for Mail Ballot Center counts.
 
-    The count cube is great for broad Create Universe counts, but the Mail Ballot
-    Center combines MB status, V4 history fields, and MB probability score. The
-    index shards have those fields and are still fast enough for this workspace.
+    This keeps the MB workspace fast. The cube can answer filter/count questions
+    instantly as long as the filter fields are in the cube. Full voter files still
+    use detail shards only after the user clicks a prepare-download button.
     """
     try:
-        summary = duckdb_index_summary(
+        summary = duckdb_count_cube_summary(
             json.dumps(active or {}, sort_keys=True),
             json.dumps(_mb_special_filters(), sort_keys=True),
         )
-        return summary, "mail-ballot-index", None
+        return summary, "mail-ballot-cube", None
     except Exception as e:
-        return None, "unavailable", e
+        # Fallback: index shards are slower, but better than returning nothing.
+        try:
+            summary = duckdb_index_summary(
+                json.dumps(active or {}, sort_keys=True),
+                json.dumps(_mb_special_filters(), sort_keys=True),
+            )
+            return summary, "mail-ballot-index-fallback", None
+        except Exception:
+            return None, "unavailable", e
 
 
 def _mb_count(active: dict, extra: dict | None = None) -> int:
@@ -3460,7 +3468,7 @@ def _mb_count(active: dict, extra: dict | None = None) -> int:
 
 def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
     try:
-        df = _mb_index_group_cached(
+        df = duckdb_count_cube_group_filtered(
             json.dumps(active or {}, sort_keys=True),
             json.dumps(_mb_special_filters(), sort_keys=True),
             field,
@@ -3468,14 +3476,31 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
         )
         if df is None or df.empty:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
-        df = df.copy()
+        df = df.rename(columns={"label": "Category"}).copy()
         df["Category"] = df["Category"].astype(str).replace({"": "(blank)", "nan": "(blank)", "None": "(blank)"})
         df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
         total = max(1, int(df["Voters"].sum()))
         df["%"] = (df["Voters"] / total * 100).map(lambda x: f"{x:.1f}%")
         return df[["Category", "Voters", "%"]]
     except Exception:
-        return pd.DataFrame(columns=["Category", "Voters", "%"])
+        # Fallback only if the cube is missing a field.
+        try:
+            df = _mb_index_group_cached(
+                json.dumps(active or {}, sort_keys=True),
+                json.dumps(_mb_special_filters(), sort_keys=True),
+                field,
+                limit,
+            )
+            if df is None or df.empty:
+                return pd.DataFrame(columns=["Category", "Voters", "%"])
+            df = df.copy()
+            df["Category"] = df["Category"].astype(str).replace({"": "(blank)", "nan": "(blank)", "None": "(blank)"})
+            df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
+            total = max(1, int(df["Voters"].sum()))
+            df["%"] = (df["Voters"] / total * 100).map(lambda x: f"{x:.1f}%")
+            return df[["Category", "Voters", "%"]]
+        except Exception:
+            return pd.DataFrame(columns=["Category", "Voters", "%"])
 
 
 def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None):
@@ -3646,6 +3671,8 @@ def render_mail_ballot_workspace():
         st.success("Mail Ballot Center filters applied here. Create Universe filters were not changed.")
 
     summary, mode, err = _mb_summary(mb_active)
+    if mode == "mail-ballot-cube":
+        st.caption("Counts are using the fast prebuilt count cube. Full voter files are prepared only when you click a download button.")
     total = _mb_total_from_summary(summary)
     applied = _mb_count(mb_active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(mb_active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
     not_applied = _mb_count(mb_active, {"MB_App": ["No", "N", "DNA", "Not Applied"]}) or max(0, total - applied)
