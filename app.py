@@ -3324,10 +3324,30 @@ def render_mail_ballot_workspace():
     summary, mode, err = update_counts(mb_active)
     if summary: render_metrics(summary)
     tabs=st.tabs(["Operations","Exports","Analysis","Notes"])
-    with tabs[0]: st.info("Use presets here to build chase, cure, and growth universes. Counts use the same remote quick-count/index engine.")
-    with tabs[1]: st.download_button("Download MB CSV", safe_filtered_df(mb_active,50000).to_csv(index=False).encode(), "mail_ballot_universe.csv", "text/csv")
-    with tabs[2]: st.write("Mail ballot analysis workspace restored for DEV testing.")
-    with tabs[3]: st.text_area("Notes")
+    with tabs[0]:
+        st.info("Use presets here to build chase, cure, and growth universes. Counts use the same remote quick-count/index engine.")
+    with tabs[1]:
+        st.caption("Prepare the CSV only when needed so the Mail Ballot Center does not scan detail shards on every page load.")
+        mb_export_key = "prepared_mail_ballot_center_csv"
+        if st.button("Prepare MB CSV", key="prepare_mb_center_csv", width="stretch"):
+            with st.spinner("Preparing mail ballot CSV..."):
+                out = safe_filtered_df(mb_active, 50000)
+                st.session_state[mb_export_key] = out.to_csv(index=False).encode()
+                st.session_state[mb_export_key + "_rows"] = len(out)
+        if mb_export_key in st.session_state:
+            st.download_button(
+                f"Download MB CSV ({st.session_state.get(mb_export_key + '_rows', 0):,} rows)",
+                st.session_state[mb_export_key],
+                "mail_ballot_universe.csv",
+                "text/csv",
+                width="stretch",
+            )
+        else:
+            st.button("Download MB CSV", disabled=True, width="stretch")
+    with tabs[2]:
+        st.write("Mail ballot analysis workspace restored for DEV testing.")
+    with tabs[3]:
+        st.text_area("Notes")
 
 def render_area_intelligence_workspace():
     st.markdown("## Area Intelligence")
@@ -3348,6 +3368,25 @@ def filtered_export_columns(df: pd.DataFrame) -> list[str]:
             "Email","Mobile","Landline","Current_ApplicantPhone","MB_App","MB_App_Status","MB_Sent","MB_Status","MB_PERM","MB_Prob_Score","Tags"]
     return [c for c in base if c in df.columns]
 
+
+
+def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
+    """Live-safe detail export helper used by exports and Mail Ballot Center.
+
+    Keeps heavy detail scans behind explicit download/prepare actions and applies
+    the current special filters, including MB probability score and election filters.
+    """
+    active = active or {}
+    special = active_special_filters() if "active_special_filters" in globals() else {}
+    try:
+        df = duckdb_detail_filtered_df(active, special, int(max_rows))
+    except Exception as exc:
+        st.warning(f"Could not prepare filtered voter file: {exc}")
+        return pd.DataFrame()
+    try:
+        return normalize_download_df(df)
+    except Exception:
+        return df
 
 def texting_export_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
