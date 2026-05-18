@@ -477,6 +477,24 @@ def detail_urls_from_manifest() -> list[str]:
     return [r2_url(f"detail/voters_detail_{i:03d}.parquet") for i in range(count)]
 
 
+def voter_lookup_urls_from_manifest() -> list[str]:
+    """Return Step 8 voter_lookup speed-table URL when present."""
+    try:
+        m = load_manifest()
+        tables = ((m.get("speed", {}) or {}).get("tables", {}) or {})
+        key = tables.get("voter_lookup")
+        if key:
+            return [r2_url(key)]
+    except Exception:
+        pass
+    return []
+
+
+def voter_lookup_or_detail_urls() -> list[str]:
+    """Use voter_lookup.parquet for selected-voter work; fall back to detail shards."""
+    return voter_lookup_urls_from_manifest() or detail_urls_from_manifest()
+
+
 def normalize_compare_value(value) -> str:
     s = clean_value(value).upper()
     s = s.replace("&", " AND ")
@@ -2323,7 +2341,7 @@ def remote_search_voters(term, max_rows=25):
     For searches like "Elmer Bowman York", York is treated as a county filter,
     and first/last name predicates are applied directly when those columns exist.
     """
-    urls = index_urls_from_manifest()
+    urls = voter_lookup_urls_from_manifest() or index_urls_from_manifest()
     raw_term = str(term or "").strip()
     base_lookup_cols = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
@@ -2430,6 +2448,14 @@ def remote_search_voters(term, max_rows=25):
         for c in df.columns:
             if c in {"FirstName","MiddleName","LastName","NameSuffix","FullName","Street Name","City","Municipality","County","Precinct"}:
                 df[c] = df[c].map(smart_title)
+        # Rebuild missing/placeholder names from segmented name fields so result cards
+        # never fall back to Unnamed Voter when SURE has the pieces available.
+        rebuilt = df.apply(full_name, axis=1).map(smart_title)
+        if "FullName" not in df.columns:
+            df["FullName"] = rebuilt
+        else:
+            bad = df["FullName"].astype(str).str.strip().eq("") | df["FullName"].astype(str).str.lower().isin(["unnamed voter", "nan", "none", "null"])
+            df.loc[bad, "FullName"] = rebuilt.loc[bad]
         return df
     except Exception as e:
         st.error(f"Lookup query failed quickly instead of hanging: {e}")
@@ -2474,7 +2500,7 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
     vid = cc_text(voter_id)
     if not vid:
         return pd.Series(dtype="object")
-    urls = detail_urls_from_manifest()
+    urls = voter_lookup_or_detail_urls()
     existing_cols = remote_parquet_columns(urls)
     base_cols = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
@@ -2482,6 +2508,7 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
         "City", "State", "Zip", "Precinct", "Municipality", "County",
         "Party", "Gender", "DOB", "RegistrationDate", "Age",
         "USC", "STS", "STH", "School District", "School Region",
+        "HH_ID", "Household_ID", "Household_Party", "HouseholdCount",
         "Mobile", "Landline", "Current_ApplicantPhone", "Email",
         "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
     ]
@@ -2679,7 +2706,7 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     household member segmented names. This runs only after the user clicks Load
     Household Members, so correctness is more important than instant load.
     """
-    urls = detail_urls_from_manifest()
+    urls = voter_lookup_or_detail_urls()
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
     conditions = []
@@ -3434,6 +3461,16 @@ def render_voter_lookup_workspace():
             btn_type = "primary" if vid == st.session_state.get("lookup_selected_id") else "secondary"
             if st.button(label, key=f"lookup_pick_{vid or i}", width="stretch", type=btn_type):
                 st.session_state["lookup_selected_id"] = vid
+                # Clicking a card loads the full selected voter detail immediately.
+                try:
+                    full_detail = remote_voter_lookup_detail(vid) if vid else r0
+                    st.session_state[f"lookup_detail_row_{vid}"] = pd.DataFrame([full_detail if len(full_detail) else r0]).iloc[0].to_dict()
+                except Exception:
+                    st.session_state[f"lookup_detail_row_{vid}"] = pd.DataFrame([r0]).iloc[0].to_dict()
+                # Clear stale per-voter display sections for the previous selection.
+                for k in list(st.session_state.keys()):
+                    if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
+                        st.session_state.pop(k, None)
                 st.rerun()
 
     with right:
@@ -3446,7 +3483,14 @@ def render_voter_lookup_workspace():
         if detail_key in st.session_state and isinstance(st.session_state.get(detail_key), dict):
             detail = pd.Series(st.session_state[detail_key])
         else:
-            detail = index_row
+            # First visible row also gets full detail so DOB/history fields are restored without another click.
+            try:
+                detail = remote_voter_lookup_detail(selected_id) if selected_id else index_row
+                if detail is None or len(detail) == 0:
+                    detail = index_row
+                st.session_state[detail_key] = pd.DataFrame([detail]).iloc[0].to_dict()
+            except Exception:
+                detail = index_row
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
@@ -3571,7 +3615,10 @@ def render_voter_lookup_workspace():
 
         st.markdown("### Household Members")
         hh_key = f"hh_df_{selected_id}"
-        if st.button("Load Household Members", key=f"load_hh_{selected_id}"):
+        if hh_key not in st.session_state:
+            with st.spinner("Loading household members..."):
+                st.session_state[hh_key] = remote_household_members(r).to_dict("records")
+        if st.button("Refresh Household Members", key=f"load_hh_{selected_id}"):
             with st.spinner("Loading household members..."):
                 st.session_state[hh_key] = remote_household_members(r).to_dict("records")
         if st.session_state.get(hh_key):
@@ -3589,11 +3636,13 @@ def render_voter_lookup_workspace():
             else:
                 st.caption("No household members found from the selected address.")
         else:
-            st.caption("Click Load Household Members only when needed so lookup stays fast.")
+            st.caption("No household members found from the selected address.")
 
         st.markdown("### Election History")
         vh_key = f"vote_history_row_{selected_id}"
-        if st.button("Load Vote History", key=f"load_vote_history_{selected_id}"):
+        if vh_key not in st.session_state:
+            st.session_state[vh_key] = pd.DataFrame([r]).iloc[0].to_dict()
+        if st.button("Refresh Vote History", key=f"load_vote_history_{selected_id}"):
             with st.spinner("Loading vote history..."):
                 full_r = remote_voter_lookup_detail(selected_id) if selected_id else r
                 if full_r is None or len(full_r) == 0:
@@ -3601,10 +3650,7 @@ def render_voter_lookup_workspace():
                 st.session_state[vh_key] = pd.DataFrame([full_r]).iloc[0].to_dict()
                 st.session_state[detail_key] = st.session_state[vh_key]
                 st.rerun()
-        if st.session_state.get(vh_key):
-            render_election_history_table(pd.Series(st.session_state[vh_key]))
-        else:
-            st.caption("Click Load Vote History only when needed so lookup stays fast.")
+        render_election_history_table(pd.Series(st.session_state[vh_key]))
 
 def render_mail_ballot_workspace():
     st.markdown("## Mail Ballot Center")
