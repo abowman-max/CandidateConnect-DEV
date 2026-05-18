@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21zo VOTER_LOOKUP_DETAIL_HISTORY_PDF
+# Candidate Connect DEV — Final Hybrid Cloud App v21zp VOTER_LOOKUP_PERSIST_HISTORY_PDF_FIX
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
@@ -940,28 +940,81 @@ def decode_saved_universes(raw):
         return {}
 
 
-def load_persistent_saved_universes():
-    """Initialize session saved universes from URL query params after an app reboot."""
-    if "saved_universes" not in st.session_state:
-        raw = None
+def _state_file_candidates():
+    """Small local DEV persistence so saved universes/corrections survive app reboot.
+    This is not a substitute for the later real cloud/mobile persistence layer, but it
+    prevents losing work during Streamlit restarts in DEV.
+    """
+    out = []
+    try:
+        out.append(Path.cwd() / ".candidate_connect_dev_state.json")
+    except Exception:
+        pass
+    try:
+        out.append(Path.home() / ".candidate_connect_dev_state.json")
+    except Exception:
+        pass
+    out.append(Path("/tmp/candidate_connect_dev_state.json"))
+    return out
+
+
+def _load_dev_state() -> dict:
+    for path in _state_file_candidates():
         try:
-            raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "")
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8")) or {}
         except Exception:
-            raw = ""
-        st.session_state["saved_universes"] = decode_saved_universes(raw)
+            continue
+    return {}
+
+
+def _save_dev_state(state: dict):
+    for path in _state_file_candidates():
+        try:
+            path.write_text(json.dumps(state or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _persist_dev_section(section: str, data):
+    state = _load_dev_state()
+    state[section] = data
+    _save_dev_state(state)
+
+
+def load_persistent_saved_universes():
+    """Initialize session saved universes from local DEV state, then URL query params.
+    Local DEV state is checked first so saved universes survive Streamlit app reboots.
+    """
+    if "saved_universes" not in st.session_state:
+        state_saved = (_load_dev_state().get("saved_universes") or {})
+        if state_saved:
+            st.session_state["saved_universes"] = _json_safe_saved_universes(state_saved)
+        else:
+            try:
+                raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "")
+            except Exception:
+                raw = ""
+            st.session_state["saved_universes"] = decode_saved_universes(raw)
     return st.session_state.setdefault("saved_universes", {})
 
 
 def persist_saved_universes(saved):
-    """Persist saved universes into the browser URL so refresh/reboot keeps them."""
+    """Persist saved universes into local DEV state and the browser URL."""
+    clean = _json_safe_saved_universes(saved)
     try:
-        encoded = encode_saved_universes(saved)
+        _persist_dev_section("saved_universes", clean)
+    except Exception:
+        pass
+    try:
+        encoded = encode_saved_universes(clean)
         if encoded:
             st.query_params[SAVED_UNIVERSES_PARAM] = encoded
         elif SAVED_UNIVERSES_PARAM in st.query_params:
             del st.query_params[SAVED_UNIVERSES_PARAM]
     except Exception:
-        # Saving still works for the current browser session if URL persistence fails.
         pass
 
 
@@ -2473,43 +2526,43 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
 
 
 def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
-    """One-page branded voter report for lookup."""
+    """Branded voter lookup report with full available vote history."""
     if canvas is None:
         return b"PDF support unavailable."
     bio = io.BytesIO()
     c = canvas.Canvas(bio, pagesize=letter)
     w, h = letter
-    y = _draw_branded_header(c, "Voter Lookup Report", datetime.now().strftime("%m/%d/%Y"))
+    y = _draw_branded_header(c, "Voter Lookup Report", datetime.now().strftime("%m/%d/%Y")) - 18
+
     name = smart_title(full_name(row)) or "Selected Voter"
     c.setFillColorRGB(0.50, 0.05, 0.12)
-    c.setFont("Helvetica-Bold", 20)
-    c.drawString(36, y, name[:60]); y -= 18
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(36, y, name[:60]); y -= 16
     c.setFillColorRGB(0.05,0.05,0.05)
-    c.setFont("Helvetica", 10)
+    c.setFont("Helvetica", 9)
     c.drawString(36, y, smart_title(address_line(row))[:95]); y -= 22
 
-    # metric line
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", 8)
     metrics = [("Party", row.get("Party","")), ("Gender", row.get("Gender","")), ("Age", row.get("Age","")), ("PA ID", row.get("voter_id",""))]
     x=36
     for lab,val in metrics:
         c.setFillColorRGB(0.35,0.35,0.35); c.drawString(x,y,lab)
-        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 12); c.drawString(x,y-14,cc_text(val) or "—")
-        c.setFont("Helvetica-Bold", 9); x += 130
-    y -= 42
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 11); c.drawString(x,y-13,cc_text(val) or "—")
+        c.setFont("Helvetica-Bold", 8); x += 130
+    y -= 36
 
-    def table_box(title, rows, x, y, width, row_h=13):
+    def table_box(title, rows, x, y, width, row_h=12):
         c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(x, y-12, width, 15, 3, fill=1, stroke=0)
         c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(x+5, y-8, title)
         y -= 17
-        c.setFont("Helvetica", 7.2); c.setFillColorRGB(0,0,0)
+        c.setFont("Helvetica", 6.8); c.setFillColorRGB(0,0,0)
         for i,(a,b) in enumerate(rows):
             if y < 55: break
             if i % 2 == 0:
                 c.setFillColorRGB(0.96,0.90,0.91); c.rect(x, y-row_h+3, width, row_h, stroke=0, fill=1)
             c.setFillColorRGB(0,0,0)
-            c.setFont("Helvetica-Bold", 6.8); c.drawString(x+4, y-7, str(a)[:25])
-            c.setFont("Helvetica", 6.8); c.drawString(x+110, y-7, str(b)[:48])
+            c.setFont("Helvetica-Bold", 6.5); c.drawString(x+4, y-7, str(a)[:25])
+            c.setFont("Helvetica", 6.5); c.drawString(x+108, y-7, str(b)[:52])
             y -= row_h
         return y
 
@@ -2519,6 +2572,7 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
         ("Municipality", row.get("Municipality", "")), ("Precinct", row.get("Precinct", "")),
         ("Congressional", row.get("USC", "")), ("State Senate", row.get("STS", "")),
         ("State House", row.get("STH", "")), ("School District", row.get("School District", "")),
+        ("School Region", row.get("School Region", "")),
     ]
     contact = [
         ("Mobile", format_phone_number(row.get("Mobile", ""))), ("Landline", format_phone_number(row.get("Landline", ""))),
@@ -2529,58 +2583,79 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     ]
     y_left = table_box("Voter Details", details, 36, y, 250)
     y_right = table_box("Contact + Mail Ballot", contact, 310, y, 250)
-    y = min(y_left, y_right) - 16
+    y = min(y_left, y_right) - 12
 
-    general, primary = _history_payload(row)
-    c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
-    c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Election History")
-    y -= 22
-    def draw_hist(title, items, x, y):
-        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 7.5); c.drawString(x,y,title); y-=12
-        c.setFont("Helvetica-Bold", 6.5)
-        x0=x+58
-        for i,it in enumerate(items[:8]):
-            c.drawCentredString(x0+i*24, y, it[1])
-        y-=10
-        c.drawString(x,y,"Party")
-        for i,it in enumerate(items[:8]): c.drawCentredString(x0+i*24, y, it[2])
-        y-=10
-        c.drawString(x,y,"Method")
-        for i,it in enumerate(items[:8]): c.drawCentredString(x0+i*24, y, it[3])
-        return y-8
-    y1 = draw_hist("General", general, 36, y)
-    y2 = draw_hist("Primary", primary, 310, y)
-    y = min(y1, y2)
-    c.setFont("Helvetica", 6.5); c.setFillColorRGB(0.25,0.25,0.25)
-    c.drawString(36, y, "Legend: ✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
-    y -= 14
-    if household is not None and not household.empty and y > 70:
+    if household is not None and not household.empty and y > 105:
         c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
         c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Household Members")
-        y -= 22
-        c.setFillColorRGB(0,0,0); c.setFont("Helvetica", 7)
+        y -= 18
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(40, y, "Name"); c.drawString(250, y, "Party"); c.drawString(295, y, "Gender"); c.drawString(345, y, "Age"); y -= 10
         for _, rr in household.head(6).iterrows():
-            marker = "* " if cc_text(rr.get("voter_id","")) == cc_text(row.get("voter_id","")) else "  "
-            c.drawString(42, y, f"{marker}{smart_title(full_name(rr)) or cc_text(rr.get('voter_id',''))}   {cc_text(rr.get('Party',''))}   {cc_text(rr.get('Gender',''))}   {cc_text(rr.get('Age',''))}"[:100])
-            y -= 10
-    c.setFont("Helvetica", 6.5); c.setFillColorRGB(0.25,0.25,0.25)
-    c.drawCentredString(w/2, 18, "Generated by Candidate Connect")
+            nm = smart_title(full_name(rr))
+            if nm.lower() == "unnamed voter":
+                nm = smart_title(cc_text(rr.get("FullName", ""))) or "Unnamed Voter"
+            mark = "✓ " if cc_text(rr.get("voter_id", "")) == cc_text(row.get("voter_id", "")) else ""
+            c.setFont("Helvetica", 6.5)
+            c.drawString(40, y, (mark + nm)[:45])
+            c.drawString(250, y, cc_text(rr.get("Party", ""))[:5])
+            c.drawString(295, y, cc_text(rr.get("Gender", ""))[:5])
+            c.drawString(345, y, cc_text(rr.get("Age", ""))[:5])
+            y -= 9
+        y -= 8
+
+    def ensure_space(needed=95):
+        nonlocal y
+        if y < needed:
+            c.showPage()
+            y = _draw_branded_header(c, "Voter Lookup Report", "Election History") - 18
+
+    general, primary = _history_payload(row, limit=None)
+    ensure_space(115)
+    c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
+    c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Full Election History")
+    y -= 22
+
+    def draw_hist(title, items, x, y, max_cols=10):
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 7.2); c.drawString(x,y,title); y-=10
+        if not items:
+            c.setFont("Helvetica", 6.5); c.drawString(x, y, "No history found."); return y-10
+        for start in range(0, len(items), max_cols):
+            chunk = items[start:start+max_cols]
+            if y < 48:
+                c.showPage(); y = _draw_branded_header(c, "Voter Lookup Report", "Election History") - 18
+            x0=x+42; step=20
+            c.setFont("Helvetica-Bold", 6.2)
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[1])
+            y-=9
+            c.drawString(x,y,"Party")
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[2])
+            y-=9
+            c.drawString(x,y,"Method")
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[3])
+            y-=13
+        return y
+
+    y_top = y
+    y1 = draw_hist("General", general, 36, y_top)
+    y2 = draw_hist("Primary", primary, 310, y_top)
+    y = min(y1, y2) - 6
+    if y < 36:
+        c.showPage(); y = 70
+    c.setFont("Helvetica", 6.3); c.setFillColorRGB(0.25,0.25,0.25)
+    c.drawString(36, max(28, y), "Legend: ✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
     c.save(); bio.seek(0); return bio.getvalue()
 
-
-@st.cache_data(ttl=600, show_spinner=False)
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
-    """Find likely household members by normalized address fields, using detail shards remotely."""
-    if row is None or len(row) == 0:
-        return pd.DataFrame(columns=report_columns())
-    if not cc_text(row.get("House Number", "")) or not cc_text(row.get("Street Name", "")):
-        return pd.DataFrame(columns=report_columns())
-    urls = detail_urls_from_manifest()
+    """Find likely household members by normalized address fields using the lightweight index.
+
+    The previous detail-shard lookup sometimes returned blank segmented names. The
+    index has the name/address display fields needed here and is much faster.
+    """
+    urls = index_urls_from_manifest()
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
     conditions = []
-    # Use stable household keys only. Municipality/precinct labels can differ between
-    # index/detail tables, which caused false "no household members" results.
     for field in ["County", "House Number", "Street Name", "Zip"]:
         val = cc_text(row.get(field, ""))
         src = first_existing_column(existing_cols, aliases.get(field, [field]))
@@ -2591,8 +2666,12 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     if apt_val and apt_src:
         conditions.append(f"LOWER(CAST({sql_ident(apt_src)} AS VARCHAR)) = {sql_lit(apt_val.lower())}")
     if len(conditions) < 3:
-        return pd.DataFrame(columns=report_columns())
-    cols = report_columns()
+        return pd.DataFrame(columns=["voter_id", "FullName", "Party", "Gender", "Age"])
+    cols = [
+        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "Party", "Gender", "Age", "DOB", "House Number", "Street Name", "Apartment Number",
+        "City", "State", "Zip", "County", "Municipality", "Precinct"
+    ]
     select_cols = safe_remote_select_exprs(existing_cols, cols)
     order_parts = []
     for out in ["LastName", "FirstName"]:
@@ -2612,15 +2691,34 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
             f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) "
             f"WHERE {where}{order_sql} LIMIT {int(max_rows)}"
         ).df()
-        return normalize_download_df(df) if not df.empty else df
+        if df.empty:
+            return df
+        # Light normalization and robust name rebuild.
+        for c in ["FirstName", "MiddleName", "LastName", "FullName", "Street Name", "City", "Municipality", "County", "Precinct"]:
+            if c in df.columns:
+                df[c] = df[c].map(smart_title)
+        if "NameSuffix" in df.columns:
+            df["NameSuffix"] = df["NameSuffix"].map(normalize_name_suffix)
+        rebuilt = df.apply(full_name, axis=1).map(smart_title)
+        df["FullName"] = rebuilt.where(rebuilt.astype(str).str.lower().ne("unnamed voter"), df.get("FullName", ""))
+        df["FullName"] = df["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
+        return df
     finally:
         con.close()
 
 
 def correction_store() -> dict:
+    """Saved voter corrections, loaded from local DEV state so app reboot doesn't erase them."""
     if "voter_corrections" not in st.session_state or not isinstance(st.session_state.get("voter_corrections"), dict):
-        st.session_state["voter_corrections"] = {}
+        st.session_state["voter_corrections"] = (_load_dev_state().get("voter_corrections") or {})
     return st.session_state["voter_corrections"]
+
+
+def persist_corrections():
+    try:
+        _persist_dev_section("voter_corrections", st.session_state.get("voter_corrections", {}) or {})
+    except Exception:
+        pass
 
 
 def correction_rows_df() -> pd.DataFrame:
@@ -2645,28 +2743,34 @@ def apply_local_correction(row: pd.Series) -> pd.Series:
 
 
 
-def normalize_vote_method(val):
-    """Normalize SURE/election vote-method values for voter lookup election history."""
+def _blank_vote_value(val) -> bool:
     if val is None:
-        return ""
+        return True
     try:
-        import pandas as _pd
-        if _pd.isna(val):
-            return ""
+        if pd.isna(val):
+            return True
     except Exception:
         pass
-    v = str(val).strip()
-    if not v or v.lower() in {"nan", "none", "null"}:
+    s = str(val).strip()
+    return s == "" or s.upper() in {"0", "N", "NO", "NONE", "NULL", "NAN", "FALSE", "DID NOT VOTE", "DNV"}
+
+
+def normalize_vote_method(val):
+    """Normalize SURE/election vote-method values for voter lookup election history."""
+    if _blank_vote_value(val):
         return ""
+    v = str(val).strip()
     vu = v.upper()
     if vu in {"M", "MAIL", "MB", "MAIL BALLOT"} or "MAIL" in vu:
         return "Mail Ballot"
     if vu in {"A", "AP", "AT POLL", "POLL", "IN PERSON", "IP", "VOTED"} or "POLL" in vu or "PERSON" in vu:
         return "At Poll"
-    if vu in {"P", "PROV", "PROVISIONAL"} or "PROV" in vu:
+    if vu in {"PROV", "PROVISIONAL"} or "PROV" in vu:
         return "Provisional"
-    if vu in {"N", "DNV", "DID NOT VOTE", "NO"}:
-        return "Did Not Vote"
+    # A bare party value is not a method. The history payload may still use it to
+    # infer At Poll only when it is a real party code, not blank/zero.
+    if vu in {"R", "D", "O", "I", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}:
+        return ""
     return v.title()
 
 
@@ -2678,9 +2782,7 @@ def vote_method_icon(method: str) -> str:
         return "🗳️"
     if m == "Provisional":
         return "🟨"
-    if m == "Did Not Vote":
-        return ""
-    return m or ""
+    return ""
 
 
 def _election_key_from_col(col: str):
@@ -2695,53 +2797,43 @@ def _is_election_party_col(col: str) -> bool:
     return any(tok in u for tok in ["PARTY", "PTY", "_PAR", " VOTE_PARTY", "VOTEPARTY"])
 
 
-def _is_election_method_col(col: str) -> bool:
-    if not election_meta_from_col(col):
-        return False
-    u = str(col or "").upper()
-    # These columns describe party, not vote method. Treating them as method caused
-    # duplicate rows like 2025/Ap and 2025/R.
-    if _is_election_party_col(u):
-        return False
-    return True
-
-
-
 def _is_party_value(v) -> bool:
+    if _blank_vote_value(v):
+        return False
     s = cc_text(v).strip().upper()
-    return s in {"R", "D", "O", "I", "N", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
+    return s in {"R", "D", "O", "I", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
 
 
 def _party_display(v) -> str:
+    if _blank_vote_value(v):
+        return ""
     s = cc_text(v).strip().upper()
     if s in {"REP", "REPUBLICAN"}:
         return "R"
     if s in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
         return "D"
-    if s in {"", "NAN", "NONE", "NULL"}:
-        return ""
     if s in {"NP", "I", "O"}:
         return "O"
-    return s[:1]
+    if s in {"R", "D"}:
+        return s
+    return ""
 
 
 def _looks_like_method_value(v) -> bool:
-    s = cc_text(v).strip().upper()
-    if not s or s in {"NAN", "NONE", "NULL"}:
+    if _blank_vote_value(v):
         return False
+    s = cc_text(v).strip().upper()
     if _is_party_value(s):
         return False
     return bool(normalize_vote_method(s))
 
 
-def _history_payload(row: pd.Series):
-    """Return one clean record per election: label, party, method.
+def _history_payload(row: pd.Series, limit: int | None = None):
+    """Return one clean record per election: year, label, party, method icon.
 
-    The old lookup regression treated base election columns like G24=R as a vote
-    method, which created duplicate rows. This version uses row values too: party
-    codes become the party row; method-looking values become the icon row. If a
-    voter has a party value but no method column, we show At Poll as the default
-    method to match the original compact lookup table behavior.
+    Blank/0/no-vote values are treated as empty. A party value like R/D means the
+    voter has a record for that election and defaults to At Poll unless a separate
+    method column says mail/provisional/etc.
     """
     cols = election_columns_from_manifest()
     grouped = {}
@@ -2751,26 +2843,23 @@ def _history_payload(row: pd.Series):
             continue
         key = (meta["type"], int(meta["year"]))
         grouped.setdefault(key, {"party": "", "method": ""})
-        val = cc_text(row.get(col, ""))
-        if not val or val.lower() in {"nan", "none", "null"}:
+        val = row.get(col, "")
+        if _blank_vote_value(val):
             continue
         col_u = str(col).upper()
-        # Party columns or party-looking values populate the Party row.
         if _is_election_party_col(col) or _is_party_value(val):
-            if not grouped[key]["party"]:
-                grouped[key]["party"] = _party_display(val)
-            # A party/history value usually means the voter voted; default to At Poll
-            # unless a separate method column says mail/provisional/etc.
-            if not grouped[key]["method"]:
+            party = _party_display(val)
+            if party and not grouped[key]["party"]:
+                grouped[key]["party"] = party
+            if party and not grouped[key]["method"]:
                 grouped[key]["method"] = "At Poll"
         elif "METHOD" in col_u or "VOTE" in col_u or _looks_like_method_value(val):
             nm = normalize_vote_method(val)
-            if nm and nm != "Did Not Vote":
+            if nm:
                 grouped[key]["method"] = nm
         else:
-            # Conservative fallback: if it is not party-looking, treat as method.
             nm = normalize_vote_method(val)
-            if nm and nm != "Did Not Vote":
+            if nm:
                 grouped[key]["method"] = nm
 
     def build(kind):
@@ -2783,13 +2872,13 @@ def _history_payload(row: pd.Series):
             label = ("G" if kind == "General" else "P") + str(year)[-2:]
             rows.append((year, label, d.get("party", ""), vote_method_icon(d.get("method", ""))))
         rows.sort(key=lambda x: x[0], reverse=True)
-        return rows[:10]
+        return rows if limit is None else rows[:limit]
     return build("General"), build("Primary")
 
 
 def render_election_history_table(row: pd.Series):
-    """Render the original compact election-history grid with icons."""
-    general, primary = _history_payload(row)
+    """Render the original compact election-history grid with icons and centered cells."""
+    general, primary = _history_payload(row, limit=None)
     if not general and not primary:
         st.caption("No election history found for this voter.")
         return
@@ -2804,7 +2893,11 @@ def render_election_history_table(row: pd.Series):
         party_row = [it[2] for it in items]
         method_row = [it[3] for it in items]
         grid = pd.DataFrame([party_row, method_row], index=["Party", "Method"], columns=headers)
-        st.dataframe(grid, width="stretch")
+        styler = grid.style.set_properties(**{"text-align": "center"}).set_table_styles([
+            {"selector": "th", "props": [("text-align", "center")]},
+            {"selector": "td", "props": [("text-align", "center")]},
+        ])
+        st.markdown(styler.to_html(), unsafe_allow_html=True)
     st.caption("✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
 
 def safe_filtered_df(active, max_rows=5000):
@@ -3306,12 +3399,10 @@ def render_voter_lookup_workspace():
         m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
         m3.metric("Age", cc_text(r.get("Age", "")) or "—")
         m4.metric("PA ID", selected_id or "—")
-        pdf_hh = None
-        if st.session_state.get(f"hh_loaded_{selected_id}"):
-            try:
-                pdf_hh = remote_household_members(r)
-            except Exception:
-                pdf_hh = None
+        try:
+            pdf_hh = remote_household_members(r)
+        except Exception:
+            pdf_hh = None
         st.download_button(
             "Download PDF Report",
             make_voter_lookup_pdf(r, pdf_hh),
@@ -3394,6 +3485,7 @@ def render_voter_lookup_workspace():
             with cb:
                 if st.button("Remove Saved Correction", key=f"remove_corr_{selected_id}"):
                     correction_store().pop(selected_id, None)
+                    persist_corrections()
                     st.success("Saved correction removed.")
                     st.rerun()
             with cc:
