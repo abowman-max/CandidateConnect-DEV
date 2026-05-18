@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21zj FAST_LOOKUP_UI_NOTE
+# Candidate Connect DEV — Final Hybrid Cloud App v21zo VOTER_LOOKUP_DETAIL_HISTORY_PDF
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
@@ -2411,6 +2411,164 @@ def remote_voter_detail(voter_id: str) -> pd.Series:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
+    """Fetch the selected voter's display/detail row by exact voter_id.
+
+    This is intentionally narrower than the full export cleanup path so the lookup
+    page can show DOB, districts, household keys, and vote history without pulling
+    the entire export schema.
+    """
+    vid = cc_text(voter_id)
+    if not vid:
+        return pd.Series(dtype="object")
+    urls = detail_urls_from_manifest()
+    existing_cols = remote_parquet_columns(urls)
+    base_cols = [
+        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2",
+        "City", "State", "Zip", "Precinct", "Municipality", "County",
+        "Party", "Gender", "DOB", "RegistrationDate", "Age",
+        "USC", "STS", "STH", "School District", "School Region",
+        "Mobile", "Landline", "Current_ApplicantPhone", "Email",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
+    ]
+    lookup_cols = base_cols + [c for c in election_columns_from_manifest() if c not in base_cols]
+    select_cols = safe_remote_select_exprs(existing_cols, lookup_cols)
+    con = duckdb.connect(database=':memory:')
+    try:
+        try:
+            con.execute('INSTALL httpfs; LOAD httpfs;')
+        except Exception:
+            try: con.execute('LOAD httpfs;')
+            except Exception: pass
+        id_col = first_existing_column(existing_cols, source_alias_candidates().get("voter_id", ["voter_id"])) or "voter_id"
+        df = con.execute(
+            f"SELECT {select_cols} FROM read_parquet({urls!r}, union_by_name=true) "
+            f"WHERE CAST({sql_ident(id_col)} AS VARCHAR) = {sql_lit(vid)} LIMIT 1"
+        ).df()
+        if df.empty:
+            return pd.Series(dtype="object")
+        # Light display normalization.
+        for c in ["FirstName","MiddleName","LastName","FullName","Street Name","City","Municipality","County","Precinct","School District","School Region"]:
+            if c in df.columns:
+                df[c] = df[c].map(smart_title)
+        if "NameSuffix" in df.columns:
+            df["NameSuffix"] = df["NameSuffix"].map(normalize_name_suffix)
+        if "State" in df.columns:
+            df["State"] = df["State"].map(lambda x: cc_text(x).upper())
+        parts = []
+        for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]:
+            parts.append(df.get(c, pd.Series([""]*len(df), index=df.index)).astype(str).replace({"nan":""}).str.strip())
+        built_full = (parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3]).str.replace(r"\s+", " ", regex=True).str.strip()
+        if "FullName" not in df.columns:
+            df["FullName"] = built_full
+        else:
+            df["FullName"] = df["FullName"].where(df["FullName"].astype(str).str.strip().ne(""), built_full)
+        if "Precinct" in df.columns:
+            muni = df["Municipality"] if "Municipality" in df.columns else pd.Series([""]*len(df), index=df.index)
+            df["Precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df["Precinct"], muni)]
+        return df.iloc[0]
+    finally:
+        con.close()
+
+
+def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
+    """One-page branded voter report for lookup."""
+    if canvas is None:
+        return b"PDF support unavailable."
+    bio = io.BytesIO()
+    c = canvas.Canvas(bio, pagesize=letter)
+    w, h = letter
+    y = _draw_branded_header(c, "Voter Lookup Report", datetime.now().strftime("%m/%d/%Y"))
+    name = smart_title(full_name(row)) or "Selected Voter"
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(36, y, name[:60]); y -= 18
+    c.setFillColorRGB(0.05,0.05,0.05)
+    c.setFont("Helvetica", 10)
+    c.drawString(36, y, smart_title(address_line(row))[:95]); y -= 22
+
+    # metric line
+    c.setFont("Helvetica-Bold", 9)
+    metrics = [("Party", row.get("Party","")), ("Gender", row.get("Gender","")), ("Age", row.get("Age","")), ("PA ID", row.get("voter_id",""))]
+    x=36
+    for lab,val in metrics:
+        c.setFillColorRGB(0.35,0.35,0.35); c.drawString(x,y,lab)
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 12); c.drawString(x,y-14,cc_text(val) or "—")
+        c.setFont("Helvetica-Bold", 9); x += 130
+    y -= 42
+
+    def table_box(title, rows, x, y, width, row_h=13):
+        c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(x, y-12, width, 15, 3, fill=1, stroke=0)
+        c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(x+5, y-8, title)
+        y -= 17
+        c.setFont("Helvetica", 7.2); c.setFillColorRGB(0,0,0)
+        for i,(a,b) in enumerate(rows):
+            if y < 55: break
+            if i % 2 == 0:
+                c.setFillColorRGB(0.96,0.90,0.91); c.rect(x, y-row_h+3, width, row_h, stroke=0, fill=1)
+            c.setFillColorRGB(0,0,0)
+            c.setFont("Helvetica-Bold", 6.8); c.drawString(x+4, y-7, str(a)[:25])
+            c.setFont("Helvetica", 6.8); c.drawString(x+110, y-7, str(b)[:48])
+            y -= row_h
+        return y
+
+    details = [
+        ("Date of Birth", row.get("DOB", "")), ("Registration Date", row.get("RegistrationDate", "")),
+        ("Registered Party", row.get("Party", "")), ("County", row.get("County", "")),
+        ("Municipality", row.get("Municipality", "")), ("Precinct", row.get("Precinct", "")),
+        ("Congressional", row.get("USC", "")), ("State Senate", row.get("STS", "")),
+        ("State House", row.get("STH", "")), ("School District", row.get("School District", "")),
+    ]
+    contact = [
+        ("Mobile", format_phone_number(row.get("Mobile", ""))), ("Landline", format_phone_number(row.get("Landline", ""))),
+        ("Applicant Phone", format_phone_number(row.get("Current_ApplicantPhone", ""))), ("Email", row.get("Email", "")),
+        ("Mail Ballot Applied", row.get("MB_App", "")), ("Application Status", row.get("MB_App_Status", "")),
+        ("Ballot Sent", row.get("MB_Sent", "")), ("Ballot Status", row.get("MB_Status", "")),
+        ("Permanent MB", row.get("MB_PERM", "")), ("Tags", row.get("Tags", "")),
+    ]
+    y_left = table_box("Voter Details", details, 36, y, 250)
+    y_right = table_box("Contact + Mail Ballot", contact, 310, y, 250)
+    y = min(y_left, y_right) - 16
+
+    general, primary = _history_payload(row)
+    c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
+    c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Election History")
+    y -= 22
+    def draw_hist(title, items, x, y):
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 7.5); c.drawString(x,y,title); y-=12
+        c.setFont("Helvetica-Bold", 6.5)
+        x0=x+58
+        for i,it in enumerate(items[:8]):
+            c.drawCentredString(x0+i*24, y, it[1])
+        y-=10
+        c.drawString(x,y,"Party")
+        for i,it in enumerate(items[:8]): c.drawCentredString(x0+i*24, y, it[2])
+        y-=10
+        c.drawString(x,y,"Method")
+        for i,it in enumerate(items[:8]): c.drawCentredString(x0+i*24, y, it[3])
+        return y-8
+    y1 = draw_hist("General", general, 36, y)
+    y2 = draw_hist("Primary", primary, 310, y)
+    y = min(y1, y2)
+    c.setFont("Helvetica", 6.5); c.setFillColorRGB(0.25,0.25,0.25)
+    c.drawString(36, y, "Legend: ✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
+    y -= 14
+    if household is not None and not household.empty and y > 70:
+        c.setFillColorRGB(0.56,0.06,0.13); c.roundRect(36, y-12, 524, 15, 3, fill=1, stroke=0)
+        c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 8); c.drawString(41, y-8, "Household Members")
+        y -= 22
+        c.setFillColorRGB(0,0,0); c.setFont("Helvetica", 7)
+        for _, rr in household.head(6).iterrows():
+            marker = "* " if cc_text(rr.get("voter_id","")) == cc_text(row.get("voter_id","")) else "  "
+            c.drawString(42, y, f"{marker}{smart_title(full_name(rr)) or cc_text(rr.get('voter_id',''))}   {cc_text(rr.get('Party',''))}   {cc_text(rr.get('Gender',''))}   {cc_text(rr.get('Age',''))}"[:100])
+            y -= 10
+    c.setFont("Helvetica", 6.5); c.setFillColorRGB(0.25,0.25,0.25)
+    c.drawCentredString(w/2, 18, "Generated by Candidate Connect")
+    c.save(); bio.seek(0); return bio.getvalue()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
     """Find likely household members by normalized address fields, using detail shards remotely."""
     if row is None or len(row) == 0:
@@ -2548,71 +2706,106 @@ def _is_election_method_col(col: str) -> bool:
     return True
 
 
-def render_election_history_table(row: pd.Series):
-    """Render the original compact election-history grid: one Party row and one Method row per election."""
-    cols = election_columns_from_manifest()
-    if not cols:
-        st.caption("Election history is not available in the lookup row. Click Load Vote History if available.")
-        return
 
+def _is_party_value(v) -> bool:
+    s = cc_text(v).strip().upper()
+    return s in {"R", "D", "O", "I", "N", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
+
+
+def _party_display(v) -> str:
+    s = cc_text(v).strip().upper()
+    if s in {"REP", "REPUBLICAN"}:
+        return "R"
+    if s in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
+        return "D"
+    if s in {"", "NAN", "NONE", "NULL"}:
+        return ""
+    if s in {"NP", "I", "O"}:
+        return "O"
+    return s[:1]
+
+
+def _looks_like_method_value(v) -> bool:
+    s = cc_text(v).strip().upper()
+    if not s or s in {"NAN", "NONE", "NULL"}:
+        return False
+    if _is_party_value(s):
+        return False
+    return bool(normalize_vote_method(s))
+
+
+def _history_payload(row: pd.Series):
+    """Return one clean record per election: label, party, method.
+
+    The old lookup regression treated base election columns like G24=R as a vote
+    method, which created duplicate rows. This version uses row values too: party
+    codes become the party row; method-looking values become the icon row. If a
+    voter has a party value but no method column, we show At Poll as the default
+    method to match the original compact lookup table behavior.
+    """
+    cols = election_columns_from_manifest()
     grouped = {}
     for col in cols:
         meta = election_meta_from_col(col)
         if not meta:
             continue
-        key = (meta["type"], meta["year"])
-        grouped.setdefault(key, {"meta": meta, "method_cols": [], "party_cols": []})
-        if _is_election_party_col(col):
-            grouped[key]["party_cols"].append(col)
-        elif _is_election_method_col(col):
-            grouped[key]["method_cols"].append(col)
+        key = (meta["type"], int(meta["year"]))
+        grouped.setdefault(key, {"party": "", "method": ""})
+        val = cc_text(row.get(col, ""))
+        if not val or val.lower() in {"nan", "none", "null"}:
+            continue
+        col_u = str(col).upper()
+        # Party columns or party-looking values populate the Party row.
+        if _is_election_party_col(col) or _is_party_value(val):
+            if not grouped[key]["party"]:
+                grouped[key]["party"] = _party_display(val)
+            # A party/history value usually means the voter voted; default to At Poll
+            # unless a separate method column says mail/provisional/etc.
+            if not grouped[key]["method"]:
+                grouped[key]["method"] = "At Poll"
+        elif "METHOD" in col_u or "VOTE" in col_u or _looks_like_method_value(val):
+            nm = normalize_vote_method(val)
+            if nm and nm != "Did Not Vote":
+                grouped[key]["method"] = nm
+        else:
+            # Conservative fallback: if it is not party-looking, treat as method.
+            nm = normalize_vote_method(val)
+            if nm and nm != "Did Not Vote":
+                grouped[key]["method"] = nm
 
-    def first_value(candidates):
-        for c in candidates:
-            v = cc_text(row.get(c, ""))
-            if v and v.lower() not in {"nan", "none", "null"}:
-                return v
-        return ""
-
-    def build_grid(kind):
-        items = []
-        for (typ, year), payload in grouped.items():
+    def build(kind):
+        rows=[]
+        for (typ, year), d in grouped.items():
             if typ != kind:
                 continue
-            method_raw = first_value(payload.get("method_cols", []))
-            if not method_raw or normalize_vote_method(method_raw) == "Did Not Vote":
-                # Still show recent elections as blank cells if the party column exists.
-                party_raw = first_value(payload.get("party_cols", []))
-                if not party_raw:
-                    continue
-            else:
-                party_raw = first_value(payload.get("party_cols", [])) or cc_text(row.get("Party", ""))
-            yy = str(year)[-2:]
-            label = ("G" if kind == "General" else "P") + yy
-            items.append((int(year), label, party_raw[:1].upper() if party_raw else "", vote_method_icon(method_raw)))
-        items.sort(key=lambda x: x[0], reverse=True)
-        return items[:10]
+            if not d.get("party") and not d.get("method"):
+                continue
+            label = ("G" if kind == "General" else "P") + str(year)[-2:]
+            rows.append((year, label, d.get("party", ""), vote_method_icon(d.get("method", ""))))
+        rows.sort(key=lambda x: x[0], reverse=True)
+        return rows[:10]
+    return build("General"), build("Primary")
 
-    general = build_grid("General")
-    primary = build_grid("Primary")
+
+def render_election_history_table(row: pd.Series):
+    """Render the original compact election-history grid with icons."""
+    general, primary = _history_payload(row)
     if not general and not primary:
         st.caption("No election history found for this voter.")
         return
 
     st.markdown("### Election History")
-    c1, c2 = st.columns(2)
-    for title, items, col in [("General Elections", general, c1), ("Primary Elections", primary, c2)]:
-        with col:
-            st.markdown(f"**{title}**")
-            if not items:
-                st.caption("No history found.")
-                continue
-            headers = [it[1] for it in items]
-            party_row = [it[2] for it in items]
-            method_row = [it[3] for it in items]
-            grid = pd.DataFrame([party_row, method_row], index=["Party", "Method"], columns=headers)
-            st.dataframe(grid, width="stretch")
-    st.caption("✉️ Mail Ballot &nbsp;&nbsp; 🗳️ At Poll &nbsp;&nbsp; 🟨 Provisional &nbsp;&nbsp; blank = Did Not Vote / no record")
+    for title, items in [("General Elections", general), ("Primary Elections", primary)]:
+        st.markdown(f"**{title}**")
+        if not items:
+            st.caption("No history found.")
+            continue
+        headers = [it[1] for it in items]
+        party_row = [it[2] for it in items]
+        method_row = [it[3] for it in items]
+        grid = pd.DataFrame([party_row, method_row], index=["Party", "Method"], columns=headers)
+        st.dataframe(grid, width="stretch")
+    st.caption("✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
 
 def safe_filtered_df(active, max_rows=5000):
     try:
@@ -3099,20 +3292,12 @@ def render_voter_lookup_workspace():
         selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
         match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
         index_row = match.iloc[0] if not match.empty else df.iloc[0]
-        # Keep lookup instant: use the lightweight index row for the main display
-        # and election history. Full detail shards are only scanned if the user asks.
-        if selected_id and st.session_state.get(f"lookup_full_detail_{selected_id}"):
-            detail = remote_voter_detail(selected_id)
-            if detail is None or len(detail) == 0:
-                detail = index_row
-        else:
+        # Search results stay lightweight, but once a card is selected we fetch a single
+        # exact voter detail row so DOB, districts, and election fields are complete.
+        detail = remote_voter_lookup_detail(selected_id) if selected_id else pd.Series(dtype="object")
+        if detail is None or len(detail) == 0:
             detail = index_row
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
-
-        if selected_id and not st.session_state.get(f"lookup_full_detail_{selected_id}"):
-            if st.button("Load Full Voter Detail", key=f"load_full_detail_{selected_id}"):
-                st.session_state[f"lookup_full_detail_{selected_id}"] = True
-                st.rerun()
 
         st.markdown(f"## {smart_title(full_name(r))}")
         st.write(smart_title(address_line(r)))
@@ -3121,6 +3306,19 @@ def render_voter_lookup_workspace():
         m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
         m3.metric("Age", cc_text(r.get("Age", "")) or "—")
         m4.metric("PA ID", selected_id or "—")
+        pdf_hh = None
+        if st.session_state.get(f"hh_loaded_{selected_id}"):
+            try:
+                pdf_hh = remote_household_members(r)
+            except Exception:
+                pdf_hh = None
+        st.download_button(
+            "Download PDF Report",
+            make_voter_lookup_pdf(r, pdf_hh),
+            file_name=f"candidate_connect_voter_report_{selected_id or 'voter'}.pdf",
+            mime="application/pdf",
+            key=f"download_voter_pdf_{selected_id}",
+        )
 
         d1, d2 = st.columns(2)
         with d1:
@@ -3214,11 +3412,16 @@ def render_voter_lookup_workspace():
                 hh = remote_household_members(r)
             if not hh.empty:
                 view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
+                # Always rebuild missing/blank names from segmented fields.
+                rebuilt_names = hh.apply(full_name, axis=1).map(smart_title)
                 if "FullName" not in view.columns:
-                    view["FullName"] = hh.apply(full_name, axis=1)
+                    view["FullName"] = rebuilt_names
+                else:
+                    view["FullName"] = view["FullName"].where(view["FullName"].astype(str).str.strip().ne(""), rebuilt_names)
+                view.insert(0, "Current", view.get("voter_id", "").astype(str).eq(str(selected_id)).map(lambda x: "✓" if x else ""))
                 st.dataframe(view, hide_index=True, width="stretch")
             else:
-                st.caption("No household members found from the lightweight lookup row.")
+                st.caption("No household members found from the selected address.")
         else:
             st.caption("Click Load Household Members only when needed so lookup stays fast.")
 
@@ -3226,12 +3429,7 @@ def render_voter_lookup_workspace():
         if st.button("Load Vote History", key=f"load_vote_history_{selected_id}"):
             st.session_state[f"vote_history_loaded_{selected_id}"] = True
         if st.session_state.get(f"vote_history_loaded_{selected_id}"):
-            with st.spinner("Loading vote history..."):
-                hist_row = remote_voter_detail(selected_id)
-            if hist_row is None or len(hist_row) == 0:
-                st.warning("Vote history could not be loaded for this voter.")
-            else:
-                render_election_history_table(hist_row)
+            render_election_history_table(r)
         else:
             st.caption("Click Load Vote History only when needed so lookup stays fast.")
 
