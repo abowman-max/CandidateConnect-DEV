@@ -470,6 +470,20 @@ def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
         if not cleaned:
             continue
         expr = f"COALESCE(CAST({sql_ident(field)} AS VARCHAR), '')"
+        # MB_PERM is a Y/blank style field in many builds. For this filter,
+        # N must mean "not permanent" — not just literal N. The safest fast
+        # count-cube expression is therefore NOT IN all yes/permanent variants.
+        if field == "MB_PERM":
+            raw_upper = {str(v).strip().upper() for v in (vals or []) if str(v).strip()}
+            yes_tokens = {"Y", "YES", "TRUE", "T", "1", "PERMANENT"}
+            no_tokens = {"N", "NO", "FALSE", "F", "0", "NOT PERMANENT", "NON PERMANENT", "NON-PERMANENT", ""}
+            upper_expr = f"UPPER(TRIM({expr}))"
+            if raw_upper and raw_upper.issubset(no_tokens):
+                clauses.append(f"({upper_expr} NOT IN ('Y','YES','TRUE','T','1','PERMANENT'))")
+                continue
+            if raw_upper and raw_upper.issubset(yes_tokens):
+                clauses.append(f"({upper_expr} IN ('Y','YES','TRUE','T','1','PERMANENT'))")
+                continue
         clauses.append(f"{expr} IN (" + ",".join(sql_lit(v) for v in cleaned) + ")")
 
     special = special or {}
@@ -3359,6 +3373,24 @@ def render_voter_lookup_workspace():
                 view["DisplayName"] = hh.apply(full_name, axis=1).map(smart_title)
                 view["DisplayName"] = view["DisplayName"].replace({"Unnamed Voter": "", "Unnamed voter": ""})
                 missing_names = view["DisplayName"].astype(str).str.strip().eq("") | view["DisplayName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
+                # If the fast household shard has IDs/party/age but not name pieces,
+                # fill names from the exact voter detail hash before falling back to an ID label.
+                for idx in view.index[missing_names]:
+                    hvid_for_name = cc_text(view.at[idx, "voter_id"]) if "voter_id" in view.columns else ""
+                    if not hvid_for_name:
+                        continue
+                    nm = ""
+                    try:
+                        detail_name_row = remote_voter_lookup_detail(hvid_for_name)
+                        nm = smart_title(full_name(detail_name_row))
+                        if not nm or nm.lower() in {"unnamed voter", "unnamed", "nan", "none", "null"}:
+                            detail_name_row = remote_voter_detail(hvid_for_name)
+                            nm = smart_title(full_name(detail_name_row))
+                    except Exception:
+                        nm = ""
+                    if nm and nm.lower() not in {"unnamed voter", "unnamed", "nan", "none", "null"}:
+                        view.at[idx, "DisplayName"] = nm
+                missing_names = view["DisplayName"].astype(str).str.strip().eq("") | view["DisplayName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
                 view.loc[missing_names, "DisplayName"] = view.loc[missing_names].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
 
                 st.markdown("""
@@ -3390,7 +3422,6 @@ def render_voter_lookup_workspace():
                                 if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
                                     st.session_state.pop(k, None)
                             st.rerun()
-                st.caption("No household members found from the selected address.")
         else:
             st.caption("No household members found from the selected address.")
 
