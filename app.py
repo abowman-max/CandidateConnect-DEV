@@ -6,6 +6,7 @@ import io
 import json
 import base64
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -477,21 +478,86 @@ def detail_urls_from_manifest() -> list[str]:
     return [r2_url(f"detail/voters_detail_{i:03d}.parquet") for i in range(count)]
 
 
-def voter_lookup_urls_from_manifest() -> list[str]:
-    """Return Step 8 voter_lookup speed-table URL when present."""
+def speed_table_key(stem: str) -> str:
     try:
         m = load_manifest()
-        tables = ((m.get("speed", {}) or {}).get("tables", {}) or {})
-        key = tables.get("voter_lookup")
-        if key:
-            return [r2_url(key)]
+        return (((m.get("speed", {}) or {}).get("tables", {}) or {}).get(stem, ""))
     except Exception:
-        pass
-    return []
+        return ""
+
+
+def speed_table_url(stem: str) -> str:
+    key = speed_table_key(stem)
+    return r2_url(key) if key else ""
+
+
+def voter_search_all_urls() -> list[str]:
+    urls = []
+    for ch in list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ["OTHER"]:
+        u = speed_table_url(f"voter_search_lname_{ch}")
+        if u:
+            urls.append(u)
+    return urls
+
+
+def _lookup_county_token_and_search_tokens(term: str):
+    county_names = {
+        "adams","allegheny","armstrong","beaver","bedford","berks","blair","bradford","bucks","butler",
+        "cambria","cameron","carbon","centre","chester","clarion","clearfield","clinton","columbia","crawford",
+        "cumberland","dauphin","delaware","elk","erie","fayette","forest","franklin","fulton","greene",
+        "huntingdon","indiana","jefferson","juniata","lackawanna","lancaster","lawrence","lebanon","lehigh",
+        "luzerne","lycoming","mckean","mercer","mifflin","monroe","montgomery","montour","northampton",
+        "northumberland","perry","philadelphia","pike","potter","schuylkill","snyder","somerset","sullivan",
+        "susquehanna","tioga","union","venango","warren","washington","wayne","westmoreland","wyoming","york"
+    }
+    raw_tokens = [t.strip() for t in re.split(r"\s+", str(term or "").strip()) if t.strip()]
+    tokens_lower = [t.lower().replace("'", "''") for t in raw_tokens]
+    county_token = next((t for t in tokens_lower if t in county_names), "")
+    search_tokens = [t for t in tokens_lower if t != county_token]
+    return county_token, search_tokens
+
+
+def voter_search_urls_for_term(term: str) -> list[str]:
+    """Pick the smallest useful search file set.
+
+    Normal name searches read one last-name-letter shard. Address-only searches
+    fall back to all 27 thin search shards. If Step 8 has not produced these yet,
+    fall back to the regular index shards.
+    """
+    county_token, search_tokens = _lookup_county_token_and_search_tokens(term)
+    digits = re.sub(r"\D+", "", str(term or ""))
+    if len(digits) >= 6 or "@" in str(term or ""):
+        return voter_search_all_urls() or index_urls_from_manifest()
+    if search_tokens:
+        last_t = search_tokens[-1]
+        ch = last_t[:1].upper()
+        if "A" <= ch <= "Z":
+            u = speed_table_url(f"voter_search_lname_{ch}")
+            if u:
+                return [u]
+    return voter_search_all_urls() or index_urls_from_manifest()
+
+
+def voter_detail_hash_url(voter_id: str) -> str:
+    vid = cc_text(voter_id)
+    if not vid:
+        return ""
+    bucket = int(hashlib.md5(vid.encode("utf-8")).hexdigest(), 16) % 64
+    return speed_table_url(f"voter_detail_hash_{bucket:02d}")
+
+
+def voter_detail_lookup_urls_for_id(voter_id: str) -> list[str]:
+    u = voter_detail_hash_url(voter_id)
+    return [u] if u else detail_urls_from_manifest()
+
+
+def voter_lookup_urls_from_manifest() -> list[str]:
+    """Backward-compatible helper for older lookup builds."""
+    key = speed_table_key("voter_lookup")
+    return [r2_url(key)] if key else []
 
 
 def voter_lookup_or_detail_urls() -> list[str]:
-    """Use voter_lookup.parquet for selected-voter work; fall back to detail shards."""
     return voter_lookup_urls_from_manifest() or detail_urls_from_manifest()
 
 
@@ -2084,9 +2150,12 @@ def household_for_mail(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["_HH_KEY"], errors="ignore")
 
 def full_name(row):
-    parts = [cc_text(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
-    name = " ".join([p for p in parts if p])
-    return name or cc_text(row.get("FullName", "")) or cc_text(row.get("Name", "")) or "Unnamed voter"
+    def usable(v):
+        t = cc_text(v).strip()
+        return "" if t.lower() in {"unnamed voter", "unknown", "none", "nan", "null"} else t
+    parts = [usable(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
+    name = " ".join([p for p in parts if p]).strip()
+    return name or usable(row.get("FullName", "")) or usable(row.get("Name", "")) or "Unnamed voter"
 
 def address_line(row):
     hn = cc_text(row.get("House Number", ""))
@@ -2170,14 +2239,14 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName", "first", "FIRST"],
-        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial", "middle_initial", "MName"],
-        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName", "last", "LAST"],
-        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix", "surnsuffix", "SurnSuffix"],
-        "FullName": ["FullName", "Full Name", "Name", "name"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
-        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "dob"],
+        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
         "Age": ["Age", "age", "Age_Calc"],
         "Age_Range": ["Age_Range", "age_group", "Age Group"],
         "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
@@ -2250,14 +2319,14 @@ def source_alias_candidates():
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "first_name", "FIRST_NAME", "fname", "FName", "first", "FIRST"],
-        "MiddleName": ["MiddleName", "Middle Name", "middle_name", "middle", "MiddleInitial", "middle_initial", "MName"],
-        "LastName": ["LastName", "Last Name", "last_name", "surname", "lname", "LName", "last", "LAST"],
-        "NameSuffix": ["NameSuffix", "Name Suffix", "suffix", "Suffix", "surnsuffix", "SurnSuffix"],
-        "FullName": ["FullName", "Full Name", "Name", "name"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
-        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "dob"],
+        "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
         "Age": ["Age", "age", "Age_Calc"],
         "Age_Range": ["Age_Range", "age_group", "Age Group"],
         "RegistrationDate": ["RegistrationDate", "Registration Date", "registration_date"],
@@ -2341,8 +2410,8 @@ def remote_search_voters(term, max_rows=25):
     For searches like "Elmer Bowman York", York is treated as a county filter,
     and first/last name predicates are applied directly when those columns exist.
     """
-    urls = voter_lookup_urls_from_manifest() or index_urls_from_manifest()
     raw_term = str(term or "").strip()
+    urls = voter_search_urls_for_term(raw_term)
     base_lookup_cols = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
         "House Number", "House Number Suffix", "Street Name", "Apartment Number", "Address Line 2",
@@ -2357,19 +2426,7 @@ def remote_search_voters(term, max_rows=25):
     if not raw_term:
         return pd.DataFrame(columns=lookup_cols)
 
-    county_names = {
-        "adams","allegheny","armstrong","beaver","bedford","berks","blair","bradford","bucks","butler",
-        "cambria","cameron","carbon","centre","chester","clarion","clearfield","clinton","columbia","crawford",
-        "cumberland","dauphin","delaware","elk","erie","fayette","forest","franklin","fulton","greene",
-        "huntingdon","indiana","jefferson","juniata","lackawanna","lancaster","lawrence","lebanon","lehigh",
-        "luzerne","lycoming","mckean","mercer","mifflin","monroe","montgomery","montour","northampton",
-        "northumberland","perry","philadelphia","pike","potter","schuylkill","snyder","somerset","sullivan",
-        "susquehanna","tioga","union","venango","warren","washington","wayne","westmoreland","wyoming","york"
-    }
-    raw_tokens = [t.strip() for t in re.split(r"\s+", raw_term) if t.strip()]
-    tokens_lower = [t.lower().replace("'", "''") for t in raw_tokens]
-    county_token = next((t for t in tokens_lower if t in county_names), "")
-    search_tokens = [t for t in tokens_lower if t != county_token]
+    county_token, search_tokens = _lookup_county_token_and_search_tokens(raw_term)
 
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
@@ -2500,7 +2557,7 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
     vid = cc_text(voter_id)
     if not vid:
         return pd.Series(dtype="object")
-    urls = voter_lookup_or_detail_urls()
+    urls = voter_detail_lookup_urls_for_id(vid)
     existing_cols = remote_parquet_columns(urls)
     base_cols = [
         "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
@@ -2659,7 +2716,7 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[2])
             y-=9
             c.drawString(x,y,"Method")
-            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[3])
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, vote_method_pdf_label(it[3]))
             y-=13
         return y
 
@@ -2687,7 +2744,7 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             c.setFont("Helvetica-Bold", 6.3); c.drawString(36, y, "Method")
             c.setFont("Helvetica", 6.3)
             for i,it in enumerate(chunk):
-                c.drawCentredString(x0+i*step, y, it[3])
+                c.drawCentredString(x0+i*step, y, vote_method_pdf_label(it[3]))
             y -= 16
         return y
 
@@ -2696,17 +2753,16 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     if y < 36:
         c.showPage(); y = 70
     c.setFont("Helvetica", 6.3); c.setFillColorRGB(0.25,0.25,0.25)
-    c.drawString(36, max(28, y), "Legend: ✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
+    c.drawString(36, max(28, y), "Legend: MB = Mail Ballot   POLL = At Poll   PROV = Provisional   blank = Did Not Vote / no record")
     c.save(); bio.seek(0); return bio.getvalue()
 
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
-    """Find likely household members by normalized address fields.
+    """Find household members from the thin search shards by normalized address.
 
-    Use detail shards here, not the lightweight index, because the index may omit
-    household member segmented names. This runs only after the user clicks Load
-    Household Members, so correctness is more important than instant load.
+    This avoids scanning the large detail shards and still includes segmented names
+    needed to avoid Unnamed Voter rows.
     """
-    urls = voter_lookup_or_detail_urls()
+    urls = voter_search_all_urls() or voter_lookup_or_detail_urls()
     existing_cols = remote_parquet_columns(urls)
     aliases = source_alias_candidates()
     conditions = []
@@ -2722,7 +2778,7 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     if len(conditions) < 3:
         return pd.DataFrame(columns=["voter_id", "FullName", "Party", "Gender", "Age"])
     cols = [
-        "voter_id", "FullName", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix",
         "Party", "Gender", "Age", "DOB", "House Number", "Street Name", "Apartment Number",
         "City", "State", "Zip", "County", "Municipality", "Precinct"
     ]
@@ -2846,574 +2902,24 @@ def vote_method_icon(method: str) -> str:
     return ""
 
 
-def _election_key_from_col(col: str):
-    meta = election_meta_from_col(col)
-    if not meta:
-        return None
-    return (meta["type"], meta["year"])
-
-
-def _is_election_party_col(col: str) -> bool:
-    u = str(col or "").upper()
-    return any(tok in u for tok in ["PARTY", "PTY", "_PAR", " VOTE_PARTY", "VOTEPARTY"])
-
-
-def _is_party_value(v) -> bool:
-    """Election-history party value.
-
-    In the SURE/history fields we have in these shards, a value of O/0/blank is
-    not a reliable third-party vote marker; it usually means no recorded vote.
-    Treat only R/D (and spelled-out equivalents) as actual party history so
-    did-not-vote years stay blank and do not produce an At Poll icon.
-    """
-    if _blank_vote_value(v):
-        return False
-    s = cc_text(v).strip().upper()
-    return s in {"R", "D", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}
-
-
-def _party_display(v) -> str:
-    """Display party for election history only.
-
-    Do not display O/0/NP/I in vote-history cells because those values are
-    showing up as did-not-vote/no-record markers in the lookup data.
-    """
-    if _blank_vote_value(v):
-        return ""
-    s = cc_text(v).strip().upper()
-    if s in {"REP", "REPUBLICAN", "R"}:
-        return "R"
-    if s in {"DEM", "DEMOCRAT", "DEMOCRATIC", "D"}:
-        return "D"
+def vote_method_pdf_label(method_or_icon: str) -> str:
+    """ReportLab base fonts do not reliably render emoji, so the PDF uses short labels."""
+    v = cc_text(method_or_icon)
+    if v in {"✉", "✉️"}:
+        return "MB"
+    if v in {"🗳", "🗳️"}:
+        return "POLL"
+    if v in {"🟨"}:
+        return "PROV"
+    m = normalize_vote_method(v)
+    if m == "Mail Ballot":
+        return "MB"
+    if m == "At Poll":
+        return "POLL"
+    if m == "Provisional":
+        return "PROV"
     return ""
 
-
-def _looks_like_method_value(v) -> bool:
-    if _blank_vote_value(v):
-        return False
-    s = cc_text(v).strip().upper()
-    if _is_party_value(s):
-        return False
-    return bool(normalize_vote_method(s))
-
-
-def _history_payload(row: pd.Series, limit: int | None = None):
-    """Return one clean record per election, including did-not-vote years.
-
-    Every election column in the manifest creates a visible year cell. Blank/O/0/no-record
-    values display as blank instead of disappearing. A real R/D party value displays the
-    party and defaults the method to At Poll unless a method column says otherwise.
-    """
-    cols = election_columns_from_manifest()
-    grouped = {}
-    for col in cols:
-        meta = election_meta_from_col(col)
-        if not meta:
-            continue
-        key = (meta["type"], int(meta["year"]))
-        grouped.setdefault(key, {"party": "", "method": ""})
-        val = row.get(col, "")
-        if _blank_vote_value(val):
-            continue
-        col_u = str(col).upper()
-        if _is_election_party_col(col) or _is_party_value(val):
-            party = _party_display(val)
-            if party and not grouped[key]["party"]:
-                grouped[key]["party"] = party
-            if party and not grouped[key]["method"]:
-                grouped[key]["method"] = "At Poll"
-        elif "METHOD" in col_u or "VOTE" in col_u or _looks_like_method_value(val):
-            nm = normalize_vote_method(val)
-            if nm:
-                grouped[key]["method"] = nm
-
-    def build(kind):
-        rows=[]
-        for (typ, year), d in grouped.items():
-            if typ != kind:
-                continue
-            label = ("G" if kind == "General" else "P") + str(year)[-2:]
-            rows.append((year, label, d.get("party", ""), vote_method_icon(d.get("method", ""))))
-        rows.sort(key=lambda x: x[0], reverse=True)
-        return rows if limit is None else rows[:limit]
-    return build("General"), build("Primary")
-
-
-def render_election_history_table(row: pd.Series):
-    """Render the original compact election-history grid with icons and centered cells."""
-    general, primary = _history_payload(row, limit=None)
-    if not general and not primary:
-        st.caption("No election history found for this voter.")
-        return
-
-    st.markdown("### Election History")
-    for title, items in [("General Elections", general), ("Primary Elections", primary)]:
-        st.markdown(f"**{title}**")
-        if not items:
-            st.caption("No history found.")
-            continue
-        headers = [it[1] for it in items]
-        party_row = [it[2] for it in items]
-        method_row = [it[3] for it in items]
-        grid = pd.DataFrame([party_row, method_row], index=["Party", "Method"], columns=headers)
-        styler = grid.style.set_properties(**{"text-align": "center"}).set_table_styles([
-            {"selector": "th", "props": [("text-align", "center")]},
-            {"selector": "td", "props": [("text-align", "center")]},
-        ])
-        st.markdown(styler.to_html(), unsafe_allow_html=True)
-    st.caption("✉️ Mail Ballot   🗳️ At Poll   🟨 Provisional   blank = Did Not Vote / no record")
-
-def safe_filtered_df(active, max_rows=5000):
-    try:
-        df = duckdb_detail_filtered_df(active or {}, active_special_filters(), max_rows)
-        if df is None or df.empty:
-            return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
-        df = normalize_download_df(df).head(max_rows)
-        return drop_all_blank_optional_columns(df, required=["voter_id", "County", "Municipality", "Precinct", "FirstName", "LastName", "House Number", "Street Name", "City", "State", "Zip"])
-    except Exception as e:
-        st.warning(f"Export query returned no rows or failed: {str(e)[:250]}")
-        return pd.DataFrame(columns=DEFAULT_EXPORT_COLUMNS)
-
-def make_simple_pdf(title, rows, headers):
-    if canvas is None:
-        return b"PDF support unavailable."
-    bio = io.BytesIO(); c = canvas.Canvas(bio, pagesize=letter); w,h = letter
-    c.setFont("Helvetica-Bold", 15); c.drawString(36, h-42, title)
-    c.setFont("Helvetica", 8); y = h-66
-    widths = [90, 70, 150, 120, 40, 40][:len(headers)]
-    def line(vals, bold=False):
-        nonlocal y
-        if y < 45:
-            c.showPage(); y = h-42
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", 7.5)
-        x=36
-        for i,v in enumerate(vals):
-            c.drawString(x, y, str(v)[:32])
-            x += widths[i] if i < len(widths) else 80
-        y -= 12
-    line(headers, True)
-    for r in rows:
-        line(r)
-    c.save(); bio.seek(0); return bio.getvalue()
-
-
-def _pdf_logo_path(name):
-    try:
-        if Path(name).exists():
-            return str(Path(name))
-    except Exception:
-        pass
-    return None
-
-class _NumberedCanvas(canvas.Canvas if canvas else object):
-    def __init__(self, *args, **kwargs):
-        if canvas is None:
-            return
-        super().__init__(*args, **kwargs)
-        self._saved_page_states = []
-    def showPage(self):
-        self._saved_page_states.append(dict(self.__dict__))
-        self._startPage()
-    def save(self):
-        if canvas is None:
-            return
-        num_pages = len(self._saved_page_states)
-        for state in self._saved_page_states:
-            self.__dict__.update(state)
-            self.setFont("Helvetica-Bold", 7)
-            self.setFillColorRGB(0.12, 0.12, 0.12)
-            self.drawCentredString(letter[0] / 2.0, 18, f"{self._pageNumber} of {num_pages}")
-            self.drawRightString(letter[0] - 28, 18, f"Updated: {datetime.now().strftime('%m/%d/%Y')}")
-            super().showPage()
-        super().save()
-
-def _draw_branded_header(c, title, subtitle=""):
-    w, h = getattr(c, "_pagesize", letter)
-    c.setFillColorRGB(1, 1, 1)
-    # logos
-    left_logo = _pdf_logo_path(LOGO_CANDIDATE_CONNECT)
-    right_logo = _pdf_logo_path(LOGO_TPTC)
-    if left_logo:
-        try: c.drawImage(left_logo, 28, h-58, width=92, height=40, preserveAspectRatio=True, mask='auto')
-        except Exception: pass
-    if right_logo:
-        try: c.drawImage(right_logo, w-122, h-58, width=94, height=40, preserveAspectRatio=True, mask='auto')
-        except Exception: pass
-    c.setFillColorRGB(0.50, 0.05, 0.12)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(132, h-42, title[:56])
-    if subtitle:
-        c.setFont("Helvetica", 7.5)
-        c.setFillColorRGB(0.30, 0.30, 0.30)
-        c.drawString(132, h-54, subtitle[:96])
-    c.setStrokeColorRGB(0.78, 0.78, 0.78)
-    c.line(28, h-66, w-28, h-66)
-    return h-78
-
-def _draw_section_bar(c, text, y, x=28, width=None):
-    w, h = getattr(c, "_pagesize", letter)
-    width = width or (w - 56)
-    c.setFillColorRGB(0.56, 0.06, 0.13)
-    c.roundRect(x, y-11, width, 13, 3, fill=1, stroke=0)
-    c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Bold", 7.4)
-    c.drawString(x+5, y-7, str(text)[:72])
-    return y-15
-
-def _selected_filter_lines(active):
-    lines=[]
-    try:
-        for k,v in (active or {}).items():
-            if v in (None, [], ""):
-                continue
-            label = DISPLAY_LABELS.get(k, k)
-            if isinstance(v, (list, tuple, set)):
-                val = ", ".join(map(str, list(v)[:4]))
-                if len(v) > 4: val += "..."
-            else:
-                val = str(v)
-            lines.append(f"{label}: {val}")
-    except Exception:
-        pass
-    try:
-        sf = active_special_filters()
-        for k,v in sf.items():
-            if v in (None, [], "", (0,0)):
-                continue
-            if isinstance(v, (list, tuple, set)):
-                val = ", ".join(map(str, list(v)[:4]))
-            else:
-                val = str(v)
-            lines.append(f"{k}: {val}")
-    except Exception:
-        pass
-    return lines[:10]
-
-def _street_sort_key_df(df):
-    df = df.copy()
-    df["_precinct_sort"] = df.get("Precinct", "").astype(str)
-    df["_street_sort"] = df.get("Street Name", "").astype(str).str.upper().str.replace(r"[^A-Z0-9 ]+", " ", regex=True).str.strip()
-    if "House Number" in df.columns:
-        df["_house_sort"] = pd.to_numeric(df["House Number"].astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
-    else:
-        df["_house_sort"] = 0
-    df["_last_sort"] = df.get("LastName", "").astype(str).str.upper()
-    df["_first_sort"] = df.get("FirstName", "").astype(str).str.upper()
-    return df.sort_values(["_precinct_sort","_street_sort","_house_sort","_last_sort","_first_sort"], kind="stable")
-
-def _contact_tracking_cols():
-    # MB Perm is printed as Y/blank, not as a tracking checkbox.
-    return ["F", "A", "U", "NH", "Yard Sign"]
-
-def _build_street_pdf(active, call_mode=False):
-    """Build branded street/call list PDF without Streamlit magic side-effects.
-    All ReportLab drawing calls are assigned so Streamlit does not render repeated None values.
-    """
-    if canvas is None:
-        return make_simple_pdf("PDF support unavailable", [], ["Message"])
-
-    df = safe_filtered_df(active, 25000)
-    df = normalize_download_df(df)
-    title = "Voter Call List" if call_mode else "Voter Contact List"
-    if df.empty:
-        return make_simple_pdf(title, [["No voters found"]], ["Message"])
-
-    df = df.copy()
-    df["_name"] = df.apply(full_name, axis=1).map(smart_title)
-    df["_phone"] = df.apply(phone_label, axis=1)
-    df["_precinct"] = df.get("Precinct", "").astype(str).map(canonical_precinct_display).replace("", "Unassigned")
-    df["_street"] = df.get("Street Name", "").astype(str).map(smart_title).replace("", "Unknown Street")
-    if call_mode:
-        df = df[df["_phone"].astype(str).str.strip().ne("")].copy()
-    if df.empty:
-        return make_simple_pdf(title, [["No voters with phone numbers found"]], ["Message"])
-
-    # Sort: precinct -> street -> house number -> last -> first.
-    df["_precinct_sort"] = df["_precinct"].astype(str).str.upper()
-    df["_street_sort"] = df["_street"].astype(str).str.upper().str.replace(r"[^A-Z0-9 ]+", " ", regex=True).str.strip()
-    df["_house_sort"] = pd.to_numeric(df.get("House Number", "").astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
-    df["_last_sort"] = df.get("LastName", "").astype(str).str.upper()
-    df["_first_sort"] = df.get("FirstName", "").astype(str).str.upper()
-    df = df.sort_values(["_precinct_sort", "_street_sort", "_house_sort", "_last_sort", "_first_sort"], kind="stable")
-
-    bio = io.BytesIO()
-    c = canvas.Canvas(bio, pagesize=landscape(letter))
-    w, h = landscape(letter)
-    mar_l, mar_r = 20, 20
-    usable_w = w - mar_l - mar_r
-    page_no = 1
-    tracks = ["F", "A", "U", "NH", "YS"]
-
-    def draw_page_no():
-        nonlocal page_no
-        _ = c.setFont("Helvetica-Bold", 7)
-        _ = c.setFillColorRGB(0.12, 0.12, 0.12)
-        _ = c.drawCentredString(w / 2.0, 18, f"Page {page_no}")
-        _ = c.drawRightString(w - 24, 18, f"Updated: {datetime.now().strftime('%m/%d/%Y')}")
-
-    def finish_page():
-        nonlocal page_no
-        draw_page_no()
-        _ = c.showPage()
-        page_no += 1
-
-    def draw_header(header_title):
-        _ = c.setFillColorRGB(1, 1, 1)
-        left_logo = _pdf_logo_path(LOGO_CANDIDATE_CONNECT)
-        right_logo = _pdf_logo_path(LOGO_TPTC)
-        if left_logo:
-            try:
-                _ = c.drawImage(left_logo, 28, h-58, width=92, height=40, preserveAspectRatio=True, mask='auto')
-            except Exception:
-                pass
-        if right_logo:
-            try:
-                _ = c.drawImage(right_logo, w-122, h-58, width=94, height=40, preserveAspectRatio=True, mask='auto')
-            except Exception:
-                pass
-        _ = c.setFillColorRGB(0.50, 0.05, 0.12)
-        _ = c.setFont("Helvetica-Bold", 16)
-        _ = c.drawString(132, h-42, str(header_title)[:56])
-        _ = c.setStrokeColorRGB(0.78, 0.78, 0.78)
-        _ = c.line(28, h-66, w-28, h-66)
-        return h - 84
-
-    def draw_table_header(y):
-        _ = c.setFillColorRGB(0.56, 0.06, 0.13)
-        _ = c.roundRect(mar_l, y-12, usable_w, 14, 3, fill=1, stroke=0)
-        _ = c.setFillColorRGB(1, 1, 1)
-        _ = c.setFont("Helvetica-Bold", 7.0)
-        if call_mode:
-            for txt, x in [("Full Name", 34), ("Phone", 222), ("Party", 398), ("Sex", 426), ("Age", 452), ("Precinct", 478)]:
-                _ = c.drawString(x, y-8, txt)
-        else:
-            for txt, x in [("House", 34), ("Full Name", 76), ("Phone", 226), ("Party", 362), ("Sex", 388), ("Age", 412)]:
-                _ = c.drawString(x, y-8, txt)
-            for label, x in [("F", 438), ("A", 462), ("U", 486), ("NH", 510), ("YS", 538), ("MB", 566)]:
-                _ = c.drawCentredString(x, y-8, label)
-        return y - 24
-
-    def draw_street_bar(street, y):
-        # Bar occupies y-12 through y+2. Return a row top safely below it.
-        _ = c.setFillColorRGB(0.56, 0.06, 0.13)
-        _ = c.roundRect(mar_l, y-12, usable_w, 14, 3, fill=1, stroke=0)
-        _ = c.setFillColorRGB(1, 1, 1)
-        _ = c.setFont("Helvetica-Bold", 7.6)
-        _ = c.drawString(mar_l+5, y-8, str(street)[:78])
-        return y - 28
-
-    def new_detail_page(precinct, cont=False, bookmark=False):
-        if bookmark:
-            try:
-                name = "pct_" + re.sub(r"[^A-Za-z0-9]+", "_", precinct)[:60]
-                _ = c.bookmarkPage(name)
-                _ = c.addOutlineEntry(smart_title(precinct)[:80], name, level=1, closed=False)
-            except Exception:
-                pass
-        heading = f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}"
-        yy = draw_header(heading)
-        yy = draw_table_header(yy)
-        return yy
-
-    # Cover page.
-    try:
-        _ = c.bookmarkPage("cover")
-        _ = c.addOutlineEntry(title, "cover", level=0, closed=False)
-    except Exception:
-        pass
-    y = draw_header(title)
-    _ = c.setFont("Helvetica-Bold", 20)
-    _ = c.setFillColorRGB(0.50, 0.05, 0.12)
-    _ = c.drawString(40, y-8, title)
-    _ = c.setFont("Helvetica-Bold", 11)
-    _ = c.setFillColorRGB(0.15, 0.15, 0.15)
-    _ = c.drawString(40, y-32, datetime.now().strftime("%m/%d/%Y"))
-    hh_key = (df.get("County", "").astype(str).str.upper()+"|"+df.get("Municipality", "").astype(str).str.upper()+"|"+df.get("House Number", "").astype(str).str.upper()+"|"+df.get("Street Name", "").astype(str).str.upper()+"|"+df.get("Apartment Number", "").astype(str).str.upper())
-    households = int(hh_key.nunique()) if len(df) else 0
-    _ = c.setFont("Helvetica-Bold", 13)
-    _ = c.drawString(40, y-62, f"Individuals: {len(df):,}   Households: {households:,}")
-    _ = c.setFont("Helvetica-Bold", 11)
-    _ = c.drawString(40, y-98, "Selected Voters")
-    _ = c.setFont("Helvetica", 9)
-    yy = y-116
-    lines = _selected_filter_lines(active)
-    if lines:
-        for line in lines:
-            _ = c.drawString(54, yy, u"• " + line[:88])
-            yy -= 15
-    else:
-        _ = c.drawString(54, yy, u"• All active selected voters")
-        yy -= 15
-    yy -= 18
-    _ = c.setFillColorRGB(0.50, 0.05, 0.12)
-    _ = c.setFont("Helvetica-Bold", 11)
-    _ = c.drawString(40, yy, "Legend")
-    yy -= 15
-    _ = c.setFillColorRGB(0.15, 0.15, 0.15)
-    _ = c.setFont("Helvetica", 8.5)
-    for line in [
-        "Phone labels: (m) mobile, (l) landline, (u) applicant/unknown.",
-        "Contact boxes: F = Favorable, A = Against, U = Undecided, NH = Not Home, YS = Yard Sign.",
-        "MB prints Y when the voter is a permanent mail ballot voter.",
-    ]:
-        _ = c.drawString(54, yy, u"• " + line)
-        yy -= 13
-    finish_page()
-
-    # Precinct summary.
-    try:
-        _ = c.bookmarkPage("precinct_summary")
-        _ = c.addOutlineEntry("Precinct Counts Summary", "precinct_summary", level=0, closed=False)
-    except Exception:
-        pass
-    summary = df.groupby("_precinct", dropna=False).size().reset_index(name="Individuals")
-    hh_sum = pd.DataFrame({"_precinct": df["_precinct"], "HH": hh_key}).groupby("_precinct")["HH"].nunique().reset_index(name="Households")
-    summary = summary.merge(hh_sum, on="_precinct", how="left").sort_values("_precinct", kind="stable")
-    y = draw_header("Precinct Counts Summary")
-    y = draw_street_bar("Precinct Counts Summary", y)
-    _ = c.setFont("Helvetica-Bold", 8.5)
-    _ = c.setFillColorRGB(0.05,0.05,0.05)
-    _ = c.drawString(42,y,"Precinct")
-    _ = c.drawRightString(420,y,"Individuals")
-    _ = c.drawRightString(510,y,"Households")
-    y -= 13
-    _ = c.setFont("Helvetica", 8.2)
-    for _, rr in summary.iterrows():
-        if y < 44:
-            finish_page()
-            y = draw_header("Precinct Counts Summary")
-            y = draw_street_bar("Precinct Counts Summary", y)
-            _ = c.setFont("Helvetica-Bold", 8.5)
-            _ = c.drawString(42,y,"Precinct")
-            _ = c.drawRightString(420,y,"Individuals")
-            _ = c.drawRightString(510,y,"Households")
-            y -= 13
-            _ = c.setFont("Helvetica", 8.2)
-        _ = c.drawString(42,y, smart_title(rr.get("_precinct", ""))[:56])
-        _ = c.drawRightString(420,y, f"{int(rr.get('Individuals',0)):,}")
-        _ = c.drawRightString(510,y, f"{int(rr.get('Households',0) or 0):,}")
-        y -= 12
-    _ = c.setFont("Helvetica-Bold",8.5)
-    _ = c.drawString(42,y,"TOTAL")
-    _ = c.drawRightString(420,y,f"{len(df):,}")
-    _ = c.drawRightString(510,y,f"{households:,}")
-    finish_page()
-
-    current_precinct = None
-    current_street = None
-    seen_precincts = set()
-    y = None
-    row_count = 0
-    for _, r in df.iterrows():
-        precinct = cc_text(r.get("_precinct", "")) or "Unassigned"
-        street = smart_title(r.get("_street", "")) or "Unknown Street"
-        house_raw = cc_text(r.get("House Number", ""))
-        m_house = re.search(r"\d+", house_raw)
-        house = m_house.group(0) if m_house else house_raw[:8]
-        apt_raw = cc_text(r.get("Apartment Number", ""))
-        apt = ""
-        if re.fullmatch(r"(?i)(?:apt|unit|ste|suite|#)?\s*[A-Z0-9-]{1,8}", apt_raw or "") and not re.search(r"(?i)\b(?:dr|rd|st|ave|ln|ct|cir|blvd|way|road|street|drive|lane)\b", apt_raw or ""):
-            apt = re.sub(r"(?i)^(apt|unit|ste|suite)\s+", "", apt_raw).strip()
-        house_text = (house + (f" Apt {apt}" if apt else "")).strip()
-
-        new_precinct = precinct != current_precinct
-        if y is None or new_precinct or y < 56:
-            if y is not None:
-                finish_page()
-            y = new_detail_page(precinct, cont=False, bookmark=(precinct not in seen_precincts))
-            seen_precincts.add(precinct)
-            current_precinct = precinct
-            current_street = None
-        if not call_mode and street != current_street:
-            if y < 82:
-                finish_page()
-                y = new_detail_page(precinct, cont=True, bookmark=False)
-            y = draw_street_bar(street, y)
-            current_street = street
-
-        phone_lines = [f"{num} ({typ})" for num, typ in phone_entries(r)]
-        row_h = 28 if (not call_mode and len(phone_lines) > 1) else 18
-        if y - row_h < 34:
-            finish_page()
-            y = new_detail_page(precinct, cont=True, bookmark=False)
-            if not call_mode:
-                y = draw_street_bar(street, y)
-        # shaded row behind the text, aligned with this row only.
-        if row_count % 2 == 0:
-            _ = c.setFillColorRGB(0.965, 0.86, 0.88)
-        else:
-            _ = c.setFillColorRGB(1,1,1)
-        _ = c.rect(mar_l+6, y-row_h+4, usable_w-12, row_h, fill=1, stroke=0)
-        _ = c.setFillColorRGB(0.08,0.08,0.08)
-        baseline = y - 10
-        if call_mode:
-            _ = c.setFont("Helvetica", 6.7)
-            _ = c.drawString(34, baseline, smart_title(r.get("_name", ""))[:42])
-            _ = c.drawString(222, baseline, cc_text(r.get("_phone", ""))[:38])
-            _ = c.drawString(400, baseline, cc_text(r.get("Party", ""))[:1])
-            _ = c.drawString(428, baseline, cc_text(r.get("Gender", ""))[:1])
-            _ = c.drawRightString(466, baseline, cc_text(r.get("Age", ""))[:3])
-            _ = c.drawString(478, baseline, smart_title(precinct)[:22])
-        else:
-            _ = c.setFont("Helvetica-Bold", 6.5)
-            if len(house_text) > 11:
-                _ = c.setFont("Helvetica-Bold", 5.6)
-            _ = c.drawString(34, baseline, house_text[:14])
-            _ = c.setFont("Helvetica", 6.4)
-            _ = c.drawString(76, baseline, smart_title(r.get("_name", ""))[:34])
-            _ = c.setFont("Helvetica", 6.3)
-            if len(phone_lines) > 1:
-                _ = c.drawString(226, baseline+5, phone_lines[0][:28])
-                _ = c.drawString(226, baseline-4, phone_lines[1][:28])
-            elif phone_lines:
-                _ = c.drawString(226, baseline, phone_lines[0][:28])
-            _ = c.drawString(364, baseline, cc_text(r.get("Party", ""))[:1])
-            _ = c.drawString(390, baseline, cc_text(r.get("Gender", ""))[:1])
-            _ = c.drawRightString(426, baseline, cc_text(r.get("Age", ""))[:3])
-            for x in [438, 462, 486, 510, 538]:
-                _ = c.rect(x-3, baseline-2, 6, 6, fill=0, stroke=1)
-            mb_val = str(r.get("MB_PERM", "") or r.get("MB_Perm", "") or r.get("Permanent MB", "")).strip().upper()
-            if mb_val in {"Y", "YES", "1", "TRUE"}:
-                _ = c.setFont("Helvetica-Bold", 7.0)
-                _ = c.drawCentredString(566, baseline, "Y")
-        y -= row_h + 4
-        row_count += 1
-
-    draw_page_no()
-    _ = c.save()
-    bio.seek(0)
-    return bio.getvalue()
-
-def street_list_pdf(active):
-    return _build_street_pdf(active, call_mode=False)
-
-def call_list_pdf(active):
-    return _build_street_pdf(active, call_mode=True)
-
-def summary_pdf(active):
-    summary, mode, err = update_counts(active)
-    rows = [["Total", summary.get("total",0)], ["Republican", summary.get("r",0)], ["Democrat", summary.get("d",0)], ["Other", summary.get("o",0)]] if summary else [["Unavailable", err or ""]]
-    return make_simple_pdf("Candidate Connect Summary Report", rows, ["Metric", "Value"])
-
-def labels_pdf(active):
-    df = safe_filtered_df(active, 3000)
-    if canvas is None: return b"PDF support unavailable."
-    bio = io.BytesIO(); c = canvas.Canvas(bio, pagesize=letter); w,h = letter
-    c.setFont("Helvetica-Bold", 8); c.drawString(36, h-24, "Avery 5160 / 8160 compatible — 30 labels per sheet. This note is in the top margin and should not overlap labels.")
-    left, top = 0.1875*inch, h-0.5*inch; label_w, label_h = 2.625*inch, 1.0*inch; gap_x=0.125*inch
-    xs=[left,left+label_w+gap_x,left+2*(label_w+gap_x)]; idx=0
-    c.setFont("Helvetica", 8)
-    for _,r in df.iterrows():
-        name=full_name(r); addr=address_line(r); city=cc_text(r.get("City","")) or cc_text(r.get("res_city","")); state=cc_text(r.get("State","")) or cc_text(r.get("res_state","")) or "PA"; z=cc_text(r.get("Zip","")) or cc_text(r.get("res_zip",""))
-        if not name or not addr: continue
-        pos=idx%30
-        if idx and pos==0: c.showPage(); c.setFont("Helvetica",8)
-        col=pos%3; row=pos//3; x=xs[col]+0.10*inch; y=top-row*label_h-0.28*inch
-        c.drawString(x,y,name[:34]); c.drawString(x,y-11,addr[:34]); c.drawString(x,y-22,f"{city}, {state} {z}"[:34]); idx+=1
-    c.save(); bio.seek(0); return bio.getvalue()
-
-def render_enhanced_home():
-    render_statewide_snapshot()
 
 def render_voter_lookup_workspace():
     st.markdown("## Voter Lookup")
@@ -3440,13 +2946,18 @@ def render_voter_lookup_workspace():
         <style>
         div[data-testid="stButton"] > button[kind="primary"],
         div[data-testid="stButton"] > button[kind="secondary"] {
-            white-space: normal !important;
+            white-space: pre-line !important;
             height: auto !important;
             min-height: 58px !important;
             text-align: left !important;
             justify-content: flex-start !important;
             line-height: 1.15 !important;
             padding: 8px 10px !important;
+        }
+        div[data-testid="stButton"] button p {
+            white-space: pre-line !important;
+            text-align: left !important;
+            line-height: 1.2 !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -3495,11 +3006,12 @@ def render_voter_lookup_workspace():
 
         st.markdown(f"## {smart_title(full_name(r))}")
         st.write(smart_title(address_line(r)))
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Party", cc_text(r.get("Party", "")) or "—")
         m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
         m3.metric("Age", cc_text(r.get("Age", "")) or "—")
-        m4.metric("PA ID", selected_id or "—")
+        m4.metric("DOB", cc_text(r.get("DOB", "")) or "—")
+        m5.metric("PA ID", selected_id or "—")
         pdf_key = f"voter_pdf_bytes_{selected_id}"
         pdf_name_key = f"voter_pdf_name_{selected_id}"
         pc1, pc2 = st.columns([0.35, 1.65])
@@ -3597,6 +3109,9 @@ def render_voter_lookup_workspace():
                 if st.button("Save Voter Correction", type="primary", key=f"save_corr_{selected_id}"):
                     correction_store()[selected_id] = {"updated_at": datetime.now().isoformat(timespec="seconds"), "fields": edits, "notes": notes}
                     persist_corrections()
+                    current = dict(st.session_state.get(detail_key, {}) or {})
+                    current.update(edits)
+                    st.session_state[detail_key] = current
                     st.success("Correction saved in DEV state and is available for correction CSV download.")
                     st.rerun()
             with cb:
@@ -3624,15 +3139,29 @@ def render_voter_lookup_workspace():
         if st.session_state.get(hh_key):
             hh = pd.DataFrame(st.session_state.get(hh_key) or [])
             if not hh.empty:
-                view = hh[[c for c in ["voter_id", "FullName", "Party", "Gender", "Age"] if c in hh.columns]].copy()
+                view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "Party", "Gender", "Age"] if c in hh.columns]].copy()
                 rebuilt_names = hh.apply(full_name, axis=1).map(smart_title)
-                if "FullName" not in view.columns:
-                    view["FullName"] = rebuilt_names
-                else:
-                    view["FullName"] = view["FullName"].where(view["FullName"].astype(str).str.strip().ne(""), rebuilt_names)
-                view["FullName"] = view["FullName"].replace({"": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
+                view["FullName"] = rebuilt_names.replace({"Unnamed Voter": "Unnamed Voter", "Unnamed voter": "Unnamed Voter"})
                 view.insert(0, "Current", view.get("voter_id", "").astype(str).eq(str(selected_id)).map(lambda x: "✓" if x else ""))
-                st.dataframe(view, hide_index=True, width="stretch")
+                display_cols = [c for c in ["Current", "voter_id", "FullName", "Party", "Gender", "Age"] if c in view.columns]
+                st.dataframe(view[display_cols], hide_index=True, width="stretch")
+                st.caption("Open another household member:")
+                for j, hhrow in view.iterrows():
+                    hvid = cc_text(hhrow.get("voter_id", ""))
+                    hname = smart_title(cc_text(hhrow.get("FullName", ""))) or hvid
+                    if not hvid or hvid == selected_id:
+                        continue
+                    if st.button(f"Open {hname}", key=f"open_household_{selected_id}_{hvid}"):
+                        st.session_state["lookup_selected_id"] = hvid
+                        try:
+                            hd = remote_voter_lookup_detail(hvid)
+                            st.session_state[f"lookup_detail_row_{hvid}"] = pd.DataFrame([hd]).iloc[0].to_dict()
+                        except Exception:
+                            pass
+                        for k in list(st.session_state.keys()):
+                            if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
+                                st.session_state.pop(k, None)
+                        st.rerun()
             else:
                 st.caption("No household members found from the selected address.")
         else:
@@ -3957,7 +3486,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zi — street list stable + fast index voter lookup + vote history")
+    st.caption("DEV final hybrid v21zj — street list stable + sharded fast voter lookup")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
