@@ -2844,6 +2844,56 @@ def _draw_branded_header(c, title: str, subtitle: str = ""):
     c.setFillColorRGB(0,0,0)
     return h - 70
 
+
+def _history_payload(row: pd.Series, limit: int | None = None):
+    """Return (general, primary) election history tuples for PDF: (column, short label, party, method)."""
+    row = row if isinstance(row, pd.Series) else pd.Series(row or {})
+    try:
+        cols = election_columns_from_manifest()
+    except Exception:
+        cols = []
+    if not cols:
+        cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
+    general_cols = sorted([c for c in cols if str(c).upper().startswith("G")], reverse=True)
+    primary_cols = sorted([c for c in cols if str(c).upper().startswith("P")], reverse=True)
+
+    def method_for(col):
+        raw = row.get(col, "")
+        method = normalize_vote_method(raw)
+        if not method and not _blank_vote_value(raw):
+            if cc_text(raw).upper() in {"R","D","O","I","NP","REP","DEM","REPUBLICAN","DEMOCRAT","DEMOCRATIC"}:
+                method = "At Poll"
+        return method
+
+    def party_for(col):
+        raw = cc_text(row.get(col, "")).upper()
+        if raw in {"R","D"}:
+            return raw
+        if raw in {"REP","REPUBLICAN"}:
+            return "R"
+        if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
+            return "D"
+        if not _blank_vote_value(raw) and normalize_vote_method(raw):
+            pty = cc_text(row.get("Party", "")).upper()
+            if pty in {"R", "D"}:
+                return pty
+            if pty in {"REP", "REPUBLICAN"}:
+                return "R"
+            if pty in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
+                return "D"
+        return ""
+
+    def build(cols):
+        out = []
+        if limit is not None:
+            cols = cols[:int(limit)]
+        for col in cols:
+            short = str(col).split("_")[0].upper()
+            out.append((str(col), short, party_for(col), method_for(col)))
+        return out
+
+    return build(general_cols), build(primary_cols)
+
 def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
     """Branded voter lookup report with full available vote history."""
     if canvas is None:
