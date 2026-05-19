@@ -2402,11 +2402,11 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name", "Voter First Name", "VoterFirstName", "Registrant First Name", "Given", "Given_Name"],
-        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "Voter Middle Name", "VoterMiddleName", "Registrant Middle Name"],
-        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name", "Voter Last Name", "VoterLastName", "Registrant Last Name", "Surname"],
-        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
-        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter Full Name", "VoterFullName", "Registrant Name", "RegistrantName"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "FNAME", "first", "FIRST", "GivenName", "Given Name", "Given_Name", "NameFirst", "Name First", "NAMEFIRST", "NAME_FIRST", "name_first", "Voter First Name", "VoterFirstName", "Voter_First_Name", "Registrant First Name", "RegistrantFirstName", "Registrant_First_Name", "Given", "Given_Name", "FirstNm", "First_Nm"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "NameMiddle", "Name Middle", "NAME_MIDDLE", "name_middle", "Voter Middle Name", "VoterMiddleName", "Voter_Middle_Name", "Registrant Middle Name", "RegistrantMiddleName", "Registrant_Middle_Name", "MiddleNm", "Middle_Nm"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "LNAME", "last", "LAST", "FamilyName", "Family Name", "NameLast", "Name Last", "NAMELAST", "NAME_LAST", "name_last", "Voter Last Name", "VoterLastName", "Voter_Last_Name", "Registrant Last Name", "RegistrantLastName", "Registrant_Last_Name", "Surname", "LastNm", "Last_Nm"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName", "NameSuffixCode", "Name Suffix Code", "Suffix_Code"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter_Name", "Voter Full Name", "VoterFullName", "Voter_Full_Name", "Registrant Name", "RegistrantName", "Registrant_Name", "DisplayName", "Display Name"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
         "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
@@ -2482,11 +2482,11 @@ def source_alias_candidates():
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
         "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
-        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "first", "FIRST", "GivenName", "Given Name", "Voter First Name", "VoterFirstName", "Registrant First Name", "Given", "Given_Name"],
-        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "Voter Middle Name", "VoterMiddleName", "Registrant Middle Name"],
-        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "last", "LAST", "FamilyName", "Family Name", "Voter Last Name", "VoterLastName", "Registrant Last Name", "Surname"],
-        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName"],
-        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter Full Name", "VoterFullName", "Registrant Name", "RegistrantName"],
+        "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "FNAME", "first", "FIRST", "GivenName", "Given Name", "Given_Name", "NameFirst", "Name First", "NAMEFIRST", "NAME_FIRST", "name_first", "Voter First Name", "VoterFirstName", "Voter_First_Name", "Registrant First Name", "RegistrantFirstName", "Registrant_First_Name", "Given", "Given_Name", "FirstNm", "First_Nm"],
+        "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "NameMiddle", "Name Middle", "NAME_MIDDLE", "name_middle", "Voter Middle Name", "VoterMiddleName", "Voter_Middle_Name", "Registrant Middle Name", "RegistrantMiddleName", "Registrant_Middle_Name", "MiddleNm", "Middle_Nm"],
+        "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "LNAME", "last", "LAST", "FamilyName", "Family Name", "NameLast", "Name Last", "NAMELAST", "NAME_LAST", "name_last", "Voter Last Name", "VoterLastName", "Voter_Last_Name", "Registrant Last Name", "RegistrantLastName", "Registrant_Last_Name", "Surname", "LastNm", "Last_Nm"],
+        "NameSuffix": ["NameSuffix", "Name Suffix", "Name_Suffix", "NAMESUFFIX", "suffix", "Suffix", "surnsuffix", "SurnSuffix", "SuffixName", "NameSuffixCode", "Name Suffix Code", "Suffix_Code"],
+        "FullName": ["FullName", "Full Name", "Full_Name", "FULLNAME", "Name", "name", "VoterName", "Voter Name", "Voter_Name", "Voter Full Name", "VoterFullName", "Voter_Full_Name", "Registrant Name", "RegistrantName", "Registrant_Name", "DisplayName", "Display Name"],
         "Party": ["Party", "party", "party_raw", "PartyCode", "RegisteredParty"],
         "Gender": ["Gender", "gender", "Sex", "sex"],
         "DOB": ["DOB", "DateOfBirth", "Date of Birth", "Date_of_Birth", "DATEOFBIRTH", "BirthDate", "Birth Date", "birth_date", "dob"],
@@ -2763,7 +2763,8 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
         if "FullName" not in df.columns:
             df["FullName"] = built_full
         else:
-            df["FullName"] = df["FullName"].where(df["FullName"].astype(str).str.strip().ne(""), built_full)
+            bad_full = df["FullName"].astype(str).str.strip().eq("") | df["FullName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null", "household voter"]) | df["FullName"].astype(str).str.lower().str.startswith("voter ")
+            df.loc[bad_full, "FullName"] = built_full.loc[bad_full]
         if "Precinct" in df.columns:
             muni = df["Municipality"] if "Municipality" in df.columns else pd.Series([""]*len(df), index=df.index)
             df["Precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df["Precinct"], muni)]
@@ -2823,6 +2824,21 @@ def remote_voter_search_exact_by_id(voter_id: str) -> pd.Series:
         return df.iloc[0]
     finally:
         con.close()
+
+
+def _draw_branded_header(c, title: str, subtitle: str = ""):
+    """Simple branded PDF header. Keeps PDF generation from depending on app-only helpers."""
+    w, h = landscape(letter)
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.roundRect(28, h - 54, w - 56, 32, 6, stroke=0, fill=1)
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 15)
+    c.drawString(42, h - 43, title)
+    if subtitle:
+        c.setFont("Helvetica", 8)
+        c.drawRightString(w - 42, h - 42, str(subtitle)[:60])
+    c.setFillColorRGB(0,0,0)
+    return h - 70
 
 def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
     """Branded voter lookup report with full available vote history."""
