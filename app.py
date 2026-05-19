@@ -4340,52 +4340,192 @@ def _area_bar_html(df: pd.DataFrame, title: str, max_rows: int = 8) -> str:
     return f'<div class="cc-home-card"><h3>{title}</h3>' + ''.join(rows) + '</div>'
 
 
+
+def _area_election_code(col: str) -> str:
+    return str(col).split("_")[0].upper()
+
+
+def _area_election_label_from_code(code: str) -> str:
+    code = str(code or "").upper()
+    m = re.match(r"^([GP])(\d{2})", code)
+    if not m:
+        return code
+    year = 2000 + int(m.group(2))
+    typ = "General" if m.group(1) == "G" else "Primary"
+    return f"{year} {typ}"
+
+
+def _area_election_sort_key(code: str):
+    code = str(code or "").upper()
+    m = re.match(r"^([GP])(\d{2})", code)
+    if not m:
+        return (0, 0)
+    year = 2000 + int(m.group(2))
+    # General before Primary within same year for readability.
+    typ_order = 2 if m.group(1) == "G" else 1
+    return (year, typ_order)
+
+
+def _area_voted_sql_for_cols(cols: list[str]) -> str:
+    checks = []
+    for c in cols:
+        expr = f"UPPER(TRIM(CAST({sql_ident(c)} AS VARCHAR)))"
+        checks.append(f"({expr} NOT IN ('', 'NAN', 'NONE', 'NULL', '0', 'N', 'NO', 'FALSE', 'DID NOT VOTE', 'DNV'))")
+    return "(" + " OR ".join(checks) + ")" if checks else "FALSE"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 14) -> pd.DataFrame:
+    """Historical turnout by current party for Primary + General elections only.
+
+    Uses index shards and ORs duplicate raw columns into one displayed election code,
+    so the report does not repeat G25/P25 if the source has date-specific variants.
+    """
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    cols = selected_election_columns(types=["General", "Primary"])
+    groups = {}
+    for c in cols:
+        code = _area_election_code(c)
+        if not re.match(r"^[GP]\d{2}$", code):
+            continue
+        groups.setdefault(code, []).append(c)
+    codes = sorted(groups.keys(), key=_area_election_sort_key, reverse=True)[:int(limit)]
+    if not codes:
+        return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+
+    urls = index_urls_from_manifest()
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    where = index_where_sql(active, special)
+    selects = []
+    for code in codes:
+        voted = _area_voted_sql_for_cols(groups[code])
+        selects.append(f"""
+        SELECT {sql_lit(_area_election_label_from_code(code))} AS Election,
+               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) = 'R' THEN 1 ELSE 0 END) AS R,
+               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) = 'D' THEN 1 ELSE 0 END) AS D,
+               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) NOT IN ('R','D') THEN 1 ELSE 0 END) AS O,
+               SUM(CASE WHEN {voted} THEN 1 ELSE 0 END) AS Total
+        FROM read_parquet({url_list}, union_by_name=true)
+        {where}
+        """)
+    q = " UNION ALL ".join(selects)
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        df = con.execute(q).df()
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+        for c in ["R","D","O","Total"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        return df[df["Total"] > 0].reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
+
 def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str], tables: dict[str, pd.DataFrame], breakdown_field: str) -> bytes:
-    """Professional report PDF for Area Intelligence. Built as a real report, not a screenshot."""
+    """Client-ready Area Intelligence PDF with branding, charts, turnout, and strategy pages."""
     bio = io.BytesIO()
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter, landscape
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+        from reportlab.graphics.shapes import Drawing, String
+        from reportlab.graphics.charts.piecharts import Pie
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
     except Exception:
         return b""
 
-    doc = SimpleDocTemplate(bio, pagesize=landscape(letter), rightMargin=0.35*inch, leftMargin=0.35*inch, topMargin=0.35*inch, bottomMargin=0.35*inch)
+    PAGE = landscape(letter)
+    doc = SimpleDocTemplate(
+        bio, pagesize=PAGE,
+        rightMargin=0.42*inch, leftMargin=0.42*inch,
+        topMargin=0.38*inch, bottomMargin=0.34*inch,
+    )
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="CC_Title", parent=styles["Title"], fontSize=26, leading=30, textColor=colors.HexColor("#111827"), spaceAfter=12))
-    styles.add(ParagraphStyle(name="CC_H", parent=styles["Heading2"], fontSize=14, leading=16, textColor=colors.HexColor("#9f151c"), spaceBefore=8, spaceAfter=6))
-    styles.add(ParagraphStyle(name="CC_Body", parent=styles["BodyText"], fontSize=9, leading=12))
-    story = []
-    story.append(Paragraph("Candidate Connect Area Intelligence Report", styles["CC_Title"]))
-    story.append(Paragraph(f"<b>Universe:</b> {title}", styles["CC_Body"]))
-    story.append(Paragraph(f"<b>Report date:</b> {datetime.now().strftime('%m/%d/%Y')}", styles["CC_Body"]))
-    story.append(Spacer(1, 0.15*inch))
-    cards = [["Total Voters", "Republican", "Democrat", "Other / Unaffiliated"], [f"{summary.get('total',0):,}", f"{summary.get('r',0):,}", f"{summary.get('d',0):,}", f"{summary.get('o',0):,}"]]
-    t = Table(cards, colWidths=[2.35*inch]*4)
-    t.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#9f151c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#d1d5db')),('FONTSIZE',(0,0),(-1,-1),11),('BOTTOMPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),8)
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 0.15*inch))
-    story.append(Paragraph("Executive Strategy Summary", styles["CC_H"]))
-    for ins in insights:
-        story.append(Paragraph(f"• {ins}", styles["CC_Body"]))
-    story.append(Spacer(1, 0.1*inch))
+    styles.add(ParagraphStyle(name="CC_Title", fontName="Helvetica-Bold", fontSize=28, leading=34, textColor=colors.HexColor("#111827"), alignment=1))
+    styles.add(ParagraphStyle(name="CC_Subtitle", fontName="Helvetica", fontSize=13, leading=18, textColor=colors.HexColor("#374151"), alignment=1))
+    styles.add(ParagraphStyle(name="CC_H", fontName="Helvetica-Bold", fontSize=17, leading=22, textColor=colors.HexColor("#111827"), spaceBefore=8, spaceAfter=6))
+    styles.add(ParagraphStyle(name="CC_H2", fontName="Helvetica-Bold", fontSize=12, leading=15, textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=4))
+    styles.add(ParagraphStyle(name="CC_Body", fontName="Helvetica", fontSize=9.5, leading=13, textColor=colors.HexColor("#374151")))
+    styles.add(ParagraphStyle(name="CC_Small", fontName="Helvetica", fontSize=7.8, leading=10, textColor=colors.HexColor("#4b5563")))
 
-    def add_df(title_s, df, max_rows=16):
+    red = colors.HexColor("#9f151c")
+    blue = colors.HexColor("#1d4ed8")
+    green = colors.HexColor("#4c9a2a")
+    gold = colors.HexColor("#f2b84b")
+    dark = colors.HexColor("#111827")
+    light = colors.HexColor("#f3f4f6")
+
+    story = []
+
+    def safe_img(path, width=None, height=None):
+        try:
+            if path and file_exists(path):
+                img = Image(path)
+                if width:
+                    img.drawWidth = width
+                if height:
+                    img.drawHeight = height
+                # preserve if only width supplied
+                if width and not height:
+                    ratio = img.imageHeight / float(img.imageWidth or 1)
+                    img.drawHeight = width * ratio
+                return img
+        except Exception:
+            return Paragraph("", styles["CC_Body"])
+        return Paragraph("", styles["CC_Body"])
+
+    # ---------------- Cover page ----------------
+    logo_left = safe_img(LOGO_CANDIDATE_CONNECT, width=2.2*inch)
+    logo_right = safe_img(LOGO_TPTC, width=1.8*inch)
+    hdr = Table([[logo_left, "", logo_right]], colWidths=[2.6*inch, 5.2*inch, 2.6*inch])
+    hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'), ('ALIGN',(2,0),(2,0),'RIGHT')]))
+    story.append(hdr)
+    story.append(Spacer(1, 0.6*inch))
+    story.append(Paragraph("Area Intelligence Report", styles["CC_Title"]))
+    story.append(Spacer(1, 0.18*inch))
+    story.append(Paragraph(cc_text(title), styles["CC_Subtitle"]))
+    story.append(Spacer(1, 0.12*inch))
+    story.append(Paragraph("Candidate Connect Voter Data & Engagement Platform", styles["CC_Subtitle"]))
+    story.append(Spacer(1, 0.24*inch))
+    date_s = datetime.now().strftime('%B %d, %Y')
+    story.append(Paragraph(f"Prepared {date_s}", styles["CC_Subtitle"]))
+    story.append(Spacer(1, 0.42*inch))
+    card_data = [["Total Voters", "Republican", "Democrat", "Other / Unaffiliated"],
+                 [f"{int(summary.get('total',0) or 0):,}", f"{int(summary.get('r',0) or 0):,}", f"{int(summary.get('d',0) or 0):,}", f"{int(summary.get('o',0) or 0):,}"]]
+    cards = Table(card_data, colWidths=[2.35*inch]*4)
+    cards.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0),red),('TEXTCOLOR',(0,0),(-1,0),colors.white),
+        ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('FONTSIZE',(0,0),(-1,0),10),('FONTSIZE',(0,1),(-1,1),18),
+        ('GRID',(0,0),(-1,-1),0.45,colors.HexColor('#d1d5db')),
+        ('TOPPADDING',(0,0),(-1,-1),10),('BOTTOMPADDING',(0,0),(-1,-1),10),
+    ]))
+    story.append(cards)
+    story.append(Spacer(1, 0.55*inch))
+    story.append(Paragraph("Prepared for strategic planning, field targeting, direct voter contact, mail-ballot operations, and campaign resource allocation.", styles["CC_Subtitle"]))
+    story.append(PageBreak())
+
+    # Helpers
+    def as_table_df(df, max_rows=20, max_cols=10):
         if df is None or df.empty:
-            return
-        story.append(Paragraph(title_s, styles["CC_H"]))
+            return None
         show = df.head(max_rows).copy()
-        # keep readable width
-        if len(show.columns) > 10:
-            keep = list(show.columns[:10])
-            show = show[keep]
+        if len(show.columns) > max_cols:
+            show = show[list(show.columns[:max_cols])]
         data = [list(show.columns)]
         for _, row in show.iterrows():
-            vals=[]
+            vals = []
             for c in show.columns:
                 v = row[c]
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -4393,21 +4533,156 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
                 else:
                     vals.append(str(v))
             data.append(vals)
-        colw = [max(0.75*inch, min(1.65*inch, 9.7*inch/len(data[0])))] * len(data[0])
+        colw = [max(0.68*inch, min(1.55*inch, 9.9*inch/len(data[0])))] * len(data[0])
         tbl = Table(data, repeatRows=1, colWidths=colw)
         tbl.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#111827')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),7),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, colors.HexColor('#f3f4f6')]),('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4)
+            ('BACKGROUND',(0,0),(-1,0),dark),('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),7.2),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, light]),('TOPPADDING',(0,0),(-1,-1),3.5),('BOTTOMPADDING',(0,0),(-1,-1),3.5),
         ]))
-        story.append(tbl)
-        story.append(Spacer(1, 0.1*inch))
+        return tbl
 
-    add_df("Core Profile: Party", tables.get("Party"), 8)
-    add_df("Core Profile: Age", tables.get("Age"), 10)
-    add_df("Core Profile: Vote History", tables.get("VoteHistory"), 8)
-    add_df("Core Profile: Mail Ballot", tables.get("MailBallot"), 8)
+    def section_header(txt):
+        return Table([[txt]], colWidths=[10.0*inch], style=TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),red),('TEXTCOLOR',(0,0),(-1,-1),colors.white),
+            ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,-1),13),
+            ('ALIGN',(0,0),(-1,-1),'LEFT'),('LEFTPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+        ]))
+
+    def pie_chart(df, title_s):
+        d = Drawing(250, 170)
+        d.add(String(10, 154, title_s, fontName='Helvetica-Bold', fontSize=11, fillColor=dark))
+        if df is None or df.empty:
+            return d
+        vals = [int(x) for x in pd.to_numeric(df["Voters"], errors="coerce").fillna(0).tolist()[:6]]
+        labs = [str(x) for x in df["Category"].tolist()[:6]]
+        if not any(vals):
+            return d
+        p = Pie(); p.x=15; p.y=15; p.width=125; p.height=125; p.data=vals; p.labels=[None]*len(vals)
+        palette = [red, blue, green, gold, colors.HexColor('#64748b'), colors.HexColor('#94a3b8')]
+        for i in range(len(vals)):
+            p.slices[i].fillColor = palette[i % len(palette)]
+        d.add(p)
+        total=sum(vals) or 1
+        y=124
+        for i,(lab,val) in enumerate(zip(labs,vals)):
+            d.add(String(155, y, f"{lab}: {val:,} ({val/total*100:.1f}%)", fontSize=7.5, fillColor=dark))
+            y -= 14
+        return d
+
+    def bar_chart(df, title_s):
+        d = Drawing(250, 170)
+        d.add(String(10, 154, title_s, fontName='Helvetica-Bold', fontSize=11, fillColor=dark))
+        if df is None or df.empty:
+            return d
+        show = df.head(7).copy()
+        vals = [int(x) for x in pd.to_numeric(show["Voters"], errors="coerce").fillna(0).tolist()]
+        labs = [str(x)[:8] for x in show["Category"].tolist()]
+        if not any(vals):
+            return d
+        bc = VerticalBarChart(); bc.x=28; bc.y=28; bc.height=100; bc.width=190; bc.data=[vals]
+        bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=max(vals)*1.15; bc.valueAxis.valueStep=max(1, int(max(vals)/4))
+        bc.categoryAxis.categoryNames=labs; bc.categoryAxis.labels.boxAnchor='ne'; bc.categoryAxis.labels.angle=35; bc.categoryAxis.labels.fontSize=6.5
+        bc.bars[0].fillColor = red
+        d.add(bc)
+        return d
+
+    # ---------------- Executive summary ----------------
+    story.append(section_header("Executive Strategy Summary"))
+    story.append(Spacer(1, 0.12*inch))
+    for ins in insights:
+        story.append(Paragraph(f"• {ins}", styles["CC_Body"]))
+    story.append(Spacer(1, 0.12*inch))
+    story.append(Paragraph("Recommended Strategic Posture", styles["CC_H2"]))
+    story.append(Paragraph("Use this profile to decide whether the campaign should prioritize persuasion, turnout, mail-ballot growth, or direct-contact density. For most local campaigns, the immediate value is identifying where reliable voters live, where reachable voters concentrate, and where the campaign can win through door-to-door and phone contact.", styles["CC_Body"]))
+    story.append(Spacer(1, 0.16*inch))
+
+    charts = Table([[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")],
+                    [bar_chart(tables.get("VoteHistory"), "General Vote History"), pie_chart(tables.get("MailBallot"), "Mail Ballot Behavior")]],
+                   colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.95*inch, 1.95*inch])
+    charts.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
+    story.append(charts)
     story.append(PageBreak())
-    add_df(f"Strategic Breakdown by {breakdown_field}", tables.get("Breakdown"), 30)
-    doc.build(story)
+
+    # ---------------- Profile tables ----------------
+    story.append(section_header("Universe Profile"))
+    story.append(Spacer(1, 0.10*inch))
+    top = []
+    for title_s, key in [("Party Composition", "Party"), ("Age Distribution", "Age"), ("General Vote History", "VoteHistory"), ("Mail Ballot Behavior", "MailBallot")]:
+        tbl = as_table_df(tables.get(key), max_rows=10, max_cols=3)
+        if tbl:
+            top.append([Paragraph(title_s, styles["CC_H2"]), tbl])
+    # two columns of mini tables
+    rows = []
+    for i in range(0, len(top), 2):
+        left = [top[i][0], top[i][1]]
+        right = [top[i+1][0], top[i+1][1]] if i+1 < len(top) else [Paragraph("", styles["CC_H2"]), Paragraph("", styles["CC_Body"])]
+        rows.append([left, right])
+    for row in rows:
+        story.append(Table(row, colWidths=[4.9*inch, 4.9*inch], style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP')])) )
+        story.append(Spacer(1,0.1*inch))
+
+    turnout_df = tables.get("Turnout")
+    if turnout_df is not None and not turnout_df.empty:
+        story.append(Spacer(1, 0.08*inch))
+        story.append(section_header("Historical Turnout by Current Party"))
+        story.append(Spacer(1, 0.08*inch))
+        story.append(Paragraph("Primary and general elections only. Party columns reflect the voter file's current party grouping at report time.", styles["CC_Small"]))
+        story.append(Spacer(1, 0.06*inch))
+        story.append(as_table_df(turnout_df, max_rows=14, max_cols=5))
+    story.append(PageBreak())
+
+    # ---------------- Strategic breakdown ----------------
+    breakdown_df = tables.get("Breakdown")
+    story.append(section_header(f"Strategic Breakdown by {breakdown_field}"))
+    story.append(Spacer(1, 0.10*inch))
+    if breakdown_df is not None and not breakdown_df.empty:
+        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12))
+    else:
+        story.append(Paragraph("No breakdown data available for this selection.", styles["CC_Body"]))
+    story.append(PageBreak())
+
+    # ---------------- Strategy page ----------------
+    story.append(section_header("Campaign Strategy Notes"))
+    story.append(Spacer(1, 0.12*inch))
+    r = int(summary.get('r',0) or 0); d = int(summary.get('d',0) or 0); o = int(summary.get('o',0) or 0); total = max(1, int(summary.get('total',0) or 0))
+    strengths = []
+    risks = []
+    actions = []
+    if max(r,d,o) == r and r/total >= 0.40:
+        strengths.append("Republican voters are a major share of the selected universe.")
+        actions.append("Build a turnout universe of reliable Republican voters and prioritize door/contact completion by geography.")
+    elif max(r,d,o) == d and d/total >= 0.40:
+        strengths.append("Democratic voters are a major share of the selected universe.")
+        actions.append("Identify persuasion and turnout pockets where direct contact can change the final margin.")
+    if o/total >= 0.15:
+        risks.append("Other/unaffiliated voters are large enough to influence the result if turnout is uneven.")
+        actions.append("Create a persuasion universe using vote history, age, contact availability, and geography concentration.")
+    try:
+        age65 = int(pd.to_numeric(tables.get("Age", pd.DataFrame()).loc[tables.get("Age", pd.DataFrame()).get("Category", pd.Series(dtype=str)).astype(str).str.contains("65", regex=False), "Voters"], errors="coerce").fillna(0).sum())
+        if age65/total >= 0.20:
+            strengths.append("The area has a sizable older electorate, which usually rewards repeated direct contact and clear voting instructions.")
+            actions.append("Use phone, mail, and volunteer follow-up to reinforce turnout among older high-propensity voters.")
+    except Exception:
+        pass
+    if not actions:
+        actions.append("Prioritize direct voter contact in the largest geography rows, then use vote history to separate turnout targets from persuasion targets.")
+    for label, items in [("Strengths", strengths or ["The selected universe is structured enough for geography-based field planning." ]), ("Risks", risks or ["No major structural warning appears from the available profile; continue testing turnout and contact assumptions." ]), ("Action Plan", actions[:5])]:
+        story.append(Paragraph(label, styles["CC_H"]))
+        for item in items:
+            story.append(Paragraph(f"• {item}", styles["CC_Body"]))
+        story.append(Spacer(1, 0.08*inch))
+
+    def _footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 7)
+        canvas.setFillColor(colors.HexColor('#6b7280'))
+        canvas.drawString(0.42*inch, 0.18*inch, "Candidate Connect Area Intelligence")
+        canvas.drawRightString(10.58*inch, 0.18*inch, f"Page {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     bio.seek(0)
     return bio.getvalue()
 
@@ -4460,6 +4735,11 @@ def render_area_intelligence_workspace():
     v4g_df = _area_group_df(active, "V4G", 8)
     mb_app_df = _area_group_df(active, "MB_App", 8)
     mb_status_df = _area_group_df(active, "MB_Status", 8)
+    turnout_df = _area_turnout_by_party(
+        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+        14,
+    )
     insights = _area_insights(summary, party_df, age_df, mb_app_df)
 
     st.markdown("### Executive Strategy Readout")
@@ -4517,6 +4797,8 @@ def render_area_intelligence_workspace():
             cc_table(age_df, height=260, key=special_key("area_tbl_age"))
             st.markdown("#### Vote History - General")
             cc_table(v4g_df, height=220, key=special_key("area_tbl_v4g"))
+            st.markdown("#### Historical Turnout by Party")
+            cc_table(turnout_df, height=300, key=special_key("area_tbl_turnout"))
             st.markdown("#### Ballot Status")
             cc_table(mb_status_df, height=220, key=special_key("area_tbl_mb_status"))
     with tabs[1]:
@@ -4535,6 +4817,7 @@ def render_area_intelligence_workspace():
                         "Age": age_df,
                         "VoteHistory": v4g_df,
                         "MailBallot": mb_status_df,
+                        "Turnout": turnout_df,
                         "Breakdown": breakdown_df,
                     },
                     DISPLAY_LABELS.get(breakdown, breakdown),
@@ -4838,7 +5121,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v21zs — current-universe handoff + mail ballot cleanup")
+    st.caption("DEV final hybrid v22i — area intelligence report upgrade")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
