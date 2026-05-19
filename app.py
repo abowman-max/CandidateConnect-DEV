@@ -1399,7 +1399,7 @@ def active_geo_filters() -> dict:
     return {k: v for k, v in active_filters().items() if k in GEO_FIELDS}
 
 def count_safe_filters(active: dict) -> dict:
-    # v21: after Step 8 v18 rebuild, Update Counts supports the full targeting count cube.
+    # v21: after Step 8 v18 rebuild, Save / Apply Current Universe supports the full targeting count cube.
     safe = set(GEO_FIELDS + [
         "Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party",
         "V4A", "V4G", "V4P",
@@ -3481,7 +3481,7 @@ def render_voter_lookup_workspace():
         st.warning("No voters found.")
         return
 
-    if "lookup_selected_id" not in st.session_state or st.session_state.get("lookup_selected_id") not in set(df.get("voter_id", pd.Series([], dtype=str)).astype(str)):
+    if "lookup_selected_id" not in st.session_state or not cc_text(st.session_state.get("lookup_selected_id", "")):
         st.session_state["lookup_selected_id"] = cc_text(df.iloc[0].get("voter_id", ""))
 
     left, right = st.columns([0.85, 1.8])
@@ -3532,7 +3532,13 @@ def render_voter_lookup_workspace():
     with right:
         selected_id = cc_text(st.session_state.get("lookup_selected_id", ""))
         match = df[df["voter_id"].astype(str) == selected_id] if "voter_id" in df.columns else pd.DataFrame()
-        index_row = match.iloc[0] if not match.empty else df.iloc[0]
+        cached_selected = st.session_state.get(f"lookup_detail_row_{selected_id}") if selected_id else None
+        if not match.empty:
+            index_row = match.iloc[0]
+        elif isinstance(cached_selected, dict) and cached_selected:
+            index_row = pd.Series(cached_selected)
+        else:
+            index_row = df.iloc[0]
         # Keep the selected voter view fast: use the lightweight lookup row first.
         # Full detail/election history/PDF are loaded only when the user asks for them.
         detail_key = f"lookup_detail_row_{selected_id}"
@@ -4454,6 +4460,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+        from reportlab.lib.utils import ImageReader
         from reportlab.graphics.shapes import Drawing, String
         from reportlab.graphics.charts.piecharts import Pie
         from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -4483,30 +4490,37 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
 
     story = []
 
-    def safe_img(path, width=None, height=None):
+    def safe_img(path, width=None, height=None, max_height=None):
         try:
             if path and file_exists(path):
                 img = Image(path)
-                if width:
+                iw = float(img.imageWidth or 1)
+                ih = float(img.imageHeight or 1)
+                if width and height:
                     img.drawWidth = width
-                if height:
                     img.drawHeight = height
-                # preserve if only width supplied
-                if width and not height:
-                    ratio = img.imageHeight / float(img.imageWidth or 1)
-                    img.drawHeight = width * ratio
+                elif width:
+                    img.drawWidth = width
+                    img.drawHeight = width * ih / iw
+                elif height:
+                    img.drawHeight = height
+                    img.drawWidth = height * iw / ih
+                if max_height and img.drawHeight > max_height:
+                    scale = max_height / float(img.drawHeight or 1)
+                    img.drawHeight *= scale
+                    img.drawWidth *= scale
                 return img
         except Exception:
             return Paragraph("", styles["CC_Body"])
         return Paragraph("", styles["CC_Body"])
 
     # ---------------- Cover page ----------------
-    logo_left = safe_img(LOGO_CANDIDATE_CONNECT, width=2.2*inch)
-    logo_right = safe_img(LOGO_TPTC, width=1.8*inch)
-    hdr = Table([[logo_left, "", logo_right]], colWidths=[2.6*inch, 5.2*inch, 2.6*inch])
-    hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'), ('ALIGN',(2,0),(2,0),'RIGHT')]))
+    logo_left = safe_img(LOGO_CANDIDATE_CONNECT, width=2.05*inch, max_height=0.75*inch)
+    logo_right = safe_img(LOGO_TPTC, width=1.75*inch, max_height=0.75*inch)
+    hdr = Table([[logo_left, "", logo_right]], colWidths=[2.4*inch, 5.4*inch, 2.2*inch])
+    hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'), ('ALIGN',(0,0),(0,0),'LEFT'), ('ALIGN',(2,0),(2,0),'RIGHT')]))
     story.append(hdr)
-    story.append(Spacer(1, 0.6*inch))
+    story.append(Spacer(1, 0.92*inch))
     story.append(Paragraph("Area Intelligence Report", styles["CC_Title"]))
     story.append(Spacer(1, 0.18*inch))
     story.append(Paragraph(cc_text(title), styles["CC_Subtitle"]))
@@ -4515,46 +4529,45 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(Spacer(1, 0.24*inch))
     date_s = datetime.now().strftime('%B %d, %Y')
     story.append(Paragraph(f"Prepared {date_s}", styles["CC_Subtitle"]))
-    story.append(Spacer(1, 0.42*inch))
-    card_data = [["Total Voters", "Republican", "Democrat", "Other / Unaffiliated"],
-                 [f"{int(summary.get('total',0) or 0):,}", f"{int(summary.get('r',0) or 0):,}", f"{int(summary.get('d',0) or 0):,}", f"{int(summary.get('o',0) or 0):,}"]]
-    cards = Table(card_data, colWidths=[2.35*inch]*4)
-    cards.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,0),red),('TEXTCOLOR',(0,0),(-1,0),colors.white),
-        ('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),
-        ('FONTSIZE',(0,0),(-1,0),10),('FONTSIZE',(0,1),(-1,1),18),
-        ('GRID',(0,0),(-1,-1),0.45,colors.HexColor('#d1d5db')),
-        ('TOPPADDING',(0,0),(-1,-1),10),('BOTTOMPADDING',(0,0),(-1,-1),10),
-    ]))
-    story.append(cards)
-    story.append(Spacer(1, 0.55*inch))
+    story.append(Spacer(1, 0.70*inch))
     story.append(Paragraph("Prepared for strategic planning, field targeting, direct voter contact, mail-ballot operations, and campaign resource allocation.", styles["CC_Subtitle"]))
     story.append(PageBreak())
 
     # Helpers
-    def as_table_df(df, max_rows=20, max_cols=10):
+    def as_table_df(df, max_rows=20, max_cols=10, first_col_w=None, font_size=7.0):
         if df is None or df.empty:
             return None
         show = df.head(max_rows).copy()
         if len(show.columns) > max_cols:
             show = show[list(show.columns[:max_cols])]
-        data = [list(show.columns)]
+        cols = list(show.columns)
+        data = [[Paragraph(str(c), styles["CC_Small"]) for c in cols]]
         for _, row in show.iterrows():
             vals = []
-            for c in show.columns:
+            for c in cols:
                 v = row[c]
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    vals.append(f"{v:,.0f}")
+                    txt = f"{v:,.0f}"
                 else:
-                    vals.append(str(v))
+                    txt = str(v)
+                vals.append(Paragraph(txt, styles["CC_Small"]))
             data.append(vals)
-        colw = [max(0.68*inch, min(1.55*inch, 9.9*inch/len(data[0])))] * len(data[0])
+        n = max(1, len(cols))
+        total_w = 10.0*inch
+        if first_col_w is None:
+            first_col_w = 1.55*inch if n >= 6 else 2.0*inch
+        if n == 1:
+            colw = [total_w]
+        else:
+            rest = max(0.42*inch, (total_w - first_col_w) / (n-1))
+            colw = [first_col_w] + [rest]*(n-1)
         tbl = Table(data, repeatRows=1, colWidths=colw)
         tbl.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),dark),('TEXTCOLOR',(0,0),(-1,0),colors.white),
             ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-            ('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),7.2),
-            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, light]),('TOPPADDING',(0,0),(-1,-1),3.5),('BOTTOMPADDING',(0,0),(-1,-1),3.5),
+            ('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),font_size),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, light]),('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+            ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(0,0),(-1,-1),2),
         ]))
         return tbl
 
@@ -4653,7 +4666,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(section_header(f"Strategic Breakdown by {breakdown_field}"))
     story.append(Spacer(1, 0.10*inch))
     if breakdown_df is not None and not breakdown_df.empty:
-        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12))
+        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=2.15*inch, font_size=6.1))
     else:
         story.append(Paragraph("No breakdown data available for this selection.", styles["CC_Body"]))
     story.append(PageBreak())
@@ -4693,7 +4706,17 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         canvas.saveState()
         canvas.setFont('Helvetica', 7)
         canvas.setFillColor(colors.HexColor('#6b7280'))
-        canvas.drawString(0.42*inch, 0.18*inch, "Candidate Connect Area Intelligence")
+        if doc.page > 1:
+            try:
+                if file_exists(LOGO_CANDIDATE_CONNECT):
+                    canvas.drawImage(ImageReader(LOGO_CANDIDATE_CONNECT), 0.42*inch, 7.05*inch, width=0.85*inch, height=0.32*inch, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+            canvas.drawString(1.32*inch, 7.13*inch, "Candidate Connect Area Intelligence")
+            canvas.setStrokeColor(colors.HexColor('#e5e7eb'))
+            canvas.line(0.42*inch, 6.98*inch, 10.58*inch, 6.98*inch)
+        else:
+            canvas.drawString(0.42*inch, 0.18*inch, "Candidate Connect Area Intelligence")
         canvas.drawRightString(10.58*inch, 0.18*inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -4820,7 +4843,10 @@ def render_area_intelligence_workspace():
         report_title = _area_universe_label(active)
         st.markdown("### Client-ready Area Intelligence Report")
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
-        if st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary"):
+        pdf_col1, pdf_col2, pdf_spacer = st.columns([0.9, 1.05, 4.0])
+        with pdf_col1:
+            prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary")
+        if prep_clicked:
             with st.spinner("Preparing Area Intelligence report..."):
                 pdf = _area_pdf_bytes(
                     report_title,
@@ -4839,13 +4865,13 @@ def render_area_intelligence_workspace():
                 )
                 st.session_state[special_key("area_pdf_bytes")] = pdf
         if st.session_state.get(special_key("area_pdf_bytes")):
-            st.download_button(
-                "Download Area Intelligence PDF",
-                st.session_state[special_key("area_pdf_bytes")],
-                "candidate_connect_area_intelligence_report.pdf",
-                "application/pdf",
-                width="stretch",
-            )
+            with pdf_col2:
+                st.download_button(
+                    "Download Area Intelligence PDF",
+                    st.session_state[special_key("area_pdf_bytes")],
+                    "candidate_connect_area_intelligence_report.pdf",
+                    "application/pdf",
+                )
     with tabs[2]:
         st.text_area("Area Intelligence notes / strategy", key=special_key("area_notes"), height=180)
 
@@ -5217,7 +5243,7 @@ with st.sidebar:
         if _has_universe:
             st.caption(f"Last applied from Create Universe: {st.session_state.get('current_universe_updated', '')}")
         else:
-            st.caption("Build a universe in Create Universe, click Update Counts, then return here to use it as your Mail Ballot base.")
+            st.caption("Build a universe in Create Universe, click Save / Apply Current Universe, then return here to use it as your Mail Ballot base.")
     elif st.session_state.get("left_section") == "area_intelligence":
         st.markdown("### Area Intelligence")
         st.caption("Select the area on the right.")
@@ -5256,7 +5282,7 @@ else: st.info("No filters selected. Choose filters in the left pane.")
 
 a1,a2,sp = st.columns([.85,.85,4.3])
 with a1:
-    if st.button("Update Counts", width="stretch"):
+    if st.button("Save / Apply Current Universe", width="stretch"):
         with st.spinner("Updating counts..."):
             summary, mode, err = update_counts(active)
         if err:
