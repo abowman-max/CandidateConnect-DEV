@@ -4599,7 +4599,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(PageBreak())
 
     # Helpers
-    def as_table_df(df, max_rows=20, max_cols=10, first_col_w=None, font_size=7.0):
+    def as_table_df(df, max_rows=20, max_cols=10, first_col_w=None, font_size=7.0, total_w=10.0*inch):
         if df is None or df.empty:
             return None
         show = df.head(max_rows).copy()
@@ -4618,7 +4618,6 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
                 vals.append(Paragraph(txt, styles["CC_Cell"]))
             data.append(vals)
         n = max(1, len(cols))
-        total_w = 10.0*inch
         if first_col_w is None:
             first_col_w = 1.55*inch if n >= 6 else 2.0*inch
         if n == 1:
@@ -4696,17 +4695,17 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
             d.add(String(left+bar_w+4, y+2, f"{val:,}", fontName='Helvetica', fontSize=6.5, fillColor=dark))
         return d
 
-    def stacked_mail_chart(df, title_s="Mail Ballot Turnout by Party Since 2020", w=500, h=175):
+    def stacked_mail_chart(df, title_s="Mail Ballot Turnout by Party Since 2020", w=700, h=215):
         d = Drawing(w, h)
         d.add(String(8, h-14, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
         if df is None or df.empty:
             d.add(String(12, h/2, "No mail-ballot history data available in the current speed/index layer.", fontName='Helvetica', fontSize=8, fillColor=colors.HexColor('#6b7280')))
             return d
-        show = df.head(8).copy()
+        show = df.head(12).copy()
         for c in ["R", "D", "O", "Total"]:
             show[c] = pd.to_numeric(show[c], errors="coerce").fillna(0).astype(int)
         maxv = int(show["Total"].max() or 1)
-        left=92; right=48; top=h-38; bar_h=10; gap=7; bar_w=w-left-right
+        left=94; right=46; top=h-36; bar_h=8; gap=5; bar_w=w-left-right
         colors_party = {"R": red, "D": blue, "O": green}
         for i, row in show.iterrows():
             y=top-i*(bar_h+gap)
@@ -4739,19 +4738,33 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(Paragraph("Use this profile to decide whether the campaign should prioritize persuasion, turnout, mail-ballot growth, or direct-contact density. For most local campaigns, the immediate value is identifying where reliable voters live, where reachable voters concentrate, and where the campaign can win through door-to-door and phone contact.", styles["CC_Body"]))
     story.append(Spacer(1, 0.16*inch))
 
+    # Keep page-2 visuals roomy: top row only, then continue charts on the next page.
     charts_top = Table(
-        [[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")]],
-        colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.90*inch]
+        [[pie_chart(tables.get("Party"), "Party Composition", w=315, h=190), bar_chart(tables.get("Age"), "Age Distribution", w=315, h=190)]],
+        colWidths=[5.0*inch, 5.0*inch], rowHeights=[2.25*inch]
     )
-    charts_top.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('INNERGRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
+    charts_top.setStyle(TableStyle([
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),
+        ('INNERGRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),
+        ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
+    ]))
     story.append(charts_top)
+    story.append(PageBreak())
+
+    story.append(section_header("Turnout and Vote Behavior"))
+    story.append(Spacer(1, 0.10*inch))
+    story.append(Table(
+        [[bar_chart(tables.get("VoteHistory"), "Vote History - All Elections", w=700, h=150)]],
+        colWidths=[10.0*inch], rowHeights=[1.9*inch],
+        style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)])
+    ))
     story.append(Spacer(1, 0.12*inch))
-    charts_bottom = Table(
-        [[bar_chart(tables.get("VoteHistory"), "Vote History - All Elections"), stacked_mail_chart(tables.get("MailBallotByParty"))]],
-        colWidths=[3.3*inch, 6.7*inch], rowHeights=[1.95*inch]
-    )
-    charts_bottom.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('INNERGRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
-    story.append(charts_bottom)
+    story.append(Table(
+        [[stacked_mail_chart(tables.get("MailBallotByParty"), w=700, h=215)]],
+        colWidths=[10.0*inch], rowHeights=[2.75*inch],
+        style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)])
+    ))
     story.append(PageBreak())
 
     # ---------------- Profile tables ----------------
@@ -4759,7 +4772,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(Spacer(1, 0.10*inch))
     top = []
     for title_s, key in [("Party Composition", "Party"), ("Age Distribution", "Age"), ("Vote History - All Elections", "VoteHistory"), ("Mail Ballot Behavior", "MailBallot")]:
-        tbl = as_table_df(tables.get(key), max_rows=10, max_cols=3)
+        tbl = as_table_df(tables.get(key), max_rows=10, max_cols=3, total_w=4.62*inch, first_col_w=2.05*inch, font_size=6.8)
         if tbl:
             top.append([Paragraph(title_s, styles["CC_H2"]), tbl])
     # two columns of mini tables
@@ -4769,7 +4782,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         right = [top[i+1][0], top[i+1][1]] if i+1 < len(top) else [Paragraph("", styles["CC_H2"]), Paragraph("", styles["CC_Body"])]
         rows.append([left, right])
     for row in rows:
-        story.append(Table(row, colWidths=[4.9*inch, 4.9*inch], style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP')])) )
+        story.append(Table(row, colWidths=[4.8*inch, 4.8*inch], style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0)])) )
         story.append(Spacer(1,0.1*inch))
 
     turnout_df = tables.get("Turnout")
@@ -4779,7 +4792,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         story.append(Spacer(1, 0.08*inch))
         story.append(Paragraph("Primary and general elections only. Party columns reflect the voter file's current party grouping at report time.", styles["CC_Small"]))
         story.append(Spacer(1, 0.06*inch))
-        story.append(as_table_df(turnout_df, max_rows=14, max_cols=5))
+        story.append(as_table_df(turnout_df, max_rows=14, max_cols=5, first_col_w=2.1*inch, font_size=6.8, total_w=9.8*inch))
     story.append(PageBreak())
 
     # ---------------- Strategic breakdown ----------------
@@ -4787,7 +4800,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(section_header(f"Strategic Breakdown by {breakdown_field}"))
     story.append(Spacer(1, 0.10*inch))
     if breakdown_df is not None and not breakdown_df.empty:
-        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=2.25*inch, font_size=5.7))
+        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=1.85*inch, font_size=5.2, total_w=10.0*inch))
     else:
         story.append(Paragraph("No breakdown data available for this selection.", styles["CC_Body"]))
     story.append(PageBreak())
