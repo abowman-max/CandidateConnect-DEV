@@ -4383,15 +4383,22 @@ def _area_election_sort_key(code: str):
 
 
 def _area_voted_sql_for_cols(cols: list[str]) -> str:
+    """True only when a voter has an actual vote method for the election.
+
+    The *_party columns in the source often contain O for no-vote rows, so they
+    must not be used to decide turnout. Turnout is based on *_method only.
+    """
     checks = []
     for c in cols:
+        if not str(c).lower().endswith("_method"):
+            continue
         expr = f"UPPER(TRIM(CAST({sql_ident(c)} AS VARCHAR)))"
         checks.append(f"({expr} NOT IN ('', 'NAN', 'NONE', 'NULL', '0', 'N', 'NO', 'FALSE', 'DID NOT VOTE', 'DNV'))")
     return "(" + " OR ".join(checks) + ")" if checks else "FALSE"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 14) -> pd.DataFrame:
+def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 12) -> pd.DataFrame:
     """Historical turnout by current party for Primary + General elections only.
 
     Uses index shards and ORs duplicate raw columns into one displayed election code,
@@ -4402,6 +4409,8 @@ def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 14)
     cols = selected_election_columns(types=["General", "Primary"])
     groups = {}
     for c in cols:
+        if not str(c).lower().endswith("_method"):
+            continue
         code = _area_election_code(c)
         if not re.match(r"^[GP]\d{2}$", code):
             continue
@@ -4459,6 +4468,8 @@ def _area_mail_ballot_turnout_by_party(active_json: str, special_json: str, limi
     cols = selected_election_columns(types=["General", "Primary"])
     groups = {}
     for c in cols:
+        if not str(c).lower().endswith("_method"):
+            continue
         code = _area_election_code(c)
         if not re.match(r"^[GP]\d{2}$", code):
             continue
@@ -4663,7 +4674,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
             return d
         vals = [int(x) for x in show["Voters"].tolist()]
         labs = [str(x) for x in show["Category"].tolist()]
-        p = Pie(); p.x=12; p.y=20; p.width=92; p.height=92; p.data=vals; p.labels=[""]*len(vals)
+        p = Pie(); p.x=18; p.y=54; p.width=88; p.height=88; p.data=vals; p.labels=[""]*len(vals)
         palette = [red, blue, green, gold, colors.HexColor('#64748b')]
         for i in range(len(vals)):
             p.slices[i].fillColor = palette[i % len(palette)]
@@ -4787,12 +4798,12 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
 
     turnout_df = tables.get("Turnout")
     if turnout_df is not None and not turnout_df.empty:
-        story.append(Spacer(1, 0.08*inch))
+        story.append(PageBreak())
         story.append(section_header("Historical Turnout by Current Party"))
         story.append(Spacer(1, 0.08*inch))
-        story.append(Paragraph("Primary and general elections only. Party columns reflect the voter file's current party grouping at report time.", styles["CC_Small"]))
+        story.append(Paragraph("Primary and general elections only. Counts require an actual vote-method record for that election; party columns reflect the voter file's current party grouping at report time.", styles["CC_Small"]))
         story.append(Spacer(1, 0.06*inch))
-        story.append(as_table_df(turnout_df, max_rows=14, max_cols=5, first_col_w=2.1*inch, font_size=6.8, total_w=9.8*inch))
+        story.append(as_table_df(turnout_df, max_rows=12, max_cols=5, first_col_w=2.1*inch, font_size=7.0, total_w=9.8*inch))
     story.append(PageBreak())
 
     # ---------------- Strategic breakdown ----------------
