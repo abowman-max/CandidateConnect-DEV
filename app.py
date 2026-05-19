@@ -2846,7 +2846,7 @@ def _draw_branded_header(c, title: str, subtitle: str = ""):
 
 
 def _history_payload(row: pd.Series, limit: int | None = None):
-    """Return (general, primary) election history tuples for PDF: (column, short label, party, method)."""
+    """Return de-duplicated election history tuples for PDF: (column, short label, party, method)."""
     row = row if isinstance(row, pd.Series) else pd.Series(row or {})
     try:
         cols = election_columns_from_manifest()
@@ -2854,8 +2854,28 @@ def _history_payload(row: pd.Series, limit: int | None = None):
         cols = []
     if not cols:
         cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
-    general_cols = sorted([c for c in cols if str(c).upper().startswith("G")], reverse=True)
-    primary_cols = sorted([c for c in cols if str(c).upper().startswith("P")], reverse=True)
+
+    # De-duplicate columns by display election code. Some builds expose both G25 and G25_* aliases,
+    # which was doubling every election in the app/PDF.
+    def dedupe_group(prefix: str):
+        raw_cols = [c for c in cols if str(c).upper().startswith(prefix)]
+        raw_cols = sorted(raw_cols, key=lambda c: str(c).upper(), reverse=True)
+        chosen = {}
+        order = []
+        for c in raw_cols:
+            short = str(c).split("_")[0].upper()
+            if short not in chosen:
+                chosen[short] = c
+                order.append(short)
+            else:
+                # Prefer the duplicate column that actually has data for this voter.
+                prev = chosen[short]
+                if _blank_vote_value(row.get(prev, "")) and not _blank_vote_value(row.get(c, "")):
+                    chosen[short] = c
+        return [chosen[k] for k in order]
+
+    general_cols = dedupe_group("G")
+    primary_cols = dedupe_group("P")
 
     def method_for(col):
         raw = row.get(col, "")
@@ -2883,11 +2903,11 @@ def _history_payload(row: pd.Series, limit: int | None = None):
                 return "D"
         return ""
 
-    def build(cols):
+    def build(group_cols):
         out = []
         if limit is not None:
-            cols = cols[:int(limit)]
-        for col in cols:
+            group_cols = group_cols[:int(limit)]
+        for col in group_cols:
             short = str(col).split("_")[0].upper()
             out.append((str(col), short, party_for(col), method_for(col)))
         return out
@@ -3222,22 +3242,37 @@ def vote_method_pdf_label(method_or_icon: str) -> str:
 
 
 
+def _dedup_history_cols_for_row(cols, row: pd.Series, prefix: str):
+    """Keep one column per displayed election code, preferring the column with data for this voter."""
+    raw_cols = [c for c in (cols or []) if str(c).upper().startswith(prefix)]
+    raw_cols = sorted(raw_cols, key=lambda c: str(c).upper(), reverse=True)
+    chosen = {}
+    order = []
+    for c in raw_cols:
+        short = str(c).split("_")[0].upper()
+        if short not in chosen:
+            chosen[short] = c
+            order.append(short)
+        else:
+            prev = chosen[short]
+            if _blank_vote_value(row.get(prev, "")) and not _blank_vote_value(row.get(c, "")):
+                chosen[short] = c
+    return [chosen[k] for k in order]
+
+
 def render_election_history_table(row: pd.Series):
-    """Draw visible blank/no-vote years and method labels for the selected voter."""
+    """Draw visible blank/no-vote years and method icons for the selected voter."""
     row = row if isinstance(row, pd.Series) else pd.Series(row or {})
     cols = election_columns_from_manifest()
-    # Fallback to columns present in the loaded row.
     if not cols:
         cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
-    general = sorted([c for c in cols if str(c).upper().startswith("G")], reverse=True)
-    primary = sorted([c for c in cols if str(c).upper().startswith("P")], reverse=True)
+    general = _dedup_history_cols_for_row(cols, row, "G")
+    primary = _dedup_history_cols_for_row(cols, row, "P")
 
     def method_for(col):
         raw = row.get(col, "")
         method = normalize_vote_method(raw)
         if not method and not _blank_vote_value(raw):
-            # Some history fields only store party. Use POLL as the visual method
-            # because it means voted but the file did not carry an explicit method.
             if cc_text(raw).upper() in {"R","D","O","I","NP","REP","DEM","REPUBLICAN","DEMOCRAT","DEMOCRATIC"}:
                 method = "At Poll"
         return method
@@ -3250,9 +3285,6 @@ def render_election_history_table(row: pd.Series):
             return "R"
         if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
             return "D"
-        # If the vote-history column stores method only (POLL/MB/PROV), still
-        # show the voter's registered party for years with a vote. This restores
-        # the visible party row without pretending blank/no-vote years are votes.
         if not _blank_vote_value(raw) and normalize_vote_method(raw):
             p = cc_text(row.get("Party", "")).upper()
             if p in {"R", "D"}:
@@ -3268,7 +3300,6 @@ def render_election_history_table(row: pd.Series):
         if not group_cols:
             st.caption("No election history columns available in this shard build.")
             return
-        data = []
         party_row = {"Row": "Party"}
         method_row = {"Row": "Method"}
         for c in group_cols:
@@ -3276,37 +3307,22 @@ def render_election_history_table(row: pd.Series):
             party_row[short] = party_for(c)
             m = method_for(c)
             method_row[short] = vote_method_icon(m) or vote_method_pdf_label(m)
-        data.extend([party_row, method_row])
-        hist_df = pd.DataFrame(data)
-        try:
-            # Render this small two-row history table as HTML so every cell is truly center aligned
-            # and vote-method icons render reliably across Streamlit dataframe versions.
-            html = hist_df.to_html(index=False, escape=False, classes="cc-history-table")
-            st.markdown(
-                """
-                <style>
-                .cc-history-wrap { max-width: 100%; overflow-x: auto; margin-bottom: 14px; }
-                table.cc-history-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12px; }
-                table.cc-history-table th, table.cc-history-table td {
-                    text-align: center !important; vertical-align: middle !important;
-                    border: 1px solid rgba(148,163,184,.25); padding: 8px 10px;
-                    background: #0b0f19; color: #f8fafc; white-space: nowrap;
-                }
-                table.cc-history-table th { position: sticky; top: 0; z-index: 2; background: #171b26; }
-                table.cc-history-table th:first-child, table.cc-history-table td:first-child {
-                    position: sticky; left: 0; z-index: 3; background: #171b26; font-weight: 900;
-                }
-                table.cc-history-table tbody tr:nth-child(even) td { background: #101521; }
-                </style>
-                <div class="cc-history-wrap">
-                """ + html + "</div>",
-                unsafe_allow_html=True,
-            )
-        except Exception:
-            st.dataframe(hist_df, hide_index=True, width="stretch")
+        hist_df = pd.DataFrame([party_row, method_row])
+        # Use Streamlit's dataframe rendering rather than raw HTML so tags never display as text.
+        # Styler keeps every visible cell centered.
+        styler = (
+            hist_df.style
+            .set_properties(**{"text-align": "center"})
+            .set_table_styles([
+                {"selector": "th", "props": [("text-align", "center")]},
+                {"selector": "td", "props": [("text-align", "center")]},
+            ])
+        )
+        st.dataframe(styler, hide_index=True, width="stretch", height=92)
+
     draw("General", general)
     draw("Primary", primary)
-    st.caption("Legend: MB = Mail Ballot · POLL = At Poll · PROV = Provisional · blank = Did Not Vote / no record")
+    st.caption("Legend: ✉️ = Mail Ballot · 🗳️ = At Poll · 🟨 = Provisional · blank = Did Not Vote / no record")
 
 def render_voter_lookup_workspace():
     st.markdown("## Voter Lookup")
