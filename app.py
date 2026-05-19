@@ -3339,17 +3339,26 @@ def _blank_vote_value(val) -> bool:
 
 
 def normalize_vote_method(val):
-    """Normalize SURE/election vote-method values for voter lookup election history."""
+    """Normalize SURE/election vote-method values for voter lookup election history.
+
+    Important: Pennsylvania/SURE-style history fields commonly use A/AB/ABS for
+    absentee/mail-style voting and P/POLL for polling-place voting. Older builds
+    were treating bare "A" as At Poll, which made mail/absentee voters look like
+    they always voted at the polls.
+    """
     if _blank_vote_value(val):
         return ""
     v = str(val).strip()
-    vu = v.upper()
-    if vu in {"M", "MAIL", "MB", "MAIL BALLOT"} or "MAIL" in vu:
+    vu = v.upper().replace("-", " ").replace("_", " ")
+    vu = re.sub(r"\s+", " ", vu).strip()
+    if vu in {"M", "MB", "MAIL", "MAIL BALLOT", "MAIL IN", "MAILIN", "MAIL BALLOT", "MAIL IN BALLOT", "MAIL-IN BALLOT"} or "MAIL" in vu:
         return "Mail Ballot"
-    if vu in {"A", "AP", "AT POLL", "POLL", "IN PERSON", "IP", "VOTED"} or "POLL" in vu or "PERSON" in vu:
-        return "At Poll"
-    if vu in {"PROV", "PROVISIONAL"} or "PROV" in vu:
+    if vu in {"A", "AB", "ABS", "ABSENTEE", "ABSENTEE BALLOT"} or "ABSENT" in vu:
+        return "Mail Ballot"
+    if vu in {"PV", "PROV", "PROVISIONAL"} or "PROV" in vu:
         return "Provisional"
+    if vu in {"P", "AP", "AT POLL", "AT POLLS", "POLL", "POLLS", "POLLING", "IN PERSON", "IP", "ELECTION DAY", "VOTED"} or "POLL" in vu or "PERSON" in vu:
+        return "At Poll"
     # A bare party value is not a method. The history payload may still use it to
     # infer At Poll only when it is a real party code, not blank/zero.
     if vu in {"R", "D", "O", "I", "NP", "REP", "DEM", "REPUBLICAN", "DEMOCRAT", "DEMOCRATIC"}:
@@ -4437,6 +4446,74 @@ def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 14)
         except Exception: pass
 
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _area_mail_ballot_turnout_by_party(active_json: str, special_json: str, limit: int = 12) -> pd.DataFrame:
+    """Mail/absentee turnout by current party for Primary + General elections since 2020.
+
+    This is used for the Area Intelligence report chart. It only counts rows where
+    the election-history field itself indicates mail/absentee voting (M/MB/MAIL/A/AB/ABS).
+    """
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    cols = selected_election_columns(types=["General", "Primary"])
+    groups = {}
+    for c in cols:
+        code = _area_election_code(c)
+        if not re.match(r"^[GP]\d{2}$", code):
+            continue
+        try:
+            if 2000 + int(code[1:]) < 2020:
+                continue
+        except Exception:
+            continue
+        groups.setdefault(code, []).append(c)
+    codes = sorted(groups.keys(), key=_area_election_sort_key, reverse=True)[:int(limit)]
+    if not codes:
+        return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+
+    def mail_sql(cols_for_code):
+        checks = []
+        for c in cols_for_code:
+            expr = f"UPPER(TRIM(CAST({sql_ident(c)} AS VARCHAR)))"
+            checks.append(f"({expr} IN ('M','MB','MAIL','MAIL BALLOT','MAIL-IN','MAIL IN','MAILIN','A','AB','ABS','ABSENTEE') OR {expr} LIKE '%MAIL%' OR {expr} LIKE '%ABS%')")
+        return "(" + " OR ".join(checks) + ")" if checks else "FALSE"
+
+    urls = index_urls_from_manifest()
+    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
+    where = index_where_sql(active, special)
+    selects = []
+    for code in codes:
+        voted_mail = mail_sql(groups[code])
+        selects.append(f"""
+        SELECT {sql_lit(_area_election_label_from_code(code))} AS Election,
+               SUM(CASE WHEN {voted_mail} AND CAST(Party AS VARCHAR) = 'R' THEN 1 ELSE 0 END) AS R,
+               SUM(CASE WHEN {voted_mail} AND CAST(Party AS VARCHAR) = 'D' THEN 1 ELSE 0 END) AS D,
+               SUM(CASE WHEN {voted_mail} AND CAST(Party AS VARCHAR) NOT IN ('R','D') THEN 1 ELSE 0 END) AS O,
+               SUM(CASE WHEN {voted_mail} THEN 1 ELSE 0 END) AS Total
+        FROM read_parquet({url_list}, union_by_name=true)
+        {where}
+        """)
+    q = " UNION ALL ".join(selects)
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        df = con.execute(q).df()
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+        for c in ["R","D","O","Total"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        return df[df["Total"] > 0].reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
+    finally:
+        try: con.close()
+        except Exception: pass
+
 def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str], tables: dict[str, pd.DataFrame], breakdown_field: str) -> bytes:
     """Client-ready Area Intelligence PDF with branding, charts, turnout, and strategy pages."""
     bio = io.BytesIO()
@@ -4447,7 +4524,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         from reportlab.lib.units import inch
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
         from reportlab.lib.utils import ImageReader
-        from reportlab.graphics.shapes import Drawing, String
+        from reportlab.graphics.shapes import Drawing, String, Rect, Line
         from reportlab.graphics.charts.piecharts import Pie
         from reportlab.graphics.charts.barcharts import VerticalBarChart
     except Exception:
@@ -4566,42 +4643,90 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
             ('ALIGN',(0,0),(-1,-1),'LEFT'),('LEFTPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
         ]))
 
-    def pie_chart(df, title_s):
-        d = Drawing(235, 128)
-        d.add(String(8, 116, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
+    def _clean_chart_df(df, max_rows=7):
         if df is None or df.empty:
+            return pd.DataFrame(columns=["Category", "Voters", "%"])
+        show = df.copy()
+        if "Category" in show.columns:
+            show["Category"] = show["Category"].astype(str)
+            show = show[~show["Category"].str.strip().str.lower().isin(["", "(blank)", "blank", "nan", "none", "null"])]
+        if "Voters" in show.columns:
+            show["Voters"] = pd.to_numeric(show["Voters"], errors="coerce").fillna(0).astype(int)
+            show = show[show["Voters"] > 0]
+        return show.head(max_rows)
+
+    def pie_chart(df, title_s, w=245, h=165):
+        d = Drawing(w, h)
+        d.add(String(8, h-14, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
+        show = _clean_chart_df(df, 5)
+        if show.empty:
+            d.add(String(12, h/2, "No data", fontName='Helvetica', fontSize=8, fillColor=colors.HexColor('#6b7280')))
             return d
-        vals = [int(x) for x in pd.to_numeric(df["Voters"], errors="coerce").fillna(0).tolist()[:6]]
-        labs = [str(x) for x in df["Category"].tolist()[:6]]
-        if not any(vals):
-            return d
-        p = Pie(); p.x=10; p.y=14; p.width=88; p.height=88; p.data=vals; p.labels=[""]*len(vals)
-        palette = [red, blue, green, gold, colors.HexColor('#64748b'), colors.HexColor('#94a3b8')]
+        vals = [int(x) for x in show["Voters"].tolist()]
+        labs = [str(x) for x in show["Category"].tolist()]
+        p = Pie(); p.x=12; p.y=20; p.width=92; p.height=92; p.data=vals; p.labels=[""]*len(vals)
+        palette = [red, blue, green, gold, colors.HexColor('#64748b')]
         for i in range(len(vals)):
             p.slices[i].fillColor = palette[i % len(palette)]
         d.add(p)
         total=sum(vals) or 1
-        y=96
+        y=h-38
         for i,(lab,val) in enumerate(zip(labs,vals)):
-            d.add(String(112, y, f"{lab}: {val:,} ({val/total*100:.1f}%)", fontSize=6.8, fillColor=dark))
-            y -= 12
+            d.add(Rect(118, y-4, 6, 6, fillColor=palette[i % len(palette)], strokeColor=None))
+            d.add(String(128, y-3, f"{lab}: {val:,} ({val/total*100:.1f}%)", fontName='Helvetica', fontSize=7.2, fillColor=dark))
+            y -= 14
         return d
 
-    def bar_chart(df, title_s):
-        d = Drawing(235, 128)
-        d.add(String(8, 116, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
+    def bar_chart(df, title_s, w=245, h=165):
+        d = Drawing(w, h)
+        d.add(String(8, h-14, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
+        show = _clean_chart_df(df, 6)
+        if show.empty:
+            d.add(String(12, h/2, "No data", fontName='Helvetica', fontSize=8, fillColor=colors.HexColor('#6b7280')))
+            return d
+        vals = [int(x) for x in show["Voters"].tolist()]
+        labs = [str(x)[:11] for x in show["Category"].tolist()]
+        maxv=max(vals) or 1
+        left=58; top=h-34; bar_h=12; gap=8; bar_w=w-left-35
+        for i,(lab,val) in enumerate(zip(labs, vals)):
+            y=top-i*(bar_h+gap)
+            d.add(String(8, y+2, lab, fontName='Helvetica', fontSize=6.8, fillColor=dark))
+            d.add(Rect(left, y, bar_w, bar_h, fillColor=colors.HexColor('#f3f4f6'), strokeColor=colors.HexColor('#cbd5e1'), strokeWidth=.3))
+            d.add(Rect(left, y, max(1, bar_w*val/maxv), bar_h, fillColor=red, strokeColor=None))
+            d.add(String(left+bar_w+4, y+2, f"{val:,}", fontName='Helvetica', fontSize=6.5, fillColor=dark))
+        return d
+
+    def stacked_mail_chart(df, title_s="Mail Ballot Turnout by Party Since 2020", w=500, h=175):
+        d = Drawing(w, h)
+        d.add(String(8, h-14, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
         if df is None or df.empty:
+            d.add(String(12, h/2, "No mail-ballot history data available in the current speed/index layer.", fontName='Helvetica', fontSize=8, fillColor=colors.HexColor('#6b7280')))
             return d
-        show = df.head(7).copy()
-        vals = [int(x) for x in pd.to_numeric(show["Voters"], errors="coerce").fillna(0).tolist()]
-        labs = [str(x)[:8] for x in show["Category"].tolist()]
-        if not any(vals):
-            return d
-        bc = VerticalBarChart(); bc.x=26; bc.y=26; bc.height=72; bc.width=178; bc.data=[vals]
-        bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=max(vals)*1.15; bc.valueAxis.valueStep=max(1, int(max(vals)/4))
-        bc.categoryAxis.categoryNames=labs; bc.categoryAxis.labels.boxAnchor='ne'; bc.categoryAxis.labels.angle=35; bc.categoryAxis.labels.fontSize=5.8
-        bc.bars[0].fillColor = red
-        d.add(bc)
+        show = df.head(8).copy()
+        for c in ["R", "D", "O", "Total"]:
+            show[c] = pd.to_numeric(show[c], errors="coerce").fillna(0).astype(int)
+        maxv = int(show["Total"].max() or 1)
+        left=92; right=48; top=h-38; bar_h=10; gap=7; bar_w=w-left-right
+        colors_party = {"R": red, "D": blue, "O": green}
+        for i, row in show.iterrows():
+            y=top-i*(bar_h+gap)
+            d.add(String(8, y+1, str(row.get("Election", ""))[:16], fontName='Helvetica', fontSize=6.7, fillColor=dark))
+            x=left
+            total=int(row["Total"] or 0)
+            if total <= 0:
+                d.add(Rect(left, y, bar_w, bar_h, fillColor=colors.HexColor('#f3f4f6'), strokeColor=colors.HexColor('#cbd5e1'), strokeWidth=.25))
+            else:
+                for party in ["R","D","O"]:
+                    val=int(row[party] or 0)
+                    seg = bar_w * val / maxv
+                    if seg > 0:
+                        d.add(Rect(x, y, seg, bar_h, fillColor=colors_party[party], strokeColor=None))
+                        x += seg
+            d.add(String(left+bar_w+4, y+1, f"{total:,}", fontName='Helvetica', fontSize=6.5, fillColor=dark))
+        lx=left; ly=8
+        for party in ["R","D","O"]:
+            d.add(Rect(lx, ly, 7, 7, fillColor=colors_party[party], strokeColor=None))
+            d.add(String(lx+10, ly, party, fontName='Helvetica', fontSize=7, fillColor=dark)); lx += 34
         return d
 
     # ---------------- Executive summary ----------------
@@ -4614,11 +4739,19 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(Paragraph("Use this profile to decide whether the campaign should prioritize persuasion, turnout, mail-ballot growth, or direct-contact density. For most local campaigns, the immediate value is identifying where reliable voters live, where reachable voters concentrate, and where the campaign can win through door-to-door and phone contact.", styles["CC_Body"]))
     story.append(Spacer(1, 0.16*inch))
 
-    charts = Table([[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")],
-                    [bar_chart(tables.get("VoteHistory"), "Vote History - All Elections"), pie_chart(tables.get("MailBallot"), "Mail Ballot Behavior")]],
-                   colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.55*inch, 1.55*inch])
-    charts.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
-    story.append(charts)
+    charts_top = Table(
+        [[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")]],
+        colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.90*inch]
+    )
+    charts_top.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('INNERGRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
+    story.append(charts_top)
+    story.append(Spacer(1, 0.12*inch))
+    charts_bottom = Table(
+        [[bar_chart(tables.get("VoteHistory"), "Vote History - All Elections"), stacked_mail_chart(tables.get("MailBallotByParty"))]],
+        colWidths=[3.3*inch, 6.7*inch], rowHeights=[1.95*inch]
+    )
+    charts_bottom.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('INNERGRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
+    story.append(charts_bottom)
     story.append(PageBreak())
 
     # ---------------- Profile tables ----------------
@@ -4654,7 +4787,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(section_header(f"Strategic Breakdown by {breakdown_field}"))
     story.append(Spacer(1, 0.10*inch))
     if breakdown_df is not None and not breakdown_df.empty:
-        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=2.15*inch, font_size=6.1))
+        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=2.25*inch, font_size=5.7))
     else:
         story.append(Paragraph("No breakdown data available for this selection.", styles["CC_Body"]))
     story.append(PageBreak())
@@ -4763,6 +4896,11 @@ def render_area_intelligence_workspace():
         json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
         14,
     )
+    mb_turnout_df = _area_mail_ballot_turnout_by_party(
+        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+        12,
+    )
     insights = _area_insights(summary, party_df, age_df, mb_app_df)
 
     st.markdown("### Executive Strategy Readout")
@@ -4844,6 +4982,7 @@ def render_area_intelligence_workspace():
                         "VoteHistory": v4a_df,
                         "MailBallot": mb_status_df,
                         "Turnout": turnout_df,
+                        "MailBallotByParty": mb_turnout_df,
                         "Breakdown": breakdown_df,
                     },
                     DISPLAY_LABELS.get(breakdown, breakdown),
