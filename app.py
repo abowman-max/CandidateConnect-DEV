@@ -4163,17 +4163,393 @@ def render_mail_ballot_workspace():
     with tabs[3]:
         st.text_area("Mail ballot notes / plan", key=special_key("mb_notes"), height=180)
 
+
+
+def _area_clean_label(value) -> str:
+    s = str(value or "").strip()
+    if not s or s.lower() in {"nan", "none", "null", "(blank)", "blank"}:
+        return "(Blank)"
+    return s
+
+
+def _area_pct(n, d) -> str:
+    try:
+        n = float(n or 0); d = float(d or 0)
+        return "0.0%" if d <= 0 else f"{(n/d)*100:.1f}%"
+    except Exception:
+        return "0.0%"
+
+
+def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
+    """Fast cube-backed group table for Area Intelligence."""
+    try:
+        special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
+        df = duckdb_count_cube_group_filtered(
+            json.dumps(count_safe_filters(active or {}), sort_keys=True),
+            json.dumps(special or {}, sort_keys=True),
+            field,
+            int(limit),
+        )
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Category", "Voters", "%"])
+        df = df.rename(columns={"label": "Category"}).copy()
+        df["Category"] = df["Category"].map(_area_clean_label)
+        df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
+        total = max(1, int(df["Voters"].sum()))
+        df["%"] = df["Voters"].map(lambda x: _area_pct(x, total))
+        return df[["Category", "Voters", "%"]]
+    except Exception:
+        return pd.DataFrame(columns=["Category", "Voters", "%"])
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, limit: int = 250) -> pd.DataFrame:
+    """One-pass geography/jurisdiction profile table from count_cube."""
+    active = json.loads(active_json or "{}")
+    special = json.loads(special_json or "{}")
+    if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(breakdown)):
+        return pd.DataFrame()
+    url = count_cube_url()
+    where = count_cube_where_sql(active, special)
+    b = sql_ident(breakdown)
+    q = f"""
+        SELECT
+            CAST({b} AS VARCHAR) AS Area,
+            SUM(Voters) AS Total,
+            SUM(CASE WHEN CAST(Party AS VARCHAR) = 'R' THEN Voters ELSE 0 END) AS R,
+            SUM(CASE WHEN CAST(Party AS VARCHAR) = 'D' THEN Voters ELSE 0 END) AS D,
+            SUM(CASE WHEN CAST(Party AS VARCHAR) NOT IN ('R','D') THEN Voters ELSE 0 END) AS O,
+            SUM(CASE WHEN CAST(Gender AS VARCHAR) = 'F' THEN Voters ELSE 0 END) AS Female,
+            SUM(CASE WHEN CAST(Gender AS VARCHAR) = 'M' THEN Voters ELSE 0 END) AS Male,
+            SUM(CASE WHEN CAST(Age_Range AS VARCHAR) IN ('65+', '65 Plus', '65 and over') THEN Voters ELSE 0 END) AS Age65Plus,
+            SUM(CASE WHEN TRY_CAST(V4G AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongGeneral,
+            SUM(CASE WHEN TRY_CAST(V4A AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongAll,
+            SUM(CASE WHEN TRY_CAST(MB_Prob_Score AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS MBProspects,
+            SUM(CASE WHEN UPPER(CAST(MB_App AS VARCHAR)) IN ('Y','YES','APPLIED','TRUE','1') OR UPPER(CAST(MB_App_Status AS VARCHAR)) IN ('APPROVED','PENDING') THEN Voters ELSE 0 END) AS MBApplicants,
+            SUM(CASE WHEN UPPER(CAST(MB_Sent AS VARCHAR)) IN ('Y','YES','SENT','TRUE','1') THEN Voters ELSE 0 END) AS MBSent,
+            SUM(CASE WHEN UPPER(CAST(MB_Status AS VARCHAR)) IN ('VOTED','RETURNED','BALLOT RETURNED') THEN Voters ELSE 0 END) AS MBReturned
+        FROM read_parquet({sql_lit(url)})
+        {where}
+        GROUP BY CAST({b} AS VARCHAR)
+        HAVING SUM(Voters) > 0
+        ORDER BY Total DESC
+        LIMIT {int(limit)}
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try: con.execute("LOAD httpfs;")
+            except Exception: pass
+        df = con.execute(q).df()
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df["Area"] = df["Area"].map(_area_clean_label)
+        for c in [x for x in df.columns if x != "Area"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        df["R %"] = df.apply(lambda r: _area_pct(r["R"], r["Total"]), axis=1)
+        df["D %"] = df.apply(lambda r: _area_pct(r["D"], r["Total"]), axis=1)
+        df["O %"] = df.apply(lambda r: _area_pct(r["O"], r["Total"]), axis=1)
+        df["65+ %"] = df.apply(lambda r: _area_pct(r["Age65Plus"], r["Total"]), axis=1)
+        df["Strong Gen %"] = df.apply(lambda r: _area_pct(r["StrongGeneral"], r["Total"]), axis=1)
+        df["MB Prospect %"] = df.apply(lambda r: _area_pct(r["MBProspects"], r["Total"]), axis=1)
+        df["MB Return %"] = df.apply(lambda r: _area_pct(r["MBReturned"], r["MBSent"]), axis=1)
+        return df[["Area", "Total", "R", "D", "O", "R %", "D %", "O %", "Female", "Male", "Age65Plus", "65+ %", "StrongGeneral", "Strong Gen %", "MBProspects", "MB Prospect %", "MBApplicants", "MBSent", "MBReturned", "MB Return %"]]
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        try: con.close()
+        except Exception: pass
+
+
+def _area_default_breakdown(active: dict) -> str:
+    active = active or {}
+    # Exact user rule first.
+    if len(active.get("Municipality") or []) == 1:
+        return "Precinct"
+    if len(active.get("County") or []) == 1:
+        return "Municipality"
+    # If district filter likely collapses to one county, try to detect it quickly.
+    try:
+        county_df = _area_group_df(active, "County", 5)
+        nonblank = county_df[county_df["Category"].astype(str).str.strip().ne("(Blank)")]
+        if len(nonblank) == 1:
+            return "Municipality"
+    except Exception:
+        pass
+    return "County"
+
+
+def _area_universe_label(active: dict) -> str:
+    if not active:
+        return "Pennsylvania Statewide"
+    try:
+        return universe_label_from_filters(active)
+    except Exception:
+        parts = []
+        for k, vals in active.items():
+            if vals:
+                v = vals[0] if len(vals) == 1 else f"{len(vals)} selected"
+                parts.append(f"{DISPLAY_LABELS.get(k,k)}: {v}")
+        return " · ".join(parts) if parts else "Selected Universe"
+
+
+def _area_insights(summary: dict, party_df: pd.DataFrame, age_df: pd.DataFrame, mb_df: pd.DataFrame) -> list[str]:
+    total = int(summary.get("total", 0) or 0)
+    r = int(summary.get("r", 0) or 0); d = int(summary.get("d", 0) or 0); o = int(summary.get("o", 0) or 0)
+    insights = []
+    if total:
+        if abs(r-d) / total >= 0.05:
+            leader = "Republican" if r > d else "Democratic"
+            margin = abs(r-d)
+            insights.append(f"The universe has a {leader} registration advantage of {margin:,} voters ({_area_pct(margin, total)} of the universe).")
+        else:
+            insights.append("The partisan registration balance is relatively close, so turnout quality and voter-contact targeting may matter more than raw party advantage.")
+        if o / total >= 0.15:
+            insights.append(f"Other/unaffiliated voters are a meaningful bloc at {_area_pct(o, total)}, making persuasion and issue-based outreach important.")
+    try:
+        age65 = age_df[age_df["Category"].astype(str).str.contains("65", regex=False)]["Voters"].sum()
+        if total and age65 / total >= 0.20:
+            insights.append(f"Older voters are a major part of the universe ({_area_pct(age65, total)} age 65+), supporting mail, phone, and repeated direct-contact programs.")
+    except Exception:
+        pass
+    try:
+        applied = int(mb_df[mb_df["Category"].astype(str).str.upper().isin(["Y","YES","APPLIED"])] ["Voters"].sum())
+        if total and applied / total < 0.25:
+            insights.append("Mail-ballot application usage appears limited enough that cultivation can still grow the reachable vote universe.")
+    except Exception:
+        pass
+    if not insights:
+        insights.append("This universe is ready for a basic field strategy review using party, age, vote-history, and mail-ballot behavior below.")
+    return insights[:5]
+
+
+def _area_bar_html(df: pd.DataFrame, title: str, max_rows: int = 8) -> str:
+    if df is None or df.empty:
+        return f'<div class="cc-home-card"><h3>{title}</h3><div class="cc-sub">No data available.</div></div>'
+    show = df.head(max_rows).copy()
+    maxv = max(1, int(pd.to_numeric(show["Voters"], errors="coerce").fillna(0).max()))
+    rows = []
+    for _, r in show.iterrows():
+        lab = str(r["Category"])
+        val = int(r["Voters"] or 0)
+        w = max(2, val / maxv * 100)
+        pct_s = str(r.get("%", ""))
+        rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{val:,} ({pct_s})</span></div>')
+    return f'<div class="cc-home-card"><h3>{title}</h3>' + ''.join(rows) + '</div>'
+
+
+def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str], tables: dict[str, pd.DataFrame], breakdown_field: str) -> bytes:
+    """Professional report PDF for Area Intelligence. Built as a real report, not a screenshot."""
+    bio = io.BytesIO()
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    except Exception:
+        return b""
+
+    doc = SimpleDocTemplate(bio, pagesize=landscape(letter), rightMargin=0.35*inch, leftMargin=0.35*inch, topMargin=0.35*inch, bottomMargin=0.35*inch)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CC_Title", parent=styles["Title"], fontSize=26, leading=30, textColor=colors.HexColor("#111827"), spaceAfter=12))
+    styles.add(ParagraphStyle(name="CC_H", parent=styles["Heading2"], fontSize=14, leading=16, textColor=colors.HexColor("#9f151c"), spaceBefore=8, spaceAfter=6))
+    styles.add(ParagraphStyle(name="CC_Body", parent=styles["BodyText"], fontSize=9, leading=12))
+    story = []
+    story.append(Paragraph("Candidate Connect Area Intelligence Report", styles["CC_Title"]))
+    story.append(Paragraph(f"<b>Universe:</b> {title}", styles["CC_Body"]))
+    story.append(Paragraph(f"<b>Report date:</b> {datetime.now().strftime('%m/%d/%Y')}", styles["CC_Body"]))
+    story.append(Spacer(1, 0.15*inch))
+    cards = [["Total Voters", "Republican", "Democrat", "Other / Unaffiliated"], [f"{summary.get('total',0):,}", f"{summary.get('r',0):,}", f"{summary.get('d',0):,}", f"{summary.get('o',0):,}"]]
+    t = Table(cards, colWidths=[2.35*inch]*4)
+    t.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#9f151c')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,-1),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#d1d5db')),('FONTSIZE',(0,0),(-1,-1),11),('BOTTOMPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),8)
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 0.15*inch))
+    story.append(Paragraph("Executive Strategy Summary", styles["CC_H"]))
+    for ins in insights:
+        story.append(Paragraph(f"• {ins}", styles["CC_Body"]))
+    story.append(Spacer(1, 0.1*inch))
+
+    def add_df(title_s, df, max_rows=16):
+        if df is None or df.empty:
+            return
+        story.append(Paragraph(title_s, styles["CC_H"]))
+        show = df.head(max_rows).copy()
+        # keep readable width
+        if len(show.columns) > 10:
+            keep = list(show.columns[:10])
+            show = show[keep]
+        data = [list(show.columns)]
+        for _, row in show.iterrows():
+            vals=[]
+            for c in show.columns:
+                v = row[c]
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    vals.append(f"{v:,.0f}")
+                else:
+                    vals.append(str(v))
+            data.append(vals)
+        colw = [max(0.75*inch, min(1.65*inch, 9.7*inch/len(data[0])))] * len(data[0])
+        tbl = Table(data, repeatRows=1, colWidths=colw)
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#111827')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ALIGN',(0,0),(-1,-1),'CENTER'),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#cbd5e1')),('FONTSIZE',(0,0),(-1,-1),7),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, colors.HexColor('#f3f4f6')]),('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4)
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 0.1*inch))
+
+    add_df("Core Profile: Party", tables.get("Party"), 8)
+    add_df("Core Profile: Age", tables.get("Age"), 10)
+    add_df("Core Profile: Vote History", tables.get("VoteHistory"), 8)
+    add_df("Core Profile: Mail Ballot", tables.get("MailBallot"), 8)
+    story.append(PageBreak())
+    add_df(f"Strategic Breakdown by {breakdown_field}", tables.get("Breakdown"), 30)
+    doc.build(story)
+    bio.seek(0)
+    return bio.getvalue()
+
+
 def render_area_intelligence_workspace():
     st.markdown("## Area Intelligence")
-    level = st.selectbox("Report Level", ["County","Municipality","Precinct","School District","School Region","USC","STS","STH"], key=special_key("area_level"))
-    opts = field_options(filter_options, level, {})
-    val = st.selectbox(level, opts, key=special_key("area_value")) if opts else ""
-    area_active = {level:[val]} if val else {}
-    st.markdown(f"### {level} Profile")
-    summary, mode, err = update_counts(area_active)
-    if summary: render_metrics(summary)
-    st.info("Area Intelligence profile restored for DEV testing. More profile details/charts can be layered back after live-safe export/report testing.")
+    st.caption("Professional geography and jurisdiction profile for campaign strategy, targeting, and client-ready reports.")
 
+    saved = get_current_universe_filters()
+    default_use = bool(saved)
+    use_current = st.checkbox(
+        f"Use current universe: {st.session_state.get('current_universe_label', 'None')}",
+        value=default_use,
+        disabled=not bool(saved),
+        key=special_key("area_use_current_universe"),
+        help="Use the universe last applied in Create Universe. If unchecked, Area Intelligence starts statewide.",
+    )
+    active = dict(saved) if (use_current and saved) else {}
+    if active:
+        st.info(f"Analyzing current universe: {_area_universe_label(active)}")
+    else:
+        st.info("Analyzing statewide universe. Build/apply a Create Universe first to profile a district, county, municipality, or custom target universe.")
+
+    # Optional quick geography focus inside Area Intel without changing Create Universe.
+    with st.expander("Optional: focus this Area Intelligence report without changing Create Universe", expanded=False):
+        f1, f2, f3, f4 = st.columns(4)
+        area_filters = {}
+        for col, fld in [(f1,"County"), (f2,"Municipality"), (f3,"STH"), (f4,"STS")]:
+            vals = col.multiselect(DISPLAY_LABELS.get(fld, fld), field_options(filter_options, fld, active), key=special_key("area_focus_" + fld))
+            if vals:
+                area_filters[fld] = vals
+        f5, f6, f7, f8 = st.columns(4)
+        for col, fld in [(f5,"USC"), (f6,"School District"), (f7,"School Region"), (f8,"Precinct")]:
+            vals = col.multiselect(DISPLAY_LABELS.get(fld, fld), field_options(filter_options, fld, {**active, **area_filters}), key=special_key("area_focus_" + re.sub(r'[^A-Za-z0-9]+','_',fld)))
+            if vals:
+                area_filters[fld] = vals
+        if area_filters:
+            active = {**active, **area_filters}
+
+    summary, mode, err = update_counts(active)
+    if not summary:
+        st.error(f"Area Intelligence counts are unavailable: {err}")
+        return
+
+    render_metrics(summary)
+
+    party_df = _area_group_df(active, "Party", 8)
+    gender_df = _area_group_df(active, "Gender", 8)
+    age_df = _area_group_df(active, "Age_Range", 12)
+    v4g_df = _area_group_df(active, "V4G", 8)
+    mb_app_df = _area_group_df(active, "MB_App", 8)
+    mb_status_df = _area_group_df(active, "MB_Status", 8)
+    insights = _area_insights(summary, party_df, age_df, mb_app_df)
+
+    st.markdown("### Executive Strategy Readout")
+    for ins in insights:
+        st.markdown(f"<div class='cc-note'>• {ins}</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        render_party_chart(summary, "Party Registration")
+    with c2:
+        st.markdown(_area_bar_html(age_df, "Age Range"), unsafe_allow_html=True)
+
+    c3, c4 = st.columns([1, 1])
+    with c3:
+        st.markdown(_area_bar_html(v4g_df, "Vote History - General"), unsafe_allow_html=True)
+    with c4:
+        st.markdown(_area_bar_html(mb_status_df, "Mail Ballot Status"), unsafe_allow_html=True)
+
+    default_breakdown = _area_default_breakdown(active)
+    breakdown_options = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
+    default_idx = breakdown_options.index(default_breakdown) if default_breakdown in breakdown_options else 0
+    breakdown = st.selectbox(
+        "Break report down by",
+        breakdown_options,
+        index=default_idx,
+        key=special_key("area_breakdown_by"),
+        help="Default follows the next-area-down rule: statewide/multi-county → County; one county → Municipality; one municipality → Precinct. You can override it here.",
+    )
+
+    breakdown_df = _area_breakdown_cube(
+        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+        breakdown,
+        300,
+    )
+
+    st.markdown(f"### Strategic Breakdown by {DISPLAY_LABELS.get(breakdown, breakdown)}")
+    if breakdown_df.empty:
+        st.warning("No breakdown data available for this selection.")
+    else:
+        cc_table(breakdown_df, height=520, key=special_key("area_breakdown_table"))
+
+    tabs = st.tabs(["Profile Tables", "Report", "Notes"])
+    with tabs[0]:
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Party")
+            cc_table(party_df, height=220, key=special_key("area_tbl_party"))
+            st.markdown("#### Gender")
+            cc_table(gender_df, height=220, key=special_key("area_tbl_gender"))
+            st.markdown("#### Mail Ballot Application")
+            cc_table(mb_app_df, height=220, key=special_key("area_tbl_mb_app"))
+        with right:
+            st.markdown("#### Age Range")
+            cc_table(age_df, height=260, key=special_key("area_tbl_age"))
+            st.markdown("#### Vote History - General")
+            cc_table(v4g_df, height=220, key=special_key("area_tbl_v4g"))
+            st.markdown("#### Ballot Status")
+            cc_table(mb_status_df, height=220, key=special_key("area_tbl_mb_status"))
+    with tabs[1]:
+        report_title = _area_universe_label(active)
+        st.markdown("### Client-ready Area Intelligence Report")
+        st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
+        if st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary"):
+            with st.spinner("Preparing Area Intelligence report..."):
+                pdf = _area_pdf_bytes(
+                    report_title,
+                    active,
+                    summary,
+                    insights,
+                    {
+                        "Party": party_df,
+                        "Age": age_df,
+                        "VoteHistory": v4g_df,
+                        "MailBallot": mb_status_df,
+                        "Breakdown": breakdown_df,
+                    },
+                    DISPLAY_LABELS.get(breakdown, breakdown),
+                )
+                st.session_state[special_key("area_pdf_bytes")] = pdf
+        if st.session_state.get(special_key("area_pdf_bytes")):
+            st.download_button(
+                "Download Area Intelligence PDF",
+                st.session_state[special_key("area_pdf_bytes")],
+                "candidate_connect_area_intelligence_report.pdf",
+                "application/pdf",
+                width="stretch",
+            )
+    with tabs[2]:
+        st.text_area("Area Intelligence notes / strategy", key=special_key("area_notes"), height=180)
 
 def filtered_export_columns(df: pd.DataFrame) -> list[str]:
     base = ["voter_id","County","Municipality","Precinct","USC","STS","STH","School District","School Region",
