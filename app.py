@@ -3912,12 +3912,13 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
 
 
-def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None):
+def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
     """Readable sortable Streamlit table with comma-formatted numbers.
 
-    Streamlit's dataframe grid already gives sortable headers and sticky headers
-    when a height is provided. This wrapper adds comma formatting and consistent
-    centered styling for the tables we show across workspaces.
+    Streamlit's dataframe grid gives sortable headers and sticky headers when a
+    height is provided. This wrapper adds comma formatting and centered styling.
+    Where supported by the installed Streamlit version, sticky_first_col pins the
+    first column so area labels remain visible while scrolling horizontally.
     """
     if df is None:
         df = pd.DataFrame()
@@ -3932,17 +3933,27 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
             # Keep percentage-like columns alone; format other large numeric columns.
             if str(col).strip() not in {"%", "Percent", "Pct"}:
                 fmt_cols[col] = "{:,.0f}"
+    column_config = None
+    if sticky_first_col and len(show.columns) > 0:
+        try:
+            import inspect
+            first_col = str(show.columns[0])
+            sig = inspect.signature(st.column_config.TextColumn)
+            if "pinned" in sig.parameters:
+                column_config = {first_col: st.column_config.TextColumn(first_col, pinned=True)}
+        except Exception:
+            column_config = None
     try:
         styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center"}).set_table_styles([
             {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900")]},
             {"selector": "td", "props": [("text-align", "center")]},
         ])
-        return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key)
+        return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
     except Exception:
         # Safe fallback: pre-format values as strings.
         for col, spec in fmt_cols.items():
             show[col] = show[col].map(lambda x: "" if pd.isna(x) else format(float(x), ",.0f"))
-        return st.dataframe(show, hide_index=True, width="stretch", height=height, key=key)
+        return st.dataframe(show, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
 
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
     st.markdown(
@@ -4246,6 +4257,10 @@ def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, li
         if df is None or df.empty:
             return pd.DataFrame()
         df["Area"] = df["Area"].map(_area_clean_label)
+        # Hide blank geography/jurisdiction rows in Area Intelligence breakdowns.
+        df = df[df["Area"].astype(str).str.strip().ne("(Blank)")].copy()
+        if df.empty:
+            return pd.DataFrame()
         for c in [x for x in df.columns if x != "Area"]:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
         df["R %"] = df.apply(lambda r: _area_pct(r["R"], r["Total"]), axis=1)
@@ -4559,7 +4574,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         labs = [str(x) for x in df["Category"].tolist()[:6]]
         if not any(vals):
             return d
-        p = Pie(); p.x=15; p.y=15; p.width=125; p.height=125; p.data=vals; p.labels=[None]*len(vals)
+        p = Pie(); p.x=15; p.y=15; p.width=125; p.height=125; p.data=vals; p.labels=[""]*len(vals)
         palette = [red, blue, green, gold, colors.HexColor('#64748b'), colors.HexColor('#94a3b8')]
         for i in range(len(vals)):
             p.slices[i].fillColor = palette[i % len(palette)]
@@ -4599,7 +4614,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(Spacer(1, 0.16*inch))
 
     charts = Table([[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")],
-                    [bar_chart(tables.get("VoteHistory"), "General Vote History"), pie_chart(tables.get("MailBallot"), "Mail Ballot Behavior")]],
+                    [bar_chart(tables.get("VoteHistory"), "Vote History - All Elections"), pie_chart(tables.get("MailBallot"), "Mail Ballot Behavior")]],
                    colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.95*inch, 1.95*inch])
     charts.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
     story.append(charts)
@@ -4609,7 +4624,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     story.append(section_header("Universe Profile"))
     story.append(Spacer(1, 0.10*inch))
     top = []
-    for title_s, key in [("Party Composition", "Party"), ("Age Distribution", "Age"), ("General Vote History", "VoteHistory"), ("Mail Ballot Behavior", "MailBallot")]:
+    for title_s, key in [("Party Composition", "Party"), ("Age Distribution", "Age"), ("Vote History - All Elections", "VoteHistory"), ("Mail Ballot Behavior", "MailBallot")]:
         tbl = as_table_df(tables.get(key), max_rows=10, max_cols=3)
         if tbl:
             top.append([Paragraph(title_s, styles["CC_H2"]), tbl])
@@ -4732,7 +4747,7 @@ def render_area_intelligence_workspace():
     party_df = _area_group_df(active, "Party", 8)
     gender_df = _area_group_df(active, "Gender", 8)
     age_df = _area_group_df(active, "Age_Range", 12)
-    v4g_df = _area_group_df(active, "V4G", 8)
+    v4a_df = _area_group_df(active, "V4A", 8)
     mb_app_df = _area_group_df(active, "MB_App", 8)
     mb_status_df = _area_group_df(active, "MB_Status", 8)
     turnout_df = _area_turnout_by_party(
@@ -4754,7 +4769,7 @@ def render_area_intelligence_workspace():
 
     c3, c4 = st.columns([1, 1])
     with c3:
-        st.markdown(_area_bar_html(v4g_df, "Vote History - General"), unsafe_allow_html=True)
+        st.markdown(_area_bar_html(v4a_df, "Vote History - All Elections"), unsafe_allow_html=True)
     with c4:
         st.markdown(_area_bar_html(mb_status_df, "Mail Ballot Status"), unsafe_allow_html=True)
 
@@ -4780,7 +4795,7 @@ def render_area_intelligence_workspace():
     if breakdown_df.empty:
         st.warning("No breakdown data available for this selection.")
     else:
-        cc_table(breakdown_df, height=520, key=special_key("area_breakdown_table"))
+        cc_table(breakdown_df, height=520, key=special_key("area_breakdown_table"), sticky_first_col=True)
 
     tabs = st.tabs(["Profile Tables", "Report", "Notes"])
     with tabs[0]:
@@ -4795,8 +4810,8 @@ def render_area_intelligence_workspace():
         with right:
             st.markdown("#### Age Range")
             cc_table(age_df, height=260, key=special_key("area_tbl_age"))
-            st.markdown("#### Vote History - General")
-            cc_table(v4g_df, height=220, key=special_key("area_tbl_v4g"))
+            st.markdown("#### Vote History - All Elections")
+            cc_table(v4a_df, height=220, key=special_key("area_tbl_v4a"))
             st.markdown("#### Historical Turnout by Party")
             cc_table(turnout_df, height=300, key=special_key("area_tbl_turnout"))
             st.markdown("#### Ballot Status")
@@ -4815,7 +4830,7 @@ def render_area_intelligence_workspace():
                     {
                         "Party": party_df,
                         "Age": age_df,
-                        "VoteHistory": v4g_df,
+                        "VoteHistory": v4a_df,
                         "MailBallot": mb_status_df,
                         "Turnout": turnout_df,
                         "Breakdown": breakdown_df,
