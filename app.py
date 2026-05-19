@@ -3025,40 +3025,72 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             y-=13
         return y
 
-    def draw_hist_wide(title, items, y, max_cols=18):
-        c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 8); c.drawString(36, y, title); y -= 12
+    def draw_hist_wide(title, items, y, max_cols=20):
+        """Compact, boxed election history grid for PDF readability."""
         if not items:
-            c.setFont("Helvetica", 6.5); c.drawString(36, y, "No history found."); return y - 12
-        usable_w = w - 92
-        left_label_w = 42
-        step = min(34, (usable_w - left_label_w) / max(1, min(max_cols, len(items))))
+            c.setFillColorRGB(0,0,0); c.setFont("Helvetica-Bold", 8); c.drawString(36, y, title)
+            c.setFont("Helvetica", 6.5); c.drawString(92, y, "No history found.")
+            return y - 14
+
+        usable_w = w - 72
+        left_label_w = 44
+        row_h = 12
+
         for start in range(0, len(items), max_cols):
             chunk = items[start:start+max_cols]
             if y < 58:
                 c.showPage(); y = _draw_branded_header(c, "Voter Lookup Report", "Election History") - 18
-            x0 = 36 + left_label_w
-            c.setFont("Helvetica-Bold", 6.3)
+
+            cols = max(1, len(chunk))
+            cell_w = (usable_w - left_label_w) / cols
+
+            c.setFillColorRGB(0.56,0.06,0.13)
+            c.roundRect(36, y-12, usable_w, 15, 3, fill=1, stroke=0)
+            c.setFillColorRGB(1,1,1); c.setFont("Helvetica-Bold", 7.5)
+            c.drawString(42, y-8, title)
+            y -= 18
+
+            x = 36
+            table_w = left_label_w + cell_w * len(chunk)
+            table_h = row_h * 3
+
+            c.setFillColorRGB(0.88,0.90,0.94); c.rect(x, y-row_h, table_w, row_h, stroke=0, fill=1)
+            c.setFillColorRGB(0.97,0.97,0.98); c.rect(x, y-row_h*2, table_w, row_h, stroke=0, fill=1)
+            c.setFillColorRGB(1,1,1); c.rect(x, y-row_h*3, table_w, row_h, stroke=0, fill=1)
+
+            c.setStrokeColorRGB(0.72,0.72,0.76); c.setLineWidth(0.35)
+            for rline in range(4):
+                yy = y - row_h*rline
+                c.line(x, yy, x+table_w, yy)
+            c.line(x, y, x, y-table_h)
+            c.line(x+left_label_w, y, x+left_label_w, y-table_h)
+            for i in range(len(chunk)+1):
+                xx = x + left_label_w + cell_w*i
+                c.line(xx, y, xx, y-table_h)
+
+            c.setFillColorRGB(0.08,0.08,0.08)
+            c.setFont("Helvetica-Bold", 5.8)
+            c.drawCentredString(x + left_label_w/2, y-row_h+3.2, "Election")
+            c.drawCentredString(x + left_label_w/2, y-row_h*2+3.2, "Party")
+            c.drawCentredString(x + left_label_w/2, y-row_h*3+3.2, "Method")
             for i,it in enumerate(chunk):
-                c.drawCentredString(x0+i*step, y, it[1])
-            y -= 10
-            c.drawString(36, y, "Party")
-            c.setFont("Helvetica-Bold", 6.3)
-            for i,it in enumerate(chunk):
-                c.drawCentredString(x0+i*step, y, it[2])
-            y -= 10
-            c.setFont("Helvetica-Bold", 6.3); c.drawString(36, y, "Method")
-            c.setFont("Helvetica", 6.3)
-            for i,it in enumerate(chunk):
-                c.drawCentredString(x0+i*step, y, vote_method_pdf_label(it[3]))
-            y -= 16
+                cx = x + left_label_w + cell_w*i + cell_w/2
+                c.setFont("Helvetica-Bold", 5.8)
+                c.drawCentredString(cx, y-row_h+3.2, cc_text(it[1])[:4])
+                c.setFont("Helvetica-Bold", 5.8)
+                c.drawCentredString(cx, y-row_h*2+3.2, cc_text(it[2])[:2])
+                c.setFont("Helvetica", 5.8)
+                c.drawCentredString(cx, y-row_h*3+3.2, vote_method_pdf_label(it[3])[:2])
+
+            y -= table_h + 10
         return y
 
-    y = draw_hist_wide("General", general, y, max_cols=22) - 4
-    y = draw_hist_wide("Primary", primary, y, max_cols=22) - 6
+    y = draw_hist_wide("General Elections", general, y, max_cols=20) - 4
+    y = draw_hist_wide("Primary Elections", primary, y, max_cols=20) - 6
     if y < 36:
         c.showPage(); y = 70
     c.setFont("Helvetica", 6.3); c.setFillColorRGB(0.25,0.25,0.25)
-    c.drawString(36, max(28, y), "Legend: MB = Mail Ballot   POLL = At Poll   PROV = Provisional   blank = Did Not Vote / no record")
+    c.drawString(36, max(28, y), "Legend: MB = Mail Ballot   AP = At Poll   PV = Provisional   blank = Did Not Vote / no record")
     c.save(); bio.seek(0); return bio.getvalue()
 
 def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame:
@@ -3228,16 +3260,16 @@ def vote_method_pdf_label(method_or_icon: str) -> str:
     if v in {"✉", "✉️"}:
         return "MB"
     if v in {"🗳", "🗳️"}:
-        return "POLL"
+        return "AP"
     if v in {"🟨"}:
-        return "PROV"
+        return "PV"
     m = normalize_vote_method(v)
     if m == "Mail Ballot":
         return "MB"
     if m == "At Poll":
-        return "POLL"
+        return "AP"
     if m == "Provisional":
-        return "PROV"
+        return "PV"
     return ""
 
 
@@ -3308,17 +3340,32 @@ def render_election_history_table(row: pd.Series):
             m = method_for(c)
             method_row[short] = vote_method_icon(m) or vote_method_pdf_label(m)
         hist_df = pd.DataFrame([party_row, method_row])
-        # Use Streamlit's dataframe rendering rather than raw HTML so tags never display as text.
-        # Styler keeps every visible cell centered.
-        styler = (
-            hist_df.style
-            .set_properties(**{"text-align": "center"})
-            .set_table_styles([
-                {"selector": "th", "props": [("text-align", "center")]},
-                {"selector": "td", "props": [("text-align", "center")]},
-            ])
-        )
-        st.dataframe(styler, hide_index=True, width="stretch", height=92)
+
+        # Custom HTML table fixes the clipped emoji row and forces center alignment.
+        def _cell(v):
+            return cc_text(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        headers = list(hist_df.columns)
+        html = [
+            '<div class="cc-history-scroll"><table class="cc-history-table">',
+            '<thead><tr>' + ''.join(f'<th>{_cell(h)}</th>' for h in headers) + '</tr></thead>',
+            '<tbody>'
+        ]
+        for _, rr in hist_df.iterrows():
+            html.append('<tr>' + ''.join(f'<td>{_cell(rr.get(h, ""))}</td>' for h in headers) + '</tr>')
+        html.append('</tbody></table></div>')
+        css = """
+<style>
+.cc-history-scroll { max-width: 100%; overflow-x: auto; margin: 6px 0 14px 0; }
+.cc-history-table { border-collapse: collapse; min-width: 760px; background: #0b0f19; color: #f8fafc; font-size: 12px; }
+.cc-history-table th, .cc-history-table td { border: 1px solid rgba(148,163,184,.28); text-align: center !important; vertical-align: middle !important; padding: 8px 10px; line-height: 1.45; min-width: 38px; height: 34px; }
+.cc-history-table th:first-child, .cc-history-table td:first-child { position: sticky; left: 0; z-index: 2; background: #111827; min-width: 58px; font-weight: 800; }
+.cc-history-table th { position: sticky; top: 0; z-index: 3; background: #1f2430; font-weight: 800; }
+.cc-history-table tr:nth-child(even) td { background: #0f1724; }
+.cc-history-table tr:nth-child(odd) td { background: #090d16; }
+.cc-history-table tr:nth-child(even) td:first-child, .cc-history-table tr:nth-child(odd) td:first-child { background: #111827; }
+</style>
+"""
+        st.markdown(css + ''.join(html), unsafe_allow_html=True)
 
     draw("General", general)
     draw("Primary", primary)
