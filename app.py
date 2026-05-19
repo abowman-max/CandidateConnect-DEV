@@ -1136,6 +1136,67 @@ def decode_saved_universes(raw):
         return {}
 
 
+
+CORRECTIONS_PARAM = "cc_voter_corrections"
+
+def _json_safe_corrections(corrections):
+    """Return voter corrections as JSON-safe durable data."""
+    if not isinstance(corrections, dict):
+        return {}
+    clean = {}
+    for vid, payload in corrections.items():
+        vid_s = str(vid or "").strip()
+        if not vid_s or not isinstance(payload, dict):
+            continue
+        fields = payload.get("fields") or {}
+        if not isinstance(fields, dict):
+            fields = {}
+        clean[vid_s] = {
+            "updated_at": str(payload.get("updated_at", "")),
+            "fields": {str(k): cc_text(v) for k, v in fields.items()},
+            "notes": cc_text(payload.get("notes", "")),
+        }
+    return clean
+
+def encode_corrections(corrections) -> str:
+    try:
+        payload = json.dumps(_json_safe_corrections(corrections), separators=(",", ":"), ensure_ascii=False)
+        return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    except Exception:
+        return ""
+
+def decode_corrections(raw):
+    try:
+        if isinstance(raw, list):
+            raw = raw[0] if raw else ""
+        raw = str(raw or "").strip()
+        if not raw:
+            return {}
+        payload = base64.urlsafe_b64decode(raw.encode("ascii") + b"=" * (-len(raw) % 4)).decode("utf-8")
+        return _json_safe_corrections(json.loads(payload))
+    except Exception:
+        return {}
+
+def _load_remote_app_state() -> dict:
+    """Read durable app_state uploaded to R2 by Pipeline Manager, when available."""
+    state = {}
+    try:
+        r = requests.get(r2_url("app_state/saved_universes.json"), timeout=10)
+        if r.ok:
+            state["saved_universes"] = _json_safe_saved_universes(r.json())
+    except Exception:
+        pass
+    try:
+        r = requests.get(r2_url("app_state/voter_record_corrections.json"), timeout=10)
+        if r.ok:
+            raw = r.json()
+            # Accept either direct correction-store JSON or a rows/list export.
+            if isinstance(raw, dict):
+                state["voter_corrections"] = _json_safe_corrections(raw)
+    except Exception:
+        pass
+    return state
+
 def _state_file_candidates():
     """Small local DEV persistence so saved universes/corrections survive app reboot.
     This is not a substitute for the later real cloud/mobile persistence layer, but it
@@ -1155,13 +1216,18 @@ def _state_file_candidates():
 
 
 def _load_dev_state() -> dict:
+    # Remote app_state is the durable baseline after rebuild/deploy. Local/browser state can override it.
+    state = _load_remote_app_state()
     for path in _state_file_candidates():
         try:
             if path.exists():
-                return json.loads(path.read_text(encoding="utf-8")) or {}
+                local_state = json.loads(path.read_text(encoding="utf-8")) or {}
+                if isinstance(local_state, dict):
+                    state.update(local_state)
+                    return state
         except Exception:
             continue
-    return {}
+    return state
 
 
 def _save_dev_state(state: dict):
@@ -2878,12 +2944,11 @@ def _history_payload(row: pd.Series, limit: int | None = None):
     primary_cols = dedupe_group("P")
 
     def method_for(col):
+        # Important: party-only values (R/D/O) are NOT vote methods.
+        # They may populate the Party row, but the Method row must stay blank unless the source
+        # actually says mail/at-poll/provisional/etc.
         raw = row.get(col, "")
-        method = normalize_vote_method(raw)
-        if not method and not _blank_vote_value(raw):
-            if cc_text(raw).upper() in {"R","D","O","I","NP","REP","DEM","REPUBLICAN","DEMOCRAT","DEMOCRATIC"}:
-                method = "At Poll"
-        return method
+        return normalize_vote_method(raw)
 
     def party_for(col):
         raw = cc_text(row.get(col, "")).upper()
@@ -3177,15 +3242,38 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
 
 
 def correction_store() -> dict:
-    """Saved voter corrections, loaded from local DEV state so app reboot doesn't erase them."""
+    """Saved voter corrections with layered persistence.
+
+    DEV durability order:
+      1) R2 app_state/voter_record_corrections.json uploaded by Pipeline Manager
+      2) local JSON state when running locally
+      3) browser URL query parameter for refresh/reboot survival of recent edits
+    """
     if "voter_corrections" not in st.session_state or not isinstance(st.session_state.get("voter_corrections"), dict):
-        st.session_state["voter_corrections"] = (_load_dev_state().get("voter_corrections") or {})
+        state_corr = _json_safe_corrections(_load_dev_state().get("voter_corrections") or {})
+        try:
+            url_corr = decode_corrections(st.query_params.get(CORRECTIONS_PARAM, ""))
+        except Exception:
+            url_corr = {}
+        state_corr.update(url_corr or {})
+        st.session_state["voter_corrections"] = state_corr
     return st.session_state["voter_corrections"]
 
 
 def persist_corrections():
+    clean = _json_safe_corrections(st.session_state.get("voter_corrections", {}) or {})
+    st.session_state["voter_corrections"] = clean
     try:
-        _persist_dev_section("voter_corrections", st.session_state.get("voter_corrections", {}) or {})
+        _persist_dev_section("voter_corrections", clean)
+    except Exception:
+        pass
+    # Also store in the browser URL so refresh/reboot keeps recent edits until they are committed to app_state/R2.
+    try:
+        encoded = encode_corrections(clean)
+        if encoded and len(encoded) < 7000:
+            st.query_params[CORRECTIONS_PARAM] = encoded
+        elif CORRECTIONS_PARAM in st.query_params:
+            del st.query_params[CORRECTIONS_PARAM]
     except Exception:
         pass
 
@@ -3302,12 +3390,11 @@ def render_election_history_table(row: pd.Series):
     primary = _dedup_history_cols_for_row(cols, row, "P")
 
     def method_for(col):
+        # Important: party-only values (R/D/O) are NOT vote methods.
+        # They may populate the Party row, but the Method row must stay blank unless the source
+        # actually says mail/at-poll/provisional/etc.
         raw = row.get(col, "")
-        method = normalize_vote_method(raw)
-        if not method and not _blank_vote_value(raw):
-            if cc_text(raw).upper() in {"R","D","O","I","NP","REP","DEM","REPUBLICAN","DEMOCRAT","DEMOCRATIC"}:
-                method = "At Poll"
-        return method
+        return normalize_vote_method(raw)
 
     def party_for(col):
         raw = cc_text(row.get(col, "")).upper()
