@@ -2944,11 +2944,15 @@ def _history_payload(row: pd.Series, limit: int | None = None):
     primary_cols = dedupe_group("P")
 
     def method_for(col):
-        # Important: party-only values (R/D/O) are NOT vote methods.
-        # They may populate the Party row, but the Method row must stay blank unless the source
-        # actually says mail/at-poll/provisional/etc.
+        # Election columns can store either an explicit vote method (MAIL/POLL/PROV)
+        # or a party code (R/D/O) meaning the voter participated in that election.
+        # If a voter participated and no explicit method is present, treat it as At Poll.
+        # If there is no party/vote record for that election, keep Method blank.
         raw = row.get(col, "")
-        return normalize_vote_method(raw)
+        explicit = normalize_vote_method(raw)
+        if explicit:
+            return explicit
+        return "At Poll" if party_for(col) else ""
 
     def party_for(col):
         raw = cc_text(row.get(col, "")).upper()
@@ -3390,11 +3394,15 @@ def render_election_history_table(row: pd.Series):
     primary = _dedup_history_cols_for_row(cols, row, "P")
 
     def method_for(col):
-        # Important: party-only values (R/D/O) are NOT vote methods.
-        # They may populate the Party row, but the Method row must stay blank unless the source
-        # actually says mail/at-poll/provisional/etc.
+        # Election columns can store either an explicit vote method (MAIL/POLL/PROV)
+        # or a party code (R/D/O) meaning the voter participated in that election.
+        # If a voter participated and no explicit method is present, treat it as At Poll.
+        # If there is no party/vote record for that election, keep Method blank.
         raw = row.get(col, "")
-        return normalize_vote_method(raw)
+        explicit = normalize_vote_method(raw)
+        if explicit:
+            return explicit
+        return "At Poll" if party_for(col) else ""
 
     def party_for(col):
         raw = cc_text(row.get(col, "")).upper()
