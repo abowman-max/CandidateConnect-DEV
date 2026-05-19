@@ -2311,7 +2311,11 @@ def full_name(row):
         if val:
             return val
 
-    parts = [usable(row.get(c, "")) for c in ["FirstName", "MiddleName", "LastName", "NameSuffix"]]
+    first = usable(row.get("FirstName", "")) or usable(row.get("first_name", "")) or usable(row.get("FIRST_NAME", ""))
+    middle = usable(row.get("MiddleName", "")) or usable(row.get("middle_name", "")) or usable(row.get("MIDDLE_NAME", ""))
+    last = usable(row.get("LastName", "")) or usable(row.get("last_name", "")) or usable(row.get("LAST_NAME", ""))
+    suffix = usable(row.get("NameSuffix", "")) or usable(row.get("suffix", "")) or usable(row.get("SUFFIX", ""))
+    parts = [first, middle, last, suffix]
     name = " ".join([p for p in parts if p]).strip()
     if name:
         return name
@@ -2996,6 +3000,7 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
     hh_key_value = cc_text(row.get("HH_LOOKUP_KEY", "")) or household_lookup_key(row)
     cols = [
         "voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix",
+        "first_name", "middle_name", "last_name", "suffix",
         "Party", "Gender", "Age", "DOB", "House Number", "Street Name", "Apartment Number",
         "City", "State", "Zip", "County", "Municipality", "Precinct", "HH_LOOKUP_KEY"
     ]
@@ -3220,10 +3225,17 @@ def render_election_history_table(row: pd.Series):
             short = str(c).split("_")[0].upper()
             party_row[short] = party_for(c)
             m = method_for(c)
-            method_row[short] = vote_method_pdf_label(m)
+            method_row[short] = vote_method_icon(m) or vote_method_pdf_label(m)
         data.extend([party_row, method_row])
         hist_df = pd.DataFrame(data)
-        st.dataframe(hist_df, hide_index=True, width="stretch")
+        try:
+            styler = hist_df.style.set_properties(**{"text-align": "center"}).set_table_styles([
+                {"selector": "th", "props": [("text-align", "center"), ("position", "sticky"), ("top", "0"), ("z-index", "2")]},
+                {"selector": "td", "props": [("text-align", "center")]},
+            ])
+            st.dataframe(styler, hide_index=True, width="stretch")
+        except Exception:
+            st.dataframe(hist_df, hide_index=True, width="stretch")
     draw("General", general)
     draw("Primary", primary)
     st.caption("Legend: MB = Mail Ballot · POLL = At Poll · PROV = Provisional · blank = Did Not Vote / no record")
@@ -3446,7 +3458,7 @@ def render_voter_lookup_workspace():
         if st.session_state.get(hh_key):
             hh = pd.DataFrame(st.session_state.get(hh_key) or [])
             if not hh.empty:
-                view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "Party", "Gender", "Age", "County", "City", "State"] if c in hh.columns]].copy()
+                view = hh[[c for c in ["voter_id", "FullName", "Name", "FirstName", "MiddleName", "LastName", "NameSuffix", "first_name", "middle_name", "last_name", "suffix", "Party", "Gender", "Age", "County", "City", "State"] if c in hh.columns]].copy()
                 # Do not show a table here. Build household member cards and make each
                 # non-current card directly clickable to load that voter.
                 view["DisplayName"] = hh.apply(full_name, axis=1).map(smart_title)
@@ -3476,8 +3488,8 @@ def render_voter_lookup_workspace():
 
                 st.markdown("""
                 <style>
-                div[data-testid="stButton"] button p { white-space: pre-line !important; line-height: 1.2 !important; }
-                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 54px !important; text-align: left !important; justify-content: flex-start !important; }
+                div[data-testid="stButton"] button p { white-space: pre-line !important; line-height: 1.2 !important; text-align: center !important; }
+                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 54px !important; text-align: center !important; justify-content: center !important; }
                 </style>
                 """, unsafe_allow_html=True)
 
@@ -3489,20 +3501,22 @@ def render_voter_lookup_workspace():
                     sub_bits = [x for x in [cc_text(hhrow.get("Party", "")), cc_text(hhrow.get("Gender", "")), ("Age " + cc_text(hhrow.get("Age", "")) if cc_text(hhrow.get("Age", "")) else "")] if x]
                     sub = " · ".join(sub_bits)
                     label = ("✓ " if is_current else "Open ") + hname + (f"\n{sub}" if sub else "")
-                    if is_current:
-                        st.button(label, key=f"hh_current_{selected_id}_{j}_{hvid}", width="stretch", disabled=True)
-                    else:
-                        if st.button(label, key=f"open_household_card_{selected_id}_{j}_{hvid}", width="stretch"):
-                            st.session_state["lookup_selected_id"] = hvid
-                            try:
-                                hd = remote_voter_lookup_detail(hvid)
-                                st.session_state[f"lookup_detail_row_{hvid}"] = pd.DataFrame([hd]).iloc[0].to_dict()
-                            except Exception:
-                                pass
-                            for k in list(st.session_state.keys()):
-                                if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
-                                    st.session_state.pop(k, None)
-                            st.rerun()
+                    _spacer_l, _card_col, _spacer_r = st.columns([0.12, 0.56, 0.32])
+                    with _card_col:
+                        if is_current:
+                            st.button(label, key=f"hh_current_{selected_id}_{j}_{hvid}", width="stretch", disabled=True)
+                        else:
+                            if st.button(label, key=f"open_household_card_{selected_id}_{j}_{hvid}", width="stretch"):
+                                st.session_state["lookup_selected_id"] = hvid
+                                try:
+                                    hd = remote_voter_lookup_detail(hvid)
+                                    st.session_state[f"lookup_detail_row_{hvid}"] = pd.DataFrame([hd]).iloc[0].to_dict()
+                                except Exception:
+                                    pass
+                                for k in list(st.session_state.keys()):
+                                    if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
+                                        st.session_state.pop(k, None)
+                                st.rerun()
         else:
             st.caption("No household members found from the selected address.")
 
