@@ -2802,7 +2802,13 @@ def remote_voter_lookup_detail(voter_id: str) -> pd.Series:
         "Mobile", "Landline", "Current_ApplicantPhone", "Email",
         "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "Tags"
     ]
-    lookup_cols = base_cols + [c for c in election_columns_from_manifest() if c not in base_cols]
+    # Pull every election/history column actually present in the detail shard, not just
+    # columns listed in the manifest. Some builds store vote method in sibling fields
+    # such as G24_method / G24_VoteMethod; if those are not selected the app can only
+    # infer At Poll from the party row.
+    manifest_election_cols = [c for c in election_columns_from_manifest() if c not in base_cols]
+    existing_election_cols = [c for c in existing_cols if election_meta_from_col(c) and c not in base_cols]
+    lookup_cols = base_cols + manifest_election_cols + [c for c in existing_election_cols if c not in manifest_election_cols]
     select_cols = safe_remote_select_exprs(existing_cols, lookup_cols)
     con = duckdb.connect(database=':memory:')
     try:
@@ -2911,77 +2917,93 @@ def _draw_branded_header(c, title: str, subtitle: str = ""):
     return h - 70
 
 
-def _history_payload(row: pd.Series, limit: int | None = None):
-    """Return de-duplicated election history tuples for PDF: (column, short label, party, method)."""
+def _election_short_label(col: str) -> str:
+    meta = election_meta_from_col(col) or {}
+    typ = str(meta.get("type", "") or "").upper()
+    year = str(meta.get("year", "") or "")
+    if year.startswith("20") and len(year) == 4:
+        yy = year[-2:]
+    else:
+        m = re.search(r"(\d{2})(?!.*\d)", str(col))
+        yy = m.group(1) if m else year[-2:]
+    prefix = "G" if typ.startswith("GENERAL") else ("P" if typ.startswith("PRIMARY") else ("S" if typ.startswith("SPECIAL") else str(col).strip()[:1].upper()))
+    return f"{prefix}{yy}" if yy else str(col).split("_")[0].upper()
+
+
+def _is_method_column_name(col: str) -> bool:
+    u = re.sub(r"[^A-Z0-9]+", "_", str(col).upper())
+    return any(tok in u for tok in ["METHOD", "VOTE_METHOD", "VOTEMETHOD", "BALLOT", "VOTE_TYPE", "VOTETYPE", "MODE", "CAST"])
+
+
+def _history_groups_for_row(row: pd.Series, prefix: str) -> list[tuple[str, list[str]]]:
+    """Return [(G24/P24 label, candidate columns)] with all party and method sibling fields."""
     row = row if isinstance(row, pd.Series) else pd.Series(row or {})
-    try:
-        cols = election_columns_from_manifest()
-    except Exception:
-        cols = []
-    if not cols:
-        cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
+    row_cols = [c for c in row.index if election_meta_from_col(c)]
+    # Fall back to manifest order when the row came from an older thin source.
+    if not row_cols:
+        row_cols = election_columns_from_manifest()
+    groups = {}
+    for c in row_cols:
+        short = _election_short_label(c)
+        if not short.upper().startswith(prefix):
+            continue
+        groups.setdefault(short, [])
+        if c not in groups[short]:
+            groups[short].append(c)
+    def key(item):
+        short = item[0]
+        m = re.search(r"(\d{2})", short)
+        return int(m.group(1)) if m else -1
+    return sorted(groups.items(), key=key, reverse=True)
 
-    # De-duplicate columns by display election code. Some builds expose both G25 and G25_* aliases,
-    # which was doubling every election in the app/PDF.
-    def dedupe_group(prefix: str):
-        raw_cols = [c for c in cols if str(c).upper().startswith(prefix)]
-        raw_cols = sorted(raw_cols, key=lambda c: str(c).upper(), reverse=True)
-        chosen = {}
-        order = []
-        for c in raw_cols:
-            short = str(c).split("_")[0].upper()
-            if short not in chosen:
-                chosen[short] = c
-                order.append(short)
-            else:
-                # Prefer the duplicate column that actually has data for this voter.
-                prev = chosen[short]
-                if _blank_vote_value(row.get(prev, "")) and not _blank_vote_value(row.get(c, "")):
-                    chosen[short] = c
-        return [chosen[k] for k in order]
 
-    general_cols = dedupe_group("G")
-    primary_cols = dedupe_group("P")
-
-    def method_for(col):
-        # Election columns can store either an explicit vote method (MAIL/POLL/PROV)
-        # or a party code (R/D/O) meaning the voter participated in that election.
-        # If a voter participated and no explicit method is present, treat it as At Poll.
-        # If there is no party/vote record for that election, keep Method blank.
-        raw = row.get(col, "")
-        explicit = normalize_vote_method(raw)
-        if explicit:
-            return explicit
-        return "At Poll" if party_for(col) else ""
-
-    def party_for(col):
-        raw = cc_text(row.get(col, "")).upper()
-        if raw in {"R","D"}:
+def _party_from_history_group(row: pd.Series, cols: list[str]) -> str:
+    # Prefer non-method columns because they usually store the party at time/current party code.
+    ordered = sorted(cols, key=lambda c: 1 if _is_method_column_name(c) else 0)
+    for c in ordered:
+        raw = cc_text(row.get(c, "")).upper()
+        if raw in {"R", "D"}:
             return raw
-        if raw in {"REP","REPUBLICAN"}:
+        if raw in {"REP", "REPUBLICAN"}:
             return "R"
-        if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
+        if raw in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
             return "D"
-        if not _blank_vote_value(raw) and normalize_vote_method(raw):
-            pty = cc_text(row.get("Party", "")).upper()
-            if pty in {"R", "D"}:
-                return pty
-            if pty in {"REP", "REPUBLICAN"}:
+    # If the only populated value is a vote method, use the voter current party as the displayed party.
+    for c in cols:
+        if normalize_vote_method(row.get(c, "")):
+            p = cc_text(row.get("Party", "")).upper()
+            if p in {"R", "D"}:
+                return p
+            if p in {"REP", "REPUBLICAN"}:
                 return "R"
-            if pty in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
+            if p in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
                 return "D"
-        return ""
+            if p:
+                return "O"
+    return ""
 
-    def build(group_cols):
-        out = []
+
+def _method_from_history_group(row: pd.Series, cols: list[str]) -> str:
+    # Prefer explicitly named method/ballot columns, then any value that normalizes to a method.
+    method_cols = [c for c in cols if _is_method_column_name(c)]
+    other_cols = [c for c in cols if c not in method_cols]
+    for c in method_cols + other_cols:
+        m = normalize_vote_method(row.get(c, ""))
+        if m:
+            return m
+    # Only infer At Poll if there is a party/vote record but no explicit method.
+    return "At Poll" if _party_from_history_group(row, cols) else ""
+
+
+def _history_payload(row: pd.Series, limit: int | None = None):
+    """Return de-duplicated election history tuples for PDF: (label, party, method)."""
+    row = row if isinstance(row, pd.Series) else pd.Series(row or {})
+    def build(prefix: str):
+        groups = _history_groups_for_row(row, prefix)
         if limit is not None:
-            group_cols = group_cols[:int(limit)]
-        for col in group_cols:
-            short = str(col).split("_")[0].upper()
-            out.append((str(col), short, party_for(col), method_for(col)))
-        return out
-
-    return build(general_cols), build(primary_cols)
+            groups = groups[:int(limit)]
+        return [(short, _party_from_history_group(row, cols), _method_from_history_group(row, cols)) for short, cols in groups]
+    return build("G"), build("P")
 
 def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None) -> bytes:
     """Branded voter lookup report with full available vote history."""
@@ -3084,13 +3106,13 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
                 c.showPage(); y = _draw_branded_header(c, "Voter Lookup Report", "Election History") - 18
             x0=x+42; step=20
             c.setFont("Helvetica-Bold", 6.2)
-            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[1])
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[0])
             y-=9
             c.drawString(x,y,"Party")
-            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[2])
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, it[1])
             y-=9
             c.drawString(x,y,"Method")
-            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, vote_method_pdf_label(it[3]))
+            for i,it in enumerate(chunk): c.drawCentredString(x0+i*step, y, vote_method_pdf_label(it[2]))
             y-=13
         return y
 
@@ -3145,11 +3167,11 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
             for i,it in enumerate(chunk):
                 cx = x + left_label_w + cell_w*i + cell_w/2
                 c.setFont("Helvetica-Bold", 5.8)
-                c.drawCentredString(cx, y-row_h+3.2, cc_text(it[1])[:4])
+                c.drawCentredString(cx, y-row_h+3.2, cc_text(it[0])[:4])
                 c.setFont("Helvetica-Bold", 5.8)
-                c.drawCentredString(cx, y-row_h*2+3.2, cc_text(it[2])[:2])
+                c.drawCentredString(cx, y-row_h*2+3.2, cc_text(it[1])[:2])
                 c.setFont("Helvetica", 5.8)
-                c.drawCentredString(cx, y-row_h*3+3.2, vote_method_pdf_label(it[3])[:2])
+                c.drawCentredString(cx, y-row_h*3+3.2, vote_method_pdf_label(it[2])[:2])
 
             y -= table_h + 10
         return y
@@ -3385,58 +3407,23 @@ def _dedup_history_cols_for_row(cols, row: pd.Series, prefix: str):
 
 
 def render_election_history_table(row: pd.Series):
-    """Draw visible blank/no-vote years and method icons for the selected voter."""
+    """Draw visible blank/no-vote years and correct method icons for the selected voter."""
     row = row if isinstance(row, pd.Series) else pd.Series(row or {})
-    cols = election_columns_from_manifest()
-    if not cols:
-        cols = [c for c in row.index if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c))]
-    general = _dedup_history_cols_for_row(cols, row, "G")
-    primary = _dedup_history_cols_for_row(cols, row, "P")
 
-    def method_for(col):
-        # Election columns can store either an explicit vote method (MAIL/POLL/PROV)
-        # or a party code (R/D/O) meaning the voter participated in that election.
-        # If a voter participated and no explicit method is present, treat it as At Poll.
-        # If there is no party/vote record for that election, keep Method blank.
-        raw = row.get(col, "")
-        explicit = normalize_vote_method(raw)
-        if explicit:
-            return explicit
-        return "At Poll" if party_for(col) else ""
-
-    def party_for(col):
-        raw = cc_text(row.get(col, "")).upper()
-        if raw in {"R","D"}:
-            return raw
-        if raw in {"REP","REPUBLICAN"}:
-            return "R"
-        if raw in {"DEM","DEMOCRAT","DEMOCRATIC"}:
-            return "D"
-        if not _blank_vote_value(raw) and normalize_vote_method(raw):
-            p = cc_text(row.get("Party", "")).upper()
-            if p in {"R", "D"}:
-                return p
-            if p in {"REP", "REPUBLICAN"}:
-                return "R"
-            if p in {"DEM", "DEMOCRAT", "DEMOCRATIC"}:
-                return "D"
-        return ""
-
-    def draw(label, group_cols):
+    def draw(label, prefix):
         st.markdown(f"**{label} Elections**")
-        if not group_cols:
+        groups = _history_groups_for_row(row, prefix)
+        if not groups:
             st.caption("No election history columns available in this shard build.")
             return
         party_row = {"Row": "Party"}
         method_row = {"Row": "Method"}
-        for c in group_cols:
-            short = str(c).split("_")[0].upper()
-            party_row[short] = party_for(c)
-            m = method_for(c)
+        for short, cols in groups:
+            party_row[short] = _party_from_history_group(row, cols)
+            m = _method_from_history_group(row, cols)
             method_row[short] = vote_method_icon(m) or vote_method_pdf_label(m)
         hist_df = pd.DataFrame([party_row, method_row])
 
-        # Custom HTML table fixes the clipped emoji row and forces center alignment.
         def _cell(v):
             return cc_text(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         headers = list(hist_df.columns)
@@ -3452,18 +3439,17 @@ def render_election_history_table(row: pd.Series):
 <style>
 .cc-history-scroll { max-width: 100%; overflow-x: auto; margin: 6px 0 14px 0; }
 .cc-history-table { border-collapse: collapse; min-width: 760px; background: #0b0f19; color: #f8fafc; font-size: 12px; }
-.cc-history-table th, .cc-history-table td { border: 1px solid rgba(148,163,184,.28); text-align: center !important; vertical-align: middle !important; padding: 8px 10px; line-height: 1.45; min-width: 38px; height: 34px; }
-.cc-history-table th:first-child, .cc-history-table td:first-child { position: sticky; left: 0; z-index: 2; background: #111827; min-width: 58px; font-weight: 800; }
+.cc-history-table th, .cc-history-table td { border: 1px solid rgba(148,163,184,.28); text-align: center !important; vertical-align: middle !important; padding: 8px 10px; line-height: 1.45; min-width: 38px; height: 36px; }
+.cc-history-table th:first-child, .cc-history-table td:first-child { position: sticky; left: 0; z-index: 2; background: #111827 !important; min-width: 58px; font-weight: 800; }
 .cc-history-table th { position: sticky; top: 0; z-index: 3; background: #1f2430; font-weight: 800; }
 .cc-history-table tr:nth-child(even) td { background: #0f1724; }
 .cc-history-table tr:nth-child(odd) td { background: #090d16; }
-.cc-history-table tr:nth-child(even) td:first-child, .cc-history-table tr:nth-child(odd) td:first-child { background: #111827; }
 </style>
 """
         st.markdown(css + ''.join(html), unsafe_allow_html=True)
 
-    draw("General", general)
-    draw("Primary", primary)
+    draw("General", "G")
+    draw("Primary", "P")
     st.caption("Legend: ✉️ = Mail Ballot · 🗳️ = At Poll · 🟨 = Provisional · blank = Did Not Vote / no record")
 
 def render_voter_lookup_workspace():
@@ -4480,6 +4466,8 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     styles.add(ParagraphStyle(name="CC_H2", fontName="Helvetica-Bold", fontSize=12, leading=15, textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=4))
     styles.add(ParagraphStyle(name="CC_Body", fontName="Helvetica", fontSize=9.5, leading=13, textColor=colors.HexColor("#374151")))
     styles.add(ParagraphStyle(name="CC_Small", fontName="Helvetica", fontSize=7.8, leading=10, textColor=colors.HexColor("#4b5563")))
+    styles.add(ParagraphStyle(name="CC_Cell", parent=styles["CC_Small"], alignment=1))
+    styles.add(ParagraphStyle(name="CC_CellHead", parent=styles["CC_Small"], alignment=1, fontName="Helvetica-Bold", textColor=colors.white))
 
     red = colors.HexColor("#9f151c")
     blue = colors.HexColor("#1d4ed8")
@@ -4541,7 +4529,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         if len(show.columns) > max_cols:
             show = show[list(show.columns[:max_cols])]
         cols = list(show.columns)
-        data = [[Paragraph(str(c), styles["CC_Small"]) for c in cols]]
+        data = [[Paragraph(str(c), styles["CC_CellHead"]) for c in cols]]
         for _, row in show.iterrows():
             vals = []
             for c in cols:
@@ -4550,7 +4538,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
                     txt = f"{v:,.0f}"
                 else:
                     txt = str(v)
-                vals.append(Paragraph(txt, styles["CC_Small"]))
+                vals.append(Paragraph(txt, styles["CC_Cell"]))
             data.append(vals)
         n = max(1, len(cols))
         total_w = 10.0*inch
@@ -4579,29 +4567,29 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         ]))
 
     def pie_chart(df, title_s):
-        d = Drawing(250, 170)
-        d.add(String(10, 154, title_s, fontName='Helvetica-Bold', fontSize=11, fillColor=dark))
+        d = Drawing(235, 128)
+        d.add(String(8, 116, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
         if df is None or df.empty:
             return d
         vals = [int(x) for x in pd.to_numeric(df["Voters"], errors="coerce").fillna(0).tolist()[:6]]
         labs = [str(x) for x in df["Category"].tolist()[:6]]
         if not any(vals):
             return d
-        p = Pie(); p.x=15; p.y=15; p.width=125; p.height=125; p.data=vals; p.labels=[""]*len(vals)
+        p = Pie(); p.x=10; p.y=14; p.width=88; p.height=88; p.data=vals; p.labels=[""]*len(vals)
         palette = [red, blue, green, gold, colors.HexColor('#64748b'), colors.HexColor('#94a3b8')]
         for i in range(len(vals)):
             p.slices[i].fillColor = palette[i % len(palette)]
         d.add(p)
         total=sum(vals) or 1
-        y=124
+        y=96
         for i,(lab,val) in enumerate(zip(labs,vals)):
-            d.add(String(155, y, f"{lab}: {val:,} ({val/total*100:.1f}%)", fontSize=7.5, fillColor=dark))
-            y -= 14
+            d.add(String(112, y, f"{lab}: {val:,} ({val/total*100:.1f}%)", fontSize=6.8, fillColor=dark))
+            y -= 12
         return d
 
     def bar_chart(df, title_s):
-        d = Drawing(250, 170)
-        d.add(String(10, 154, title_s, fontName='Helvetica-Bold', fontSize=11, fillColor=dark))
+        d = Drawing(235, 128)
+        d.add(String(8, 116, title_s, fontName='Helvetica-Bold', fontSize=10, fillColor=dark))
         if df is None or df.empty:
             return d
         show = df.head(7).copy()
@@ -4609,9 +4597,9 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         labs = [str(x)[:8] for x in show["Category"].tolist()]
         if not any(vals):
             return d
-        bc = VerticalBarChart(); bc.x=28; bc.y=28; bc.height=100; bc.width=190; bc.data=[vals]
+        bc = VerticalBarChart(); bc.x=26; bc.y=26; bc.height=72; bc.width=178; bc.data=[vals]
         bc.valueAxis.valueMin=0; bc.valueAxis.valueMax=max(vals)*1.15; bc.valueAxis.valueStep=max(1, int(max(vals)/4))
-        bc.categoryAxis.categoryNames=labs; bc.categoryAxis.labels.boxAnchor='ne'; bc.categoryAxis.labels.angle=35; bc.categoryAxis.labels.fontSize=6.5
+        bc.categoryAxis.categoryNames=labs; bc.categoryAxis.labels.boxAnchor='ne'; bc.categoryAxis.labels.angle=35; bc.categoryAxis.labels.fontSize=5.8
         bc.bars[0].fillColor = red
         d.add(bc)
         return d
@@ -4628,7 +4616,7 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
 
     charts = Table([[pie_chart(tables.get("Party"), "Party Composition"), bar_chart(tables.get("Age"), "Age Distribution")],
                     [bar_chart(tables.get("VoteHistory"), "Vote History - All Elections"), pie_chart(tables.get("MailBallot"), "Mail Ballot Behavior")]],
-                   colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.95*inch, 1.95*inch])
+                   colWidths=[5.0*inch, 5.0*inch], rowHeights=[1.55*inch, 1.55*inch])
     charts.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('GRID',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb'))]))
     story.append(charts)
     story.append(PageBreak())
@@ -4706,18 +4694,15 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         canvas.saveState()
         canvas.setFont('Helvetica', 7)
         canvas.setFillColor(colors.HexColor('#6b7280'))
-        if doc.page > 1:
-            try:
-                if file_exists(LOGO_CANDIDATE_CONNECT):
-                    canvas.drawImage(ImageReader(LOGO_CANDIDATE_CONNECT), 0.42*inch, 7.05*inch, width=0.85*inch, height=0.32*inch, preserveAspectRatio=True, mask='auto')
-            except Exception:
-                pass
-            canvas.drawString(1.32*inch, 7.13*inch, "Candidate Connect Area Intelligence")
-            canvas.setStrokeColor(colors.HexColor('#e5e7eb'))
-            canvas.line(0.42*inch, 6.98*inch, 10.58*inch, 6.98*inch)
-        else:
-            canvas.drawString(0.42*inch, 0.18*inch, "Candidate Connect Area Intelligence")
-        canvas.drawRightString(10.58*inch, 0.18*inch, f"Page {doc.page}")
+        try:
+            if file_exists(LOGO_CANDIDATE_CONNECT):
+                canvas.drawImage(ImageReader(LOGO_CANDIDATE_CONNECT), 0.42*inch, 0.10*inch, width=0.42*inch, height=0.18*inch, preserveAspectRatio=True, mask='auto')
+                canvas.drawString(0.90*inch, 0.17*inch, "Candidate Connect Area Intelligence")
+            else:
+                canvas.drawString(0.42*inch, 0.17*inch, "Candidate Connect Area Intelligence")
+        except Exception:
+            canvas.drawString(0.42*inch, 0.17*inch, "Candidate Connect Area Intelligence")
+        canvas.drawRightString(10.58*inch, 0.17*inch, f"Page {doc.page}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
