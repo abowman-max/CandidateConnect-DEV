@@ -3229,11 +3229,29 @@ def render_election_history_table(row: pd.Series):
         data.extend([party_row, method_row])
         hist_df = pd.DataFrame(data)
         try:
-            styler = hist_df.style.set_properties(**{"text-align": "center"}).set_table_styles([
-                {"selector": "th", "props": [("text-align", "center"), ("position", "sticky"), ("top", "0"), ("z-index", "2")]},
-                {"selector": "td", "props": [("text-align", "center")]},
-            ])
-            st.dataframe(styler, hide_index=True, width="stretch")
+            # Render this small two-row history table as HTML so every cell is truly center aligned
+            # and vote-method icons render reliably across Streamlit dataframe versions.
+            html = hist_df.to_html(index=False, escape=False, classes="cc-history-table")
+            st.markdown(
+                """
+                <style>
+                .cc-history-wrap { max-width: 100%; overflow-x: auto; margin-bottom: 14px; }
+                table.cc-history-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12px; }
+                table.cc-history-table th, table.cc-history-table td {
+                    text-align: center !important; vertical-align: middle !important;
+                    border: 1px solid rgba(148,163,184,.25); padding: 8px 10px;
+                    background: #0b0f19; color: #f8fafc; white-space: nowrap;
+                }
+                table.cc-history-table th { position: sticky; top: 0; z-index: 2; background: #171b26; }
+                table.cc-history-table th:first-child, table.cc-history-table td:first-child {
+                    position: sticky; left: 0; z-index: 3; background: #171b26; font-weight: 900;
+                }
+                table.cc-history-table tbody tr:nth-child(even) td { background: #101521; }
+                </style>
+                <div class="cc-history-wrap">
+                """ + html + "</div>",
+                unsafe_allow_html=True,
+            )
         except Exception:
             st.dataframe(hist_df, hide_index=True, width="stretch")
     draw("General", general)
@@ -3489,7 +3507,7 @@ def render_voter_lookup_workspace():
                 st.markdown("""
                 <style>
                 div[data-testid="stButton"] button p { white-space: pre-line !important; line-height: 1.2 !important; text-align: center !important; }
-                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 54px !important; text-align: center !important; justify-content: center !important; }
+                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 46px !important; text-align: center !important; justify-content: center !important; padding: 8px 12px !important; }
                 </style>
                 """, unsafe_allow_html=True)
 
@@ -3500,8 +3518,8 @@ def render_voter_lookup_workspace():
                     is_current = hvid == selected_id
                     sub_bits = [x for x in [cc_text(hhrow.get("Party", "")), cc_text(hhrow.get("Gender", "")), ("Age " + cc_text(hhrow.get("Age", "")) if cc_text(hhrow.get("Age", "")) else "")] if x]
                     sub = " · ".join(sub_bits)
-                    label = ("✓ " if is_current else "Open ") + hname + (f"\n{sub}" if sub else "")
-                    _spacer_l, _card_col, _spacer_r = st.columns([0.12, 0.56, 0.32])
+                    label = ("✓ " if is_current else "") + hname + (f"\n{sub}" if sub else "")
+                    _card_col, _spacer_r = st.columns([0.42, 0.58])
                     with _card_col:
                         if is_current:
                             st.button(label, key=f"hh_current_{selected_id}_{j}_{hvid}", width="stretch", disabled=True)
