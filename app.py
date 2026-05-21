@@ -777,6 +777,35 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
   .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
 }
 
+
+
+/* v22v header-only final polish: taller header + Impact-style tagline */
+.cc-global-header { height: 142px !important; }
+.block-container { padding-top: 9.1rem !important; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 9.0rem !important; }
+.cc-global-header-inner { padding-top: 12px !important; padding-bottom: 12px !important; }
+.cc-global-redbar { height: 14px !important; margin-bottom: 8px !important; }
+.cc-global-brand-row { min-height: 104px !important; align-items:center !important; }
+.cc-global-logo-center { height: 108px !important; max-width: 390px !important; object-fit: contain !important; }
+.cc-global-logo-right { height: 76px !important; max-width: 250px !important; object-fit: contain !important; }
+.cc-global-tagline {
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+    font-size: 27px !important;
+    line-height: .95 !important;
+    letter-spacing: .04em !important;
+    color: #071d3a !important;
+    text-transform: uppercase !important;
+    text-shadow: 1px 2px 2px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.85) !important;
+}
+.cc-global-tagline span { color:#071d3a !important; text-shadow: 1px 2px 2px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.85) !important; }
+@media (max-width: 900px) {
+  .cc-global-header { height: 118px !important; }
+  .block-container { padding-top: 7.8rem !important; }
+  [data-testid="stSidebar"] > div:first-child { padding-top: 7.8rem !important; }
+  .cc-global-logo-center { height: 76px !important; max-width: 240px !important; }
+  .cc-global-tagline { font-size: 18px !important; }
+}
+
 </style>
 """,
     unsafe_allow_html=True,
