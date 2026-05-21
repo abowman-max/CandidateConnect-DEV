@@ -68,6 +68,22 @@ def file_exists(path: str) -> bool:
     except Exception:
         return False
 
+
+def img_data_uri(path: str) -> str:
+    """Return a safe data URI for local branding images used in the fixed full-width header."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            alt = Path(__file__).resolve().parent / path
+            p = alt if alt.exists() else p
+        if not p.exists():
+            return ""
+        ext = p.suffix.lower().lstrip(".") or "png"
+        mime = "image/png" if ext in {"png", "apng"} else ("image/jpeg" if ext in {"jpg", "jpeg"} else "image/png")
+        return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+    except Exception:
+        return ""
+
 DEFAULT_EXPORT_COLUMNS = [
     # Keep voter_id in every CSV/Excel output so street/walk/contact results can be matched later.
     "voter_id",
@@ -527,6 +543,94 @@ h1,h2,h3,h4,h5,h6, p, span, label, div, .stMarkdown, .stCaption, [data-testid="s
 [data-testid="stSidebar"] details > summary *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
     color: #071d3a !important;
 }
+
+
+
+/* v22r final readability lock: light UI, dark text, red controls, no dark-mode bleed-through */
+:root { color-scheme: light !important; }
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
+    background: #efe8d8 !important;
+    color: #071d3a !important;
+}
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
+    background: #e6ddcc !important;
+    color: #071d3a !important;
+    border-right: 2px solid #9f151c !important;
+}
+.block-container { padding-top: 7.7rem !important; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 7.5rem !important; }
+.cc-header { display: none !important; }
+.cc-global-header {
+    position: fixed; top: 0; left: 0; right: 0; height: 118px; z-index: 999999;
+    background: #efe8d8; border-bottom: 2px solid #9f151c;
+    box-shadow: 0 6px 18px rgba(7,29,58,.20);
+    display: grid; grid-template-columns: 260px minmax(0,1fr); align-items: stretch;
+}
+.cc-global-sidebar-fill { border-right: 2px solid #9f151c; background:#e6ddcc; }
+.cc-global-header-inner {
+    margin: 0 auto; max-width: 1280px; width: min(1280px, calc(100vw - 290px));
+    padding: 10px 24px 8px 24px;
+}
+.cc-global-redbar { height: 14px; border-radius: 999px; background:#940d14; border:1px solid #5d0b10; margin-bottom:8px; box-shadow:0 6px 14px rgba(7,29,58,.25); }
+.cc-global-brand-row { display:flex; align-items:center; justify-content:space-between; gap:24px; }
+.cc-global-logo-left { height:78px; object-fit:contain; }
+.cc-global-logo-right { height:78px; max-width:300px; object-fit:contain; }
+.cc-global-title { text-align:center; flex:1; color:#071d3a !important; font-weight:950; font-size:22px; line-height:1.15; }
+.cc-global-sub { color:#071d3a !important; font-size:10px; font-weight:700; opacity:.95; margin-top:4px; }
+@media (max-width: 900px) {
+  .cc-global-header { grid-template-columns: 0 minmax(0,1fr); height: 112px; }
+  .cc-global-sidebar-fill { display:none; }
+  .cc-global-header-inner { width:100%; padding-left:12px; padding-right:12px; }
+  .cc-global-logo-left { height:58px; } .cc-global-logo-right { height:58px; max-width:180px; }
+  .cc-global-title { font-size:16px; }
+}
+
+.cc-card, .cc-home-card, .cc-metric, .cc-icon-metric, .cc-note, .cc-verify, .stAlert,
+div[data-testid="stMetric"], div[data-testid="stExpander"], div[data-testid="stForm"], .element-container {
+    color:#071d3a !important;
+}
+.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric, div[data-testid="stMetric"] {
+    background:#f8f4ea !important; border-color:#b9ad99 !important;
+}
+.cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric *, .cc-note *, .cc-verify *, div[data-testid="stMetric"] * {
+    color:#071d3a !important; opacity:1 !important; text-shadow:none !important;
+}
+.cc-icon-dot, .cc-swatch { color:#ffffff !important; }
+.cc-donut-center, .cc-donut-center * { color:#ffffff !important; }
+.cc-legend-row, .cc-age-row, .cc-age-row *, .cc-home-table, .cc-home-table * { color:#071d3a !important; opacity:1 !important; }
+.cc-home-table th { background:#9f151c !important; color:#ffffff !important; text-align:center !important; }
+.cc-home-table th * { color:#ffffff !important; }
+.cc-home-table td { background:#ffffff !important; color:#000000 !important; text-align:center !important; }
+.cc-home-table tr:nth-child(even) td { background:#f3eadc !important; }
+
+[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input,
+[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"],
+[data-baseweb="popover"] div, [data-baseweb="menu"] div, [role="option"], [role="option"] * {
+    background:#ffffff !important; color:#071d3a !important; opacity:1 !important; text-shadow:none !important;
+}
+[role="option"]:hover, [role="option"][aria-selected="true"], [data-baseweb="menu"] li:hover {
+    background:#f1e7d6 !important; color:#071d3a !important;
+}
+
+[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame, .stTable {
+    background:#ffffff !important; color:#000000 !important; border:1px solid #9f151c !important;
+}
+[data-testid="stDataFrame"] *, [data-testid="stTable"] * { color:#000000 !important; opacity:1 !important; text-shadow:none !important; }
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] *,
+[data-testid="stTable"] th, [data-testid="stTable"] th * {
+    background:#9f151c !important; color:#ffffff !important; text-align:center !important; font-weight:900 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"], [data-testid="stTable"] td {
+    background:#ffffff !important; color:#000000 !important; text-align:center !important; justify-content:center !important;
+}
+[data-testid="stDataFrame"] [role="row"]:nth-child(even) [role="gridcell"], [data-testid="stTable"] tr:nth-child(even) td {
+    background:#f3eadc !important;
+}
+
+.modebar, .modebar-container, .modebar-group { background:#ffffff !important; border:1px solid #9f151c !important; }
+.modebar-btn svg path { fill:#071d3a !important; }
+.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
+.hoverlayer .hovertext text { fill:#071d3a !important; }
 
 </style>
 """,
@@ -4106,9 +4210,9 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
         except Exception:
             column_config = None
     try:
-        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center", "color": "#000000"}).set_table_styles([
+        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center", "color": "#000000", "background-color": "#ffffff"}).set_table_styles([
             {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900"), ("background-color", "#9f151c"), ("color", "#ffffff")]},
-            {"selector": "td", "props": [("text-align", "center"), ("color", "#000000")]},
+            {"selector": "td", "props": [("text-align", "center"), ("color", "#000000"), ("background-color", "#ffffff")]},
             {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f3eadc")]},
             {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
         ])
@@ -5448,18 +5552,23 @@ def render_output_buttons(active):
             if uploaded is not None:
                 st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
 
-st.markdown('<div class="cc-header">', unsafe_allow_html=True)
-h_logo, h_mid, h_power = st.columns([1.1, 2.8, 1.2])
-with h_logo:
-    if file_exists(LOGO_CANDIDATE_CONNECT): st.image(LOGO_CANDIDATE_CONNECT, width="stretch")
-    else: st.markdown('<div class="cc-title">Candidate Connect</div>', unsafe_allow_html=True)
-with h_mid:
-    st.markdown('<div class="cc-title">Candidate Connect DEV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cc-sub">Voter Data & Engagement Platform • Stable DEV cloud build v21zs</div>', unsafe_allow_html=True)
-with h_power:
-    if file_exists(LOGO_TPTC): st.image(LOGO_TPTC, width="stretch")
-    else: st.markdown('<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+# Full-width branded header fixed across both the sidebar and main workspace.
+_cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
+_tss_logo_uri = img_data_uri(LOGO_TPTC)
+_cc_logo_html = f'<img class="cc-global-logo-left" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
+_tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
+st.markdown(f'''<div class="cc-global-header">
+  <div class="cc-global-sidebar-fill"></div>
+  <div class="cc-global-header-inner">
+    <div class="cc-global-redbar"></div>
+    <div class="cc-global-brand-row">
+      {_cc_logo_html}
+      <div class="cc-global-title">Candidate Connect DEV<div class="cc-global-sub">Voter Data & Engagement Platform • Stable DEV cloud build v22r</div></div>
+      {_tss_logo_html}
+    </div>
+  </div>
+</div>
+''', unsafe_allow_html=True)
 
 try:
     with st.spinner("Loading filters from R2..."):
@@ -5473,7 +5582,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v22q — readability contrast + precinct exact field fix")
+    st.caption("DEV final hybrid v22r — full-width header + readability lock")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
