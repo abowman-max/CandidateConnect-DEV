@@ -898,6 +898,63 @@ div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownlo
 )
 
 
+
+# v23b: home dashboard gender labels + responsive chart/table readability.
+st.markdown(
+    """
+<style>
+/* Keep dashboard donuts circular and readable on iPad / smaller MacBook widths. */
+.cc-donut {
+    aspect-ratio: 1 / 1 !important;
+    flex: 0 0 auto !important;
+}
+.cc-donut-wrap {
+    flex-wrap: wrap !important;
+    align-items: center !important;
+}
+.cc-home-card {
+    overflow-x: auto !important;
+}
+.cc-legend-row {
+    min-width: 260px !important;
+}
+@media (max-width: 1100px) {
+    .cc-donut-wrap {
+        justify-content: center !important;
+        gap: 14px !important;
+    }
+    .cc-donut {
+        width: 190px !important;
+        height: 190px !important;
+        min-width: 190px !important;
+        max-width: 190px !important;
+    }
+    .cc-donut:after { inset: 52px !important; }
+    .cc-legend-row {
+        grid-template-columns: 18px 1fr auto !important;
+        width: 100% !important;
+        max-width: 440px !important;
+        min-width: 280px !important;
+    }
+}
+@media (max-width: 760px) {
+    .cc-donut {
+        width: 170px !important;
+        height: 170px !important;
+        min-width: 170px !important;
+        max-width: 170px !important;
+    }
+    .cc-donut:after { inset: 46px !important; }
+    .cc-donut-wrap {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+    }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
@@ -2387,6 +2444,29 @@ def render_party_chart(summary, title="Party Breakdown"):
     </div></div>"""
     st.markdown(html, unsafe_allow_html=True)
 
+
+def render_gender_chart(summary, title="Voters by Gender"):
+    """Dashboard donut for gender. Uses the same layout as party, but labels correctly as Female/Male/Unknown."""
+    total = int(summary.get("total", 0) or 0)
+    f = int(summary.get("f", 0) or 0)
+    m = int(summary.get("m", 0) or 0)
+    u = int(summary.get("u", 0) or 0)
+    fp = round((f / total * 100), 1) if total else 0
+    mp = round((m / total * 100), 1) if total else 0
+    up = round((u / total * 100), 1) if total else 0
+    html = f"""<div class=\"cc-home-card\"><h3>{title}</h3>
+    <div class=\"cc-donut-wrap\">
+      <div class=\"cc-donut\" style=\"--r:{fp};--d:{mp};--o:{up};\">
+        <div class=\"cc-donut-center\"><div>{total:,}</div><div style=\"font-size:11px;color:#ffffff !important;\">Total</div></div>
+      </div>
+      <div style=\"min-width:260px;\">
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#d51f2a\"></span><span>Female</span><b>{f:,} ({fp:.1f}%)</b></div>
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#2454d6\"></span><span>Male</span><b>{m:,} ({mp:.1f}%)</b></div>
+        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#4c9a2a\"></span><span>Unknown / Other</span><b>{u:,} ({up:.1f}%)</b></div>
+      </div>
+    </div></div>"""
+    st.markdown(html, unsafe_allow_html=True)
+
 def render_quick_exact_comparison():
     q = st.session_state.get("quick_summary")
     e = st.session_state.get("exact_summary")
@@ -2596,8 +2676,8 @@ def render_statewide_snapshot():
         gdf = duckdb_count_cube_group("Gender", 8)
         if not gdf.empty and "Voters" in gdf.columns:
             gf = {str(row.get("label", "")).upper(): int(row.get("Voters", 0) or 0) for _, row in gdf.iterrows()}
-            gs = {"total": sum(gf.values()), "r": gf.get("F", 0), "d": gf.get("M", 0), "o": sum(v for k,v in gf.items() if k not in {"F","M"})}
-            render_party_chart(gs, "Voters by Gender")
+            gs = {"total": sum(gf.values()), "f": gf.get("F", 0), "m": gf.get("M", 0), "u": sum(v for k, v in gf.items() if k not in {"F", "M"})}
+            render_gender_chart(gs, "Voters by Gender")
     with right:
         render_home_age_card(total)
         render_home_geo_table(summary)
