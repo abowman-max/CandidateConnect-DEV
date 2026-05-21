@@ -557,11 +557,11 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewC
     color: #071d3a !important;
     border-right: 2px solid #9f151c !important;
 }
-.block-container { padding-top: 7.7rem !important; }
-[data-testid="stSidebar"] > div:first-child { padding-top: 7.5rem !important; }
+.block-container { padding-top: 8.8rem !important; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 8.25rem !important; }
 .cc-header { display: none !important; }
 .cc-global-header {
-    position: fixed; top: 0; left: 0; right: 0; height: 118px; z-index: 999999;
+    position: fixed; top: 0; left: 0; right: 0; height: 140px; z-index: 999999;
     background: #efe8d8; border-bottom: 2px solid #9f151c;
     box-shadow: 0 6px 18px rgba(7,29,58,.20);
     display: grid; grid-template-columns: 260px minmax(0,1fr); align-items: stretch;
@@ -675,7 +675,7 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
 
 
 /* v22t surgical readability fix: do not allow blue-on-dark chart text or invisible tables. */
-.cc-global-header { height: 122px !important; }
+.cc-global-header { height: 140px !important; }
 .cc-global-header-inner { width:100vw !important; max-width:none !important; padding-left:28px !important; padding-right:28px !important; }
 .cc-global-brand-row { display:grid !important; grid-template-columns: 260px minmax(280px,1fr) 260px !important; align-items:center !important; }
 .cc-global-title span {
@@ -756,16 +756,16 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
     gap:1px !important;
     padding-left:18px !important;
     color:#071d3a !important;
-    font-family: Georgia, 'Times New Roman', serif !important;
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
     font-weight:900 !important;
-    font-size:24px !important;
-    line-height:1.02 !important;
-    letter-spacing:.03em !important;
+    font-size:26px !important;
+    line-height:.93 !important;
+    letter-spacing:.02em !important;
     text-transform:uppercase !important;
 }
-.cc-global-tagline span { color:#071d3a !important; text-shadow:0 1px 0 #ffffff !important; }
-.cc-global-logo-center-wrap { justify-self:center !important; display:flex !important; align-items:center !important; justify-content:center !important; }
-.cc-global-logo-center { height:92px !important; max-width:360px !important; object-fit:contain !important; }
+.cc-global-tagline span { color:#071d3a !important; text-shadow:2px 2px 0 rgba(255,255,255,.72), 3px 3px 5px rgba(7,29,58,.35) !important; }
+.cc-global-logo-center-wrap { justify-self:center !important; display:flex !important; align-items:center !important; justify-content:center !important; padding-top:0 !important; padding-bottom:8px !important; }
+.cc-global-logo-center { height:96px !important; max-width:380px !important; object-fit:contain !important; object-position:center center !important; }
 .cc-global-logo-right { justify-self:end !important; height:78px !important; max-width:250px !important; object-fit:contain !important; }
 .cc-global-title, .cc-global-title-rule { display:none !important; }
 .cc-html-table td, .cc-html-table th { text-align:center !important; vertical-align:middle !important; }
@@ -806,6 +806,19 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
   .cc-global-tagline { font-size: 18px !important; }
 }
 
+
+
+/* v22w header final nudge: taller header, centered logo fully visible, cleaner sidebar top */
+.cc-global-header { height: 142px !important; overflow:visible !important; }
+.cc-global-header-inner { padding-top:10px !important; padding-bottom:12px !important; }
+.cc-global-redbar { margin-bottom:6px !important; }
+.cc-global-brand-row { min-height:110px !important; align-items:center !important; }
+.cc-global-logo-center { height:96px !important; max-height:96px !important; transform:translateY(-3px) !important; }
+.cc-global-tagline { font-family:Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important; font-size:27px !important; line-height:.92 !important; letter-spacing:.01em !important; }
+.cc-global-tagline span { color:#071d3a !important; text-shadow:2px 2px 0 #f8f4ea, 3px 3px 5px rgba(7,29,58,.38) !important; }
+.block-container { padding-top: 9.0rem !important; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 8.25rem !important; }
+.cc-sidebar-build-note { color:#071d3a !important; opacity:.78; font-size:10px; margin:-6px 0 8px 0; text-align:center; letter-spacing:.12em; font-weight:900; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -5761,8 +5774,7 @@ if "left_section" not in st.session_state: st.session_state["left_section"] = No
 _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
-    st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v22s — full-width header + readability lock")
+    st.markdown('<div class="cc-sidebar-build-note">DEV</div>', unsafe_allow_html=True)
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
