@@ -5774,7 +5774,9 @@ def render_output_buttons(active):
             allowed_types = ["PDF"] if export_kind.endswith("PDF") else ["CSV", "Excel"]
             file_type = st.selectbox("File type", allowed_types, key=special_key("export_file_type"))
         with e3:
-            mailing_mode = st.radio("Mailing mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"), disabled=(export_kind != "Mail File"))
+            mailing_mode = st.radio("Mailing mode", ["Not Householded", "Householded"], horizontal=True, key=special_key("mailing_mode"), disabled=(export_kind not in ["Mail File", "Mailing Labels PDF"]))
+            if export_kind in ["Mail File", "Mailing Labels PDF"]:
+                st.caption("Householded = one mail piece/label per household address.")
 
         key = prepared_key_for(export_kind, file_type)
         pcol, dcol = st.columns([1, 1])
