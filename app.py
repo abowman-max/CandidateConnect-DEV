@@ -819,6 +819,38 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
 .block-container { padding-top: 9.0rem !important; }
 [data-testid="stSidebar"] > div:first-child { padding-top: 8.25rem !important; }
 .cc-sidebar-build-note { color:#071d3a !important; opacity:.78; font-size:10px; margin:-6px 0 8px 0; text-align:center; letter-spacing:.12em; font-weight:900; }
+
+
+/* === v22x tab/toggle readability fix: dark blue tab text on beige theme === */
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] *,
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button * {
+    color: #071d3a !important;
+    font-weight: 850 !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+button[data-baseweb="tab"][aria-selected="true"],
+button[data-baseweb="tab"][aria-selected="true"] *,
+[role="tab"][aria-selected="true"],
+[role="tab"][aria-selected="true"] * {
+    color: #071d3a !important;
+    font-weight: 950 !important;
+}
+button[data-baseweb="tab"]:hover,
+button[data-baseweb="tab"]:hover *,
+[role="tab"]:hover,
+[role="tab"]:hover * {
+    color: #071d3a !important;
+    background: rgba(255,255,255,.28) !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 3px !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
