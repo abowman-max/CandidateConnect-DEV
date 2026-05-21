@@ -55,7 +55,7 @@ DISPLAY_LABELS = {
     "HasMobile": "Mobile Phone",
     "HasLandline": "Landline",
     "HasEmail": "Email",
-    "HasApplicantPhone": "Applicant Phone",
+    "HasApplicantPhone": "Mail Ballot Application Phone",
     "Tags": "Tags",
 }
 
@@ -358,6 +358,61 @@ div[data-testid="stHorizontalBlock"] .stButton > button {
 [data-testid="stDataFrame"] div[role="columnheader"] {
     font-weight: 900 !important;
 }
+
+
+/* v22p readability lock: stable light workspace independent of browser/system theme */
+:root { color-scheme: light !important; }
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .main {
+    background: #f3efe6 !important;
+    color: #0b1f3a !important;
+}
+[data-testid="stSidebar"] {
+    background: #e7e0d2 !important;
+    color: #0b1f3a !important;
+    border-right: 2px solid #9f151c !important;
+}
+[data-testid="stSidebar"] *, .stMarkdown, .stMarkdown *, p, label, span, div {
+    color: #0b1f3a;
+}
+/* Keep form controls readable */
+[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input {
+    background-color: #ffffff !important;
+    color: #0b1f3a !important;
+    border-color: #9ca3af !important;
+}
+[data-baseweb="popover"], [role="listbox"] { background:#ffffff !important; color:#0b1f3a !important; }
+[role="option"], [role="option"] * { color:#0b1f3a !important; background:#ffffff !important; }
+[data-baseweb="tag"] { background:#9f151c !important; color:#ffffff !important; }
+[data-baseweb="tag"] * { color:#ffffff !important; }
+.stButton > button, div[data-testid="stDownloadButton"] > button {
+    background: linear-gradient(180deg, #a5161d, #7f1016) !important;
+    color: #ffffff !important;
+    border: 1px solid #5f0b10 !important;
+    border-radius: 9px !important;
+    font-weight: 850 !important;
+}
+.stButton > button *, div[data-testid="stDownloadButton"] > button * { color:#ffffff !important; }
+/* Tables: readable, centered, striped, sticky-looking headers where Streamlit allows */
+[data-testid="stDataFrame"] div[role="gridcell"], [data-testid="stDataFrame"] div[role="columnheader"], [data-testid="stDataFrame"] div[role="rowheader"] {
+    color: #000000 !important;
+    text-align: center !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+[data-testid="stDataFrame"] div[role="columnheader"], [data-testid="stDataFrame"] div[role="rowheader"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+}
+[data-testid="stDataFrame"] div[role="columnheader"] *, [data-testid="stDataFrame"] div[role="rowheader"] * {
+    color: #ffffff !important;
+}
+[data-testid="stDataFrame"] div[role="gridcell"] { background:#fffaf0 !important; }
+[data-testid="stDataFrame"] div[role="row"]:nth-child(even) div[role="gridcell"] { background:#eee7d8 !important; }
+/* Hide Streamlit chrome as much as possible for testers */
+#MainMenu, footer, header, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { visibility:hidden !important; height:0 !important; }
+.block-container { padding-top: .7rem !important; }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -1441,12 +1496,12 @@ def election_meta_from_col(col: str):
     raw = str(col).strip()
     u = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
     patterns = [
-        r"^([GPS])_?((?:20)?\d{2})(?:_|$)",
-        r"^(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)_?((?:20)?\d{2})(?:_|$)",
-        r"^((?:20)?\d{2})_?(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)(?:_|$)",
-        r"(?:^|_)([GPS])_?((?:20)?\d{2})(?:_|$)",
-        r"(?:^|_)(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)_?((?:20)?\d{2})(?:_|$)",
-        r"(?:^|_)((?:20)?\d{2})_?(GENERAL|PRIMARY|SPECIAL|GEN|PRI|PRIM|SPEC)(?:_|$)",
+        r"^([GP])_?((?:20)?\d{2})(?:_|$)",
+        r"^(GENERAL|PRIMARY|GEN|PRI|PRIM)_?((?:20)?\d{2})(?:_|$)",
+        r"^((?:20)?\d{2})_?(GENERAL|PRIMARY|GEN|PRI|PRIM)(?:_|$)",
+        r"(?:^|_)([GP])_?((?:20)?\d{2})(?:_|$)",
+        r"(?:^|_)(GENERAL|PRIMARY|GEN|PRI|PRIM)_?((?:20)?\d{2})(?:_|$)",
+        r"(?:^|_)((?:20)?\d{2})_?(GENERAL|PRIMARY|GEN|PRI|PRIM)(?:_|$)",
     ]
     for pat in patterns:
         m = re.search(pat, u)
@@ -1468,8 +1523,6 @@ def election_meta_from_col(col: str):
             etype = "General"
         elif typ_u.startswith("P"):
             etype = "Primary"
-        elif typ_u.startswith("S"):
-            etype = "Special"
         else:
             etype = str(typ).title()
         return {"column": raw, "year": str(year), "type": etype}
@@ -1495,7 +1548,7 @@ def election_options():
     metas = [election_meta_from_col(c) for c in election_columns_from_manifest()]
     metas = [m for m in metas if m]
     years = sorted({m["year"] for m in metas}, key=lambda x: int(x), reverse=True)
-    types = sorted({m["type"] for m in metas})
+    types = [t for t in ["General", "Primary"] if t in {m["type"] for m in metas}]
     methods = ["Voted", "Mail", "Absentee", "Polls", "Provisional"]
     return years, types, methods
 
@@ -2263,24 +2316,17 @@ def mark_downloaded(*keys):
 
 
 def canonical_precinct_display(value, municipality=""):
-    """Normalize obvious duplicate precinct labels for display/export.
-    Example: YORK 1ST WARD - 2ND PRECINCT -> York Township Precinct 540102.
-    This is an app-side display/export guardrail until the same fix is moved into Step 8.
+    """Return the public precinct name exactly as supplied by the final CC data.
+
+    The tester rule is that precinct labels in filters, tables, downloads, and
+    reports must come from the public precinct field, not raw codes or generated
+    fallbacks.  Step 8 now also enforces this upstream; this app-side helper
+    simply prevents old code from rewriting values like Dormont 00 01.
     """
     raw = cc_text(value)
     if not raw:
         return ""
-    s = raw.upper().replace("–", "-").replace("—", "-")
-    m = re.search(r"\bYORK\s+(\d+)(?:ST|ND|RD|TH)?\s+WARD\s*-\s*(\d+)(?:ST|ND|RD|TH)?\s+PRECINCT\b", s)
-    if m:
-        ward = int(m.group(1)); pct = int(m.group(2))
-        return f"York Township Precinct 540{ward}0{pct}"
-    # Standardize case for numeric township precincts too.
-    m2 = re.search(r"\bYORK\s+TOWNSHIP\s+PRECINCT\s+(\d{6})\b", s)
-    if m2:
-        return f"York Township Precinct {m2.group(1)}"
-    return raw
-
+    return raw.strip()
 
 def clean_apartment_and_address2(df: pd.DataFrame) -> pd.DataFrame:
     """Keep Apartment Number to true unit values only; move other extra address text to Address Line 2."""
@@ -2529,7 +2575,7 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         muni_series = df["Municipality"] if "Municipality" in df.columns else pd.Series([""]*len(df), index=df.index)
         df["Precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df["Precinct"], muni_series)]
     df = clean_apartment_and_address2(df)
-    election_cols = [c for c in df.columns if re.match(r"^[GPS]\d{2}(?:_\d+)?$", str(c)) or re.match(r"^[GPS]\d{2}(?:_\d+)?_method$", str(c))]
+    election_cols = [c for c in df.columns if re.match(r"^[GP]\d{2}(?:_\d+)?$", str(c)) or re.match(r"^[GP]\d{2}(?:_\d+)?_method$", str(c))]
     ordered = DEFAULT_EXPORT_COLUMNS + [c for c in election_cols if c not in DEFAULT_EXPORT_COLUMNS]
     return df[ordered]
 
@@ -3056,7 +3102,7 @@ def make_voter_lookup_pdf(row: pd.Series, household: pd.DataFrame | None = None)
     ]
     contact = [
         ("Mobile", format_phone_number(row.get("Mobile", ""))), ("Landline", format_phone_number(row.get("Landline", ""))),
-        ("Applicant Phone", format_phone_number(row.get("Current_ApplicantPhone", ""))), ("Email", row.get("Email", "")),
+        ("Mail Ballot Application Phone", format_phone_number(row.get("Current_ApplicantPhone", ""))), ("Email", row.get("Email", "")),
         ("Mail Ballot Applied", row.get("MB_App", "")), ("Application Status", row.get("MB_App_Status", "")),
         ("Ballot Sent", row.get("MB_Sent", "")), ("Ballot Status", row.get("MB_Status", "")),
         ("Permanent MB", row.get("MB_PERM", "")), ("Tags", row.get("Tags", "")),
@@ -3607,7 +3653,7 @@ def render_voter_lookup_workspace():
             contact_rows = [
                 ["Mobile", format_phone_number(r.get("Mobile", ""))],
                 ["Landline", format_phone_number(r.get("Landline", ""))],
-                ["Applicant Phone", format_phone_number(r.get("Current_ApplicantPhone", ""))],
+                ["Mail Ballot Application Phone", format_phone_number(r.get("Current_ApplicantPhone", ""))],
                 ["Email", r.get("Email", "")],
                 ["Mail Ballot Applied", r.get("MB_App", "")],
                 ["Application Status", r.get("MB_App_Status", "")],
@@ -5310,7 +5356,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v22i — area intelligence report upgrade")
+    st.caption("DEV final hybrid v22p — readability + precinct + election cleanup")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
@@ -5333,7 +5379,7 @@ with st.sidebar:
             st.slider("Newly Registered Within Last N Months",0,24,0,1,key=special_key("new_reg_months"))
         with st.expander("Vote History", expanded=False):
             st.selectbox("Vote History Type", ["All Elections","General Elections","Primary Elections"], key=special_key("vote_score_type"))
-            st.slider("Vote History Score Range",0,4,(0,4),1,key=special_key("vote_history_score_range"))
+            st.slider("Vote History",0,4,(0,4),1,key=special_key("vote_history_score_range"))
             years, etypes, methods = election_options()
             st.multiselect("Election Year", years, key=special_key("election_years"))
             st.multiselect("Election Type", etypes, key=special_key("election_types"))
