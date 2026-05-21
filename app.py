@@ -413,6 +413,121 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], 
 #MainMenu, footer, header, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { visibility:hidden !important; height:0 !important; }
 .block-container { padding-top: .7rem !important; }
 
+
+
+/* v22q hard readability override: stable light app regardless of system dark mode */
+:root { color-scheme: light !important; }
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    background: #efe8d8 !important;
+    color: #071d3a !important;
+}
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
+    background: #e2dac8 !important;
+    color: #071d3a !important;
+    border-right: 2px solid #9f151c !important;
+}
+.block-container {
+    background: #efe8d8 !important;
+    color: #071d3a !important;
+}
+/* hide Streamlit chrome as much as Streamlit allows */
+#MainMenu, footer, header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] {
+    visibility: hidden !important;
+    height: 0px !important;
+}
+
+h1,h2,h3,h4,h5,h6, p, span, label, div, .stMarkdown, .stCaption, [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
+.cc-header, .cc-card, .cc-home-card, .cc-metric, .cc-icon-metric {
+    background: #f8f4ea !important;
+    color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 18px rgba(7,29,58,.16) !important;
+}
+.cc-header { border-top: 10px solid #9f151c !important; border-radius: 14px !important; }
+.cc-title, .cc-sub, .cc-home-title, .cc-home-card h3, .cc-card h3,
+.cc-metric .label, .cc-metric .value, .cc-metric .sub,
+.cc-icon-label, .cc-icon-value, .cc-icon-sub {
+    color: #071d3a !important;
+}
+.cc-note, .cc-verify, .stAlert {
+    background: #d9e8f8 !important;
+    color: #071d3a !important;
+    border: 1px solid #8aa3bf !important;
+}
+/* inputs/select dropdowns */
+[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    border-color: #8b8171 !important;
+}
+[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+[data-baseweb="popover"] *, [data-baseweb="menu"] *, [role="option"], [role="option"] * {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+[role="option"]:hover, [role="option"][aria-selected="true"] {
+    background: #f1e7d6 !important;
+    color: #071d3a !important;
+}
+[data-baseweb="tag"] {
+    background: #7f1218 !important;
+    color: #ffffff !important;
+}
+[data-baseweb="tag"] * { color: #ffffff !important; }
+/* buttons */
+.stButton > button, div[data-testid="stDownloadButton"] > button {
+    background: linear-gradient(180deg, #a71820, #7f1016) !important;
+    color: #ffffff !important;
+    border: 1px solid #5d0b10 !important;
+}
+.stButton > button *, div[data-testid="stDownloadButton"] > button * { color:#ffffff !important; }
+/* tables/dataframes: readable, centered, zebra where supported */
+[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: 1px solid #9f151c !important;
+}
+[data-testid="stDataFrame"] * { color: #000000 !important; }
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] [role="columnheader"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    text-align: center !important;
+    font-weight: 900 !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] * { color:#ffffff !important; }
+[data-testid="stDataFrame"] [role="gridcell"] {
+    text-align: center !important;
+    justify-content: center !important;
+    color: #000000 !important;
+}
+/* Plotly/chart menu hover readability */
+.modebar, .modebar-container, .modebar-group {
+    background: #ffffff !important;
+    border: 1px solid #9f151c !important;
+    border-radius: 8px !important;
+}
+.modebar-btn svg path { fill: #071d3a !important; }
+.modebar-btn:hover { background: #f1e7d6 !important; }
+.svg-container, .main-svg { background: transparent !important; }
+/* Sidebar expander/readability */
+[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details[open],
+[data-testid="stSidebar"] details > summary,
+[data-testid="stSidebar"] details[open] > summary {
+    background: #f8f4ea !important;
+    color: #071d3a !important;
+    border-color: #8b8171 !important;
+}
+[data-testid="stSidebar"] details > summary *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
+    color: #071d3a !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -2079,7 +2194,7 @@ def render_home_geo_table(summary: dict):
         if c in show.columns:
             show[c] = show[c].fillna(0).astype(int).map(lambda x: f"{x:,}")
     st.markdown('<div class="cc-home-card"><h3>County Breakdown by Party</h3>', unsafe_allow_html=True)
-    st.dataframe(show, hide_index=True, width="stretch", height=235)
+    cc_table(show, height=235, key="home_county_breakdown")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -3991,9 +4106,11 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
         except Exception:
             column_config = None
     try:
-        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center"}).set_table_styles([
-            {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900")]},
-            {"selector": "td", "props": [("text-align", "center")]},
+        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center", "color": "#000000"}).set_table_styles([
+            {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900"), ("background-color", "#9f151c"), ("color", "#ffffff")]},
+            {"selector": "td", "props": [("text-align", "center"), ("color", "#000000")]},
+            {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f3eadc")]},
+            {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
         ])
         return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
     except Exception:
@@ -5356,7 +5473,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v22p — readability + precinct + election cleanup")
+    st.caption("DEV final hybrid v22q — readability contrast + precinct exact field fix")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
