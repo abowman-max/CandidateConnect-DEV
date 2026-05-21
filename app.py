@@ -5626,7 +5626,38 @@ def labels_pdf(active: dict, mailing_mode: str = "Not Householded") -> bytes:
     def clean(v):
         return cc_text(v).strip()
 
-    def label_lines(row):
+    def _wrap_text_to_width(text_value: str, max_width: float, font_name: str, font_size: float, max_lines: int = 2) -> list[str]:
+        """Wrap label text by actual PDF width so long household names do not get cut off."""
+        text_value = clean(text_value)
+        if not text_value:
+            return []
+        words = text_value.split()
+        lines = []
+        current = ""
+        for word in words:
+            test = (current + " " + word).strip()
+            if c.stringWidth(test, font_name, font_size) <= max_width or not current:
+                current = test
+            else:
+                lines.append(current)
+                current = word
+                if len(lines) >= max_lines:
+                    break
+        if current and len(lines) < max_lines:
+            lines.append(current)
+        # If the final line is still too wide, trim with an ellipsis rather than bleeding into next label.
+        fixed = []
+        for line in lines[:max_lines]:
+            if c.stringWidth(line, font_name, font_size) <= max_width:
+                fixed.append(line)
+                continue
+            ell = "…"
+            while line and c.stringWidth(line + ell, font_name, font_size) > max_width:
+                line = line[:-1].rstrip()
+            fixed.append((line + ell) if line else ell)
+        return fixed
+
+    def label_payload(row):
         name = clean(row.get("HouseholdName")) if mailing_mode == "Householded" else ""
         if not name:
             name = clean(row.get("FullName")) or full_name(row)
@@ -5646,11 +5677,7 @@ def labels_pdf(active: dict, mailing_mode: str = "Not Householded") -> bytes:
         csz = ", ".join([x for x in [city, state] if x]).strip()
         if zipc:
             csz = (csz + " " + zipc).strip()
-        lines = [name]
-        if addr: lines.append(addr)
-        if line2: lines.append(line2)
-        if csz: lines.append(csz)
-        return lines[:4]
+        return name, addr, line2, csz
 
     c.setTitle("Candidate Connect Mailing Labels")
     for idx, (_, row) in enumerate(df.iterrows()):
@@ -5661,12 +5688,41 @@ def labels_pdf(active: dict, mailing_mode: str = "Not Householded") -> bytes:
         col = pos % cols_per_page
         x = left_margin + col * (label_w + col_gap)
         y_top = page_h - top_margin - r * label_h
-        lines = label_lines(row)
-        c.setFont("Helvetica", 9)
-        y = y_top - 0.22 * inch
-        for line in lines:
-            c.drawString(x + 0.12 * inch, y, str(line)[:36])
-            y -= 0.16 * inch
+        name, addr, line2, csz = label_payload(row)
+
+        # Avery 5160 has limited width. Use a bold name, wrap to two lines, and
+        # slightly shrink very long names so householded labels remain clean.
+        pad_x = 0.12 * inch
+        usable_label_w = label_w - (0.22 * inch)
+        name_font = "Helvetica-Bold"
+        name_size = 8.8 if len(name) > 46 else 9.2
+        normal_font = "Helvetica"
+        normal_size = 8.8
+        name_lines = _wrap_text_to_width(name, usable_label_w, name_font, name_size, max_lines=2)
+        detail_lines = []
+        if addr:
+            detail_lines.extend(_wrap_text_to_width(addr, usable_label_w, normal_font, normal_size, max_lines=1))
+        if line2:
+            detail_lines.extend(_wrap_text_to_width(line2, usable_label_w, normal_font, normal_size, max_lines=1))
+        if csz:
+            detail_lines.extend(_wrap_text_to_width(csz, usable_label_w, normal_font, normal_size, max_lines=1))
+
+        # Keep the whole label vertically balanced. If the name takes two lines,
+        # there is still room for address + city/state/zip without overlap.
+        total_lines = len(name_lines) + len(detail_lines)
+        line_gap = 0.135 * inch
+        y = y_top - 0.18 * inch
+        if total_lines <= 3:
+            y -= 0.03 * inch
+
+        c.setFont(name_font, name_size)
+        for line in name_lines:
+            c.drawString(x + pad_x, y, line)
+            y -= line_gap
+        c.setFont(normal_font, normal_size)
+        for line in detail_lines[: max(0, 4 - len(name_lines))]:
+            c.drawString(x + pad_x, y, line)
+            y -= line_gap
     if len(df) == 0:
         c.setFont("Helvetica-Bold", 12)
         c.drawCentredString(page_w/2, page_h/2, "No voters matched this export.")
