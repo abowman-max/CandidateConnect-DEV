@@ -546,7 +546,7 @@ h1,h2,h3,h4,h5,h6, p, span, label, div, .stMarkdown, .stCaption, [data-testid="s
 
 
 
-/* v22r final readability lock: light UI, dark text, red controls, no dark-mode bleed-through */
+/* v22s final readability lock: light UI, dark text, red controls, no dark-mode bleed-through */
 :root { color-scheme: light !important; }
 html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
     background: #efe8d8 !important;
@@ -631,6 +631,46 @@ div[data-testid="stMetric"], div[data-testid="stExpander"], div[data-testid="stF
 .modebar-btn svg path { fill:#071d3a !important; }
 .hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
 .hoverlayer .hovertext text { fill:#071d3a !important; }
+
+
+/* v22s professional readability cleanup */
+.cc-global-header { grid-template-columns: minmax(0,1fr) !important; left:0 !important; right:0 !important; width:100vw !important; }
+.cc-global-sidebar-fill { display:none !important; }
+.cc-global-header-inner { max-width:none !important; width:100vw !important; margin:0 !important; padding-left:64px !important; padding-right:64px !important; box-sizing:border-box !important; }
+.cc-global-redbar { width:100% !important; }
+.cc-global-title { font-size:30px !important; letter-spacing:.03em !important; text-transform:none !important; }
+.cc-global-title span { display:inline-block; padding:5px 18px; border-top:2px solid #9f151c; border-bottom:2px solid #9f151c; color:#071d3a !important; }
+.cc-global-title-rule { width:120px; height:4px; background:#9f151c; border-radius:999px; margin:7px auto 0 auto; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 7.4rem !important; }
+.stButton > button, div[data-testid="stDownloadButton"] > button, button { color:#ffffff !important; }
+.stButton > button *, div[data-testid="stDownloadButton"] > button *, button * { color:#ffffff !important; }
+/* Voter top metrics should blend with the page instead of looking like mismatched cards. */
+div[data-testid="stMetric"] { background:#efe8d8 !important; border:0 !important; box-shadow:none !important; padding:4px 0 !important; }
+div[data-testid="stMetric"] * { color:#071d3a !important; }
+/* Strong table readability across app, including Streamlit's canvas/grid wrappers. */
+[data-testid="stDataFrame"] { background:#ffffff !important; border:1px solid #9f151c !important; border-radius:8px !important; overflow:hidden !important; }
+[data-testid="stDataFrame"] [role="grid"], [data-testid="stDataFrame"] div[class*="stDataFrame"], [data-testid="stDataFrame"] canvas { background:#ffffff !important; }
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"] { color:#000000 !important; text-align:center !important; justify-content:center !important; }
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] * { background:#9f151c !important; color:#ffffff !important; text-align:center !important; font-weight:900 !important; }
+/* Plotly modebar/hover menu readability. */
+.modebar, .modebar-container, .modebar-group { background:#ffffff !important; border:1px solid #9f151c !important; box-shadow:0 4px 12px rgba(7,29,58,.2) !important; }
+.modebar-btn, .modebar-btn * { color:#071d3a !important; fill:#071d3a !important; }
+.modebar-btn svg path { fill:#071d3a !important; }
+.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
+.hoverlayer .hovertext text { fill:#071d3a !important; }
+/* Election history table: light, centered, readable. */
+.cc-history-scroll { max-width:100%; overflow-x:auto; padding-bottom:4px; }
+.cc-history-table { border-collapse:collapse !important; min-width:760px !important; background:#ffffff !important; color:#071d3a !important; font-size:13px !important; border:1px solid #9f151c !important; }
+.cc-history-table th, .cc-history-table td { border:1px solid #c8bca8 !important; text-align:center !important; vertical-align:middle !important; padding:8px 10px !important; line-height:1.35 !important; height:34px !important; color:#071d3a !important; background:#ffffff !important; }
+.cc-history-table th { background:#9f151c !important; color:#ffffff !important; font-weight:900 !important; }
+.cc-history-table th:first-child, .cc-history-table td:first-child { position:sticky; left:0; z-index:2; min-width:64px; font-weight:900; }
+.cc-history-table td:first-child { background:#f3eadc !important; color:#071d3a !important; }
+.cc-history-table tr:nth-child(even) td:not(:first-child) { background:#f3eadc !important; }
+.cc-history-table tr:nth-child(odd) td:not(:first-child) { background:#ffffff !important; }
+.cc-history-table th:first-child { background:#9f151c !important; color:#ffffff !important; }
+/* Remove dark chart/card bleed-through. */
+.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric { background:#f8f4ea !important; color:#071d3a !important; }
+.cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric * { color:#071d3a !important; opacity:1 !important; }
 
 </style>
 """,
@@ -3816,13 +3856,11 @@ def render_voter_lookup_workspace():
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
-        st.write(smart_title(address_line(r)))
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("Party", cc_text(r.get("Party", "")) or "—")
         m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
         m3.metric("Age", cc_text(r.get("Age", "")) or "—")
         m4.metric("DOB", cc_text(r.get("DOB", "")) or "—")
-        m5.metric("PA ID", selected_id or "—")
         pdf_key = f"voter_pdf_bytes_{selected_id}"
         pdf_name_key = f"voter_pdf_name_{selected_id}"
         pc1, pc2 = st.columns([0.35, 1.65])
@@ -3866,7 +3904,7 @@ def render_voter_lookup_workspace():
                 ["School District", r.get("School District", "")],
                 ["School Region", r.get("School Region", "")],
             ]
-            st.dataframe(pd.DataFrame(voter_rows, columns=["Field", "Value"]), hide_index=True, width="stretch")
+            cc_table(pd.DataFrame(voter_rows, columns=["Field", "Value"]), height=360, key=f"voter_details_tbl_{selected_id}")
         with d2:
             st.markdown("### Contact + Mail Ballot")
             contact_rows = [
@@ -3881,7 +3919,7 @@ def render_voter_lookup_workspace():
                 ["Permanent MB", r.get("MB_PERM", "")],
                 ["Tags", r.get("Tags", "")],
             ]
-            st.dataframe(pd.DataFrame(contact_rows, columns=["Field", "Value"]), hide_index=True, width="stretch")
+            cc_table(pd.DataFrame(contact_rows, columns=["Field", "Value"]), height=330, key=f"voter_contact_tbl_{selected_id}")
 
         with st.expander("Edit / Correct This Voter Record", expanded=False):
             if selected_id in correction_store():
@@ -4153,6 +4191,7 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
         df = df.rename(columns={"label": "Category"}).copy()
         df["Category"] = df["Category"].astype(str).replace({"": "(blank)", "nan": "(blank)", "None": "(blank)"})
+        df = _drop_unusable_rows(df)
         df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
         total = max(1, int(df["Voters"].sum()))
         df["%"] = (df["Voters"] / total * 100).map(lambda x: f"{x:.1f}%")
@@ -4178,27 +4217,40 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
 
 
-def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
-    """Readable sortable Streamlit table with comma-formatted numbers.
+def _drop_unusable_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove rows with blank/unusable labels from app tables and charts."""
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame()
+    out = df.copy()
+    label_candidates = [c for c in ["Category", "Area", "County", "Municipality", "Precinct", "School District", "School Region"] if c in out.columns]
+    if label_candidates:
+        c = label_candidates[0]
+        bad = {"", "(blank)", "blank", "nan", "none", "null"}
+        out = out[~out[c].astype(str).str.strip().str.lower().isin(bad)].copy()
+    return out
 
-    Streamlit's dataframe grid gives sortable headers and sticky headers when a
-    height is provided. This wrapper adds comma formatting and centered styling.
-    Where supported by the installed Streamlit version, sticky_first_col pins the
-    first column so area labels remain visible while scrolling horizontally.
+
+def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
+    """Readable sortable Streamlit table with comma-formatted, centered cells.
+
+    Also removes unusable blank label rows and avoids tall empty black space below
+    small tables by shrinking the grid height when only a few rows are present.
     """
     if df is None:
         df = pd.DataFrame()
-    show = df.copy()
-    # Format common numeric columns with commas while preserving sort where possible
+    show = _drop_unusable_rows(df.copy())
+    # Format common numeric columns with commas while preserving sort where possible.
     fmt_cols = {}
     for col in show.columns:
-        if col in {"Voters", "Total", "Count", "Rows", "Households"} or str(col).lower().endswith(" voters"):
+        if col in {"Voters", "Total", "Count", "Rows", "Households", "Republican", "Democrat", "Other", "R", "D", "O", "Female", "Male", "Age65Plus", "StrongGeneral", "StrongAll", "MBProspects", "MBApplicants", "MBSent", "MBReturned"} or str(col).lower().endswith(" voters"):
             show[col] = pd.to_numeric(show[col], errors="coerce")
             fmt_cols[col] = "{:,.0f}"
         elif pd.api.types.is_integer_dtype(show[col]) or pd.api.types.is_float_dtype(show[col]):
-            # Keep percentage-like columns alone; format other large numeric columns.
-            if str(col).strip() not in {"%", "Percent", "Pct"}:
+            if str(col).strip() not in {"%", "Percent", "Pct"} and not str(col).strip().endswith("%"):
                 fmt_cols[col] = "{:,.0f}"
+    if height is not None and len(show) <= 12:
+        # Keep sortable dataframe but remove empty dead space below short tables.
+        height = min(int(height), max(90, 38 + 36 * (len(show) + 1)))
     column_config = None
     if sticky_first_col and len(show.columns) > 0:
         try:
@@ -4213,12 +4265,11 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
         styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center", "color": "#000000", "background-color": "#ffffff"}).set_table_styles([
             {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900"), ("background-color", "#9f151c"), ("color", "#ffffff")]},
             {"selector": "td", "props": [("text-align", "center"), ("color", "#000000"), ("background-color", "#ffffff")]},
-            {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f3eadc")]},
-            {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+            {"selector": "tbody tr:nth-child(even) td", "props": [("background-color", "#f3eadc")]},
+            {"selector": "tbody tr:nth-child(odd) td", "props": [("background-color", "#ffffff")]},
         ])
         return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
     except Exception:
-        # Safe fallback: pre-format values as strings.
         for col, spec in fmt_cols.items():
             show[col] = show[col].map(lambda x: "" if pd.isna(x) else format(float(x), ",.0f"))
         return st.dataframe(show, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
@@ -4337,13 +4388,11 @@ def render_mail_ballot_workspace():
     ret = c8.multiselect("Ballot Status", field_options(filter_options, "MB_Status", base), key=special_key("mb_status"))
     perm = c9.multiselect("Permanent MB", field_options(filter_options, "MB_PERM", base), key=special_key("mb_perm"))
 
-    c10, c11, c12 = st.columns(3)
-    v4a = c10.multiselect("Vote History - All", field_options(filter_options, "V4A", base), key=special_key("mb_v4a"))
-    v4g = c11.multiselect("Vote History - General", field_options(filter_options, "V4G", base), key=special_key("mb_v4g"))
-    v4p = c12.multiselect("Vote History - Primary", field_options(filter_options, "V4P", base), key=special_key("mb_v4p"))
+    c10, _sp1, _sp2 = st.columns([1.2, 1, 1])
+    v4a = c10.multiselect("Vote History", field_options(filter_options, "V4A", base), key=special_key("mb_v4a"))
 
     mb_active = dict(base)
-    for fld, vals in {"Party": party, "Gender": gender, "Age_Range": age, "MB_App": app_filed, "MB_App_Status": app, "MB_Sent": sent, "MB_Status": ret, "MB_PERM": perm, "V4A": v4a, "V4G": v4g, "V4P": v4p}.items():
+    for fld, vals in {"Party": party, "Gender": gender, "Age_Range": age, "MB_App": app_filed, "MB_App_Status": app, "MB_Sent": sent, "MB_Status": ret, "MB_PERM": perm, "V4A": v4a}.items():
         if vals:
             mb_active[fld] = vals
     for fld, vals in mission_defaults.items():
@@ -4401,8 +4450,8 @@ def render_mail_ballot_workspace():
         with right:
             st.markdown("#### Age Range")
             cc_table(_mb_group_df(mb_active, "Age_Range", 12), height=240, key=special_key("mb_tbl_age"))
-            st.markdown("#### Vote History - General")
-            cc_table(_mb_group_df(mb_active, "V4G", 8), height=220, key=special_key("mb_tbl_v4g"))
+            st.markdown("#### Vote History")
+            cc_table(_mb_group_df(mb_active, "V4A", 8), height=220, key=special_key("mb_tbl_v4a"))
             st.markdown("#### Ballot Status")
             cc_table(_mb_group_df(mb_active, "MB_Status", 12), height=240, key=special_key("mb_tbl_mb_status"))
 
@@ -4473,6 +4522,7 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
         df = df.rename(columns={"label": "Category"}).copy()
         df["Category"] = df["Category"].map(_area_clean_label)
+        df = _drop_unusable_rows(df)
         df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
         total = max(1, int(df["Voters"].sum()))
         df["%"] = df["Voters"].map(lambda x: _area_pct(x, total))
@@ -5563,7 +5613,7 @@ st.markdown(f'''<div class="cc-global-header">
     <div class="cc-global-redbar"></div>
     <div class="cc-global-brand-row">
       {_cc_logo_html}
-      <div class="cc-global-title">Candidate Connect DEV<div class="cc-global-sub">Voter Data & Engagement Platform • Stable DEV cloud build v22r</div></div>
+      <div class="cc-global-title"><span>Candidate Connect</span><div class="cc-global-title-rule"></div></div>
       {_tss_logo_html}
     </div>
   </div>
@@ -5582,7 +5632,7 @@ _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
     st.markdown("## Candidate Connect")
-    st.caption("DEV final hybrid v22r — full-width header + readability lock")
+    st.caption("DEV final hybrid v22s — full-width header + readability lock")
     if st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if st.button("🔎 Voter Lookup", width="stretch"):
