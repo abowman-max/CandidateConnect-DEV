@@ -745,6 +745,38 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
 /* Select menus: remove internal code-looking options visually where Streamlit leaves old items cached. */
 [role="option"] { color:#071d3a !important; background:#ffffff !important; }
 [role="option"]:hover { background:#f1e7d6 !important; color:#071d3a !important; }
+
+
+/* v22u final polish: home table numbers + branded tagline/header balance */
+.cc-global-brand-row { grid-template-columns: 260px minmax(320px,1fr) 260px !important; }
+.cc-global-tagline {
+    justify-self:start !important;
+    display:flex !important;
+    flex-direction:column !important;
+    gap:1px !important;
+    padding-left:18px !important;
+    color:#071d3a !important;
+    font-family: Georgia, 'Times New Roman', serif !important;
+    font-weight:900 !important;
+    font-size:24px !important;
+    line-height:1.02 !important;
+    letter-spacing:.03em !important;
+    text-transform:uppercase !important;
+}
+.cc-global-tagline span { color:#071d3a !important; text-shadow:0 1px 0 #ffffff !important; }
+.cc-global-logo-center-wrap { justify-self:center !important; display:flex !important; align-items:center !important; justify-content:center !important; }
+.cc-global-logo-center { height:92px !important; max-width:360px !important; object-fit:contain !important; }
+.cc-global-logo-right { justify-self:end !important; height:78px !important; max-width:250px !important; object-fit:contain !important; }
+.cc-global-title, .cc-global-title-rule { display:none !important; }
+.cc-html-table td, .cc-html-table th { text-align:center !important; vertical-align:middle !important; }
+.cc-table-wrap { background:#ffffff !important; }
+@media (max-width: 900px) {
+  .cc-global-tagline { font-size:16px !important; padding-left:4px !important; }
+  .cc-global-logo-center { height:64px !important; max-width:220px !important; }
+  .cc-global-logo-right { height:50px !important; max-width:140px !important; }
+  .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -4330,7 +4362,11 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
         return None
     for col in show.columns:
         if col in {"Voters", "Total", "Count", "Rows", "Households", "Republican", "Democrat", "Other", "R", "D", "O", "Female", "Male", "Age65Plus", "StrongGeneral", "StrongAll", "MBProspects", "MBApplicants", "MBSent", "MBReturned"} or str(col).lower().endswith(" voters"):
-            show[col] = pd.to_numeric(show[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{int(x):,}")
+            # Values may already be comma-formatted strings from upstream display helpers.
+            # Strip commas before numeric conversion so statewide/home tables do not blank out.
+            raw = show[col].astype(str).str.replace(",", "", regex=False).str.strip()
+            nums = pd.to_numeric(raw, errors="coerce")
+            show[col] = nums.map(lambda x: "" if pd.isna(x) else f"{int(x):,}")
     max_h = height or 360
     if len(show) <= 12:
         max_h = min(max_h, max(110, 44 + 38 * (len(show) + 1)))
@@ -5670,15 +5706,15 @@ def render_output_buttons(active):
 # Full-width branded header fixed across both the sidebar and main workspace.
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
 _tss_logo_uri = img_data_uri(LOGO_TPTC)
-_cc_logo_html = f'<img class="cc-global-logo-left" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
+_cc_logo_html = f'<img class="cc-global-logo-center" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
 _tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
 st.markdown(f'''<div class="cc-global-header">
   <div class="cc-global-sidebar-fill"></div>
   <div class="cc-global-header-inner">
     <div class="cc-global-redbar"></div>
     <div class="cc-global-brand-row">
-      {_cc_logo_html}
-      <div class="cc-global-title"><span>Candidate Connect</span><div class="cc-global-title-rule"></div></div>
+      <div class="cc-global-tagline"><span>Target.</span><span>Engage.</span><span>Win.</span></div>
+      <div class="cc-global-logo-center-wrap">{_cc_logo_html}</div>
       {_tss_logo_html}
     </div>
   </div>
