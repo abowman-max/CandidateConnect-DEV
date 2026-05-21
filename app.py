@@ -851,6 +851,47 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     background-color: #b0121b !important;
     height: 3px !important;
 }
+
+
+/* === v22y final export/report readability + upload box fixes === */
+.stButton > button, .stButton > button *,
+div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button *,
+button[kind="primary"], button[kind="secondary"], button[kind="primary"] *, button[kind="secondary"] * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: none !important;
+}
+.stButton > button:disabled, .stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownloadButton"] > button:disabled * {
+    color: #f8fafc !important;
+    -webkit-text-fill-color: #f8fafc !important;
+    opacity: .85 !important;
+}
+/* Streamlit uploaders/contact tracking boxes */
+[data-testid="stFileUploader"], [data-testid="stFileUploader"] section,
+[data-testid="stFileUploader"] div, [data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] p, [data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] label {
+    color: #001f3f !important;
+    -webkit-text-fill-color: #001f3f !important;
+}
+[data-testid="stFileUploader"] section {
+    background: #fbf7ee !important;
+    border: 1px solid rgba(170, 20, 30, .35) !important;
+    border-radius: 12px !important;
+}
+[data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    background: #a40f19 !important;
+}
+/* Radio labels on export/report pages */
+[role="radiogroup"] label, [role="radiogroup"] label *,
+[data-testid="stRadio"] label, [data-testid="stRadio"] label * {
+    color: #001f3f !important;
+    -webkit-text-fill-color: #001f3f !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -5562,6 +5603,77 @@ def mail_export_df(df: pd.DataFrame, mailing_mode: str) -> pd.DataFrame:
             "County","Municipality","Precinct","Party","Gender","Age"]
     return df[[c for c in cols if c in df.columns]].copy()
 
+def labels_pdf(active: dict, mailing_mode: str = "Not Householded") -> bytes:
+    """Generate Avery 5160-style mailing labels. Householded means one label per address."""
+    if canvas is None or letter is None or inch is None:
+        return b"ReportLab is not available in this environment."
+    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+    if df is None or df.empty:
+        df = pd.DataFrame()
+    df = mail_export_df(df, "Householded" if mailing_mode == "Householded" else "Not Householded")
+    bio = io.BytesIO()
+    c = canvas.Canvas(bio, pagesize=letter)
+    page_w, page_h = letter
+    # Avery 5160: 3 columns x 10 rows, label 2.625 x 1.0, margins about .1875/.5
+    left_margin = 0.1875 * inch
+    top_margin = 0.50 * inch
+    label_w = 2.625 * inch
+    label_h = 1.00 * inch
+    col_gap = 0.125 * inch
+    rows_per_page = 10
+    cols_per_page = 3
+
+    def clean(v):
+        return cc_text(v).strip()
+
+    def label_lines(row):
+        name = clean(row.get("HouseholdName")) if mailing_mode == "Householded" else ""
+        if not name:
+            name = clean(row.get("FullName")) or full_name(row)
+        if not name:
+            name = "Current Resident"
+        house = clean(row.get("House Number"))
+        suffix = clean(row.get("House Number Suffix"))
+        street = clean(row.get("Street Name"))
+        apt = clean(row.get("Apartment Number"))
+        line2 = clean(row.get("Address Line 2"))
+        addr = " ".join([x for x in [house, suffix, street] if x]).strip()
+        if apt:
+            addr = (addr + " " + apt).strip()
+        city = clean(row.get("City")) or clean(row.get("res_city"))
+        state = clean(row.get("State")) or clean(row.get("res_state")) or "PA"
+        zipc = clean(row.get("Zip")) or clean(row.get("res_zip"))
+        csz = ", ".join([x for x in [city, state] if x]).strip()
+        if zipc:
+            csz = (csz + " " + zipc).strip()
+        lines = [name]
+        if addr: lines.append(addr)
+        if line2: lines.append(line2)
+        if csz: lines.append(csz)
+        return lines[:4]
+
+    c.setTitle("Candidate Connect Mailing Labels")
+    for idx, (_, row) in enumerate(df.iterrows()):
+        pos = idx % (rows_per_page * cols_per_page)
+        if idx and pos == 0:
+            c.showPage()
+        r = pos // cols_per_page
+        col = pos % cols_per_page
+        x = left_margin + col * (label_w + col_gap)
+        y_top = page_h - top_margin - r * label_h
+        lines = label_lines(row)
+        c.setFont("Helvetica", 9)
+        y = y_top - 0.22 * inch
+        for line in lines:
+            c.drawString(x + 0.12 * inch, y, str(line)[:36])
+            y -= 0.16 * inch
+    if len(df) == 0:
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(page_w/2, page_h/2, "No voters matched this export.")
+    c.save()
+    bio.seek(0)
+    return bio.getvalue()
+
 
 def zip_bytes(files: dict[str, bytes]) -> bytes:
     bio = io.BytesIO()
@@ -5617,7 +5729,7 @@ def build_single_export(active, export_kind: str, file_type: str, mailing_mode: 
     if export_kind == "Call List PDF":
         return "candidate_connect_call_list.pdf", call_list_pdf(active), "application/pdf", 0
     if export_kind == "Mailing Labels PDF":
-        return "candidate_connect_labels_avery5160.pdf", labels_pdf(active), "application/pdf", 0
+        return "candidate_connect_labels_avery5160.pdf", labels_pdf(active, mailing_mode), "application/pdf", 0
     raise ValueError(f"Unsupported export type: {export_kind}")
 
 
@@ -5706,7 +5818,7 @@ def render_output_buttons(active):
                     if "Call List PDF" in selected_types:
                         files["candidate_connect_call_list.pdf"] = call_list_pdf(active)
                     if "Mailing Labels PDF" in selected_types:
-                        files["candidate_connect_labels_avery5160.pdf"] = labels_pdf(active)
+                        files["candidate_connect_labels_avery5160.pdf"] = labels_pdf(active, mailing_mode)
                     st.session_state[zip_key] = zip_bytes(files) if files else b""
             if st.session_state.get(zip_key):
                 st.download_button("Download Selected ZIP", st.session_state[zip_key], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=(zip_key,))
