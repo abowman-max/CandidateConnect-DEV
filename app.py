@@ -672,6 +672,79 @@ div[data-testid="stMetric"] * { color:#071d3a !important; }
 .cc-home-card, .cc-card, .cc-metric, .cc-icon-metric { background:#f8f4ea !important; color:#071d3a !important; }
 .cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric * { color:#071d3a !important; opacity:1 !important; }
 
+
+
+/* v22t surgical readability fix: do not allow blue-on-dark chart text or invisible tables. */
+.cc-global-header { height: 122px !important; }
+.cc-global-header-inner { width:100vw !important; max-width:none !important; padding-left:28px !important; padding-right:28px !important; }
+.cc-global-brand-row { display:grid !important; grid-template-columns: 260px minmax(280px,1fr) 260px !important; align-items:center !important; }
+.cc-global-title span {
+    display:inline-block !important;
+    padding:8px 28px !important;
+    border:2px solid #9f151c !important;
+    border-radius:999px !important;
+    background:linear-gradient(180deg,#ffffff,#f3eadc) !important;
+    box-shadow:0 6px 14px rgba(7,29,58,.18) !important;
+    font-size:28px !important;
+    letter-spacing:.04em !important;
+    color:#071d3a !important;
+}
+.cc-global-title-rule { width:220px !important; height:3px !important; margin-top:8px !important; }
+
+.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric { background:#f8f4ea !important; }
+.cc-home-card h3, .cc-card h3, .cc-age-row, .cc-age-row *, .cc-legend-row, .cc-legend-row *,
+.cc-icon-label, .cc-icon-value, .cc-icon-sub, .cc-metric .label, .cc-metric .value, .cc-metric .sub {
+    color:#071d3a !important; opacity:1 !important;
+}
+.cc-donut-center, .cc-donut-center *, .cc-donut-center .value, .cc-donut-center .label {
+    color:#ffffff !important; fill:#ffffff !important; opacity:1 !important; text-shadow:0 1px 2px #000 !important;
+}
+.cc-donut:after { background:#071d3a !important; }
+
+/* Sidebar expanders: hover and selected states stay readable. */
+[data-testid="stSidebar"] details > summary:hover,
+[data-testid="stSidebar"] details > summary:hover *,
+[data-testid="stSidebar"] details[open] > summary,
+[data-testid="stSidebar"] details[open] > summary * {
+    background:#f8f4ea !important; color:#071d3a !important;
+}
+[data-testid="stSidebar"] details[open] > summary { border:2px solid #9f151c !important; }
+
+/* White button text everywhere. */
+.stButton > button, .stButton > button *, div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button * {
+    color:#ffffff !important; opacity:1 !important;
+}
+
+/* Native dataframe fallback: use dark red header, white body, black text, no black dead zones. */
+[data-testid="stDataFrame"] { background:#ffffff !important; border:1px solid #9f151c !important; border-radius:10px !important; }
+[data-testid="stDataFrame"] [role="grid"], [data-testid="stDataFrame"] canvas, [data-testid="stDataFrame"] div { background-color:transparent !important; }
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] * { background:#9f151c !important; color:#ffffff !important; text-align:center !important; }
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"], [data-testid="stDataFrame"] [role="gridcell"] * { color:#000000 !important; text-align:center !important; justify-content:center !important; }
+
+/* Reliable HTML tables used by analysis sections. */
+.cc-table-wrap {
+    overflow:auto; border:1px solid #9f151c; border-radius:10px; background:#ffffff; margin:8px 0 18px 0;
+}
+.cc-html-table { border-collapse:separate; border-spacing:0; width:100%; font-size:14px; color:#000000; background:#ffffff; }
+.cc-html-table th { position:sticky; top:0; z-index:5; background:#9f151c; color:#ffffff; text-align:center; font-weight:900; padding:10px 12px; border-right:1px solid rgba(255,255,255,.35); white-space:nowrap; }
+.cc-html-table td { color:#000000; text-align:center; padding:9px 12px; border-right:1px solid #dfd7c8; border-bottom:1px solid #e7dfd2; vertical-align:middle; }
+.cc-html-table tbody tr:nth-child(odd) td { background:#ffffff; }
+.cc-html-table tbody tr:nth-child(even) td { background:#f3eadc; }
+.cc-table-wrap.sticky-first .cc-html-table th:first-child,
+.cc-table-wrap.sticky-first .cc-html-table td:first-child { position:sticky; left:0; z-index:6; font-weight:900; min-width:150px; }
+.cc-table-wrap.sticky-first .cc-html-table td:first-child { background:#fff7ea; }
+.cc-table-wrap.sticky-first .cc-html-table th:first-child { background:#9f151c; color:#ffffff; z-index:7; }
+.cc-empty-table { border:1px solid #b9ad99; border-radius:10px; background:#ffffff; color:#071d3a; padding:14px; text-align:center; font-weight:800; margin:8px 0 18px 0; }
+
+/* Plotly hover/modebar: no black tooltip with black/blue text. */
+.modebar, .modebar-container, .modebar-group, .modebar-btn { background:#ffffff !important; color:#071d3a !important; }
+.modebar-btn svg path, .modebar-btn svg, .modebar-btn * { fill:#071d3a !important; color:#071d3a !important; }
+.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
+.hoverlayer .hovertext text { fill:#071d3a !important; }
+
+/* Select menus: remove internal code-looking options visually where Streamlit leaves old items cached. */
+[role="option"] { color:#071d3a !important; background:#ffffff !important; }
+[role="option"]:hover { background:#f1e7d6 !important; color:#071d3a !important; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -1949,7 +2022,7 @@ def options_from_geo(df: pd.DataFrame, field: str, active: dict) -> list:
         if field not in narrowed.columns:
             return []
         vals = narrowed[field].astype(str).map(clean_value)
-        return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+        return sorted([v for v in vals.unique().tolist() if not is_unusable_label(v)], key=smart_sort_key)
     except Exception:
         return []
 
@@ -1960,7 +2033,7 @@ def options_from_filter_table(filter_options: pd.DataFrame, field: str) -> list:
         if "field" not in filter_options.columns or "value" not in filter_options.columns:
             return []
         vals = filter_options.loc[filter_options["field"].astype(str).eq(str(field)), "value"].astype(str).map(clean_value)
-        out = sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+        out = sorted([v for v in vals.unique().tolist() if not is_unusable_label(v)], key=smart_sort_key)
         return out
     except Exception:
         return []
@@ -2016,7 +2089,7 @@ def options_from_count_cube(field: str, active: dict) -> list:
         if field not in narrowed.columns:
             return []
         vals = narrowed[field].astype(str).map(clean_value)
-        return sorted([v for v in vals.unique().tolist() if v], key=smart_sort_key)
+        return sorted([v for v in vals.unique().tolist() if not is_unusable_label(v)], key=smart_sort_key)
     except Exception:
         return []
 
@@ -2569,21 +2642,33 @@ def normalize_phone_digits(value) -> str:
     return digits or s
 
 
+
+def is_unusable_label(value) -> bool:
+    """Labels we never want to show in filters, charts, or report tables."""
+    s = clean_value(value).strip()
+    if not s:
+        return True
+    low = s.lower()
+    if low in {"(blank)", "blank", "nan", "none", "null", "unknown", "n/a", "na"}:
+        return True
+    # Pure numeric precinct/coded values like 01100 are internal codes, not usable public labels.
+    if re.fullmatch(r"\d{4,}", s):
+        return True
+    return False
+
 def mark_downloaded(*keys):
     for k in keys:
         st.session_state.pop(k, None)
 
 
 def canonical_precinct_display(value, municipality=""):
-    """Return the public precinct name exactly as supplied by the final CC data.
+    """Return a public precinct label, never an internal numeric code.
 
-    The tester rule is that precinct labels in filters, tables, downloads, and
-    reports must come from the public precinct field, not raw codes or generated
-    fallbacks.  Step 8 now also enforces this upstream; this app-side helper
-    simply prevents old code from rewriting values like Dormont 00 01.
+    Valid labels can look like ``Dormont 00 01``.  Invalid internal labels are
+    pure numeric strings like ``01100``.  Those are hidden instead of displayed.
     """
     raw = cc_text(value)
-    if not raw:
+    if not raw or is_unusable_label(raw):
         return ""
     return raw.strip()
 
@@ -2776,7 +2861,7 @@ def normalize_download_df(df: pd.DataFrame) -> pd.DataFrame:
         "voter_id": ["voter_id", "VoterID", "Voter ID", "IDNumber", "ID Number", "PA ID Number", "PA_ID_Number", "SURE_ID", "StateVoterID"],
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
-        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
+        "Precinct": ["precinct", "Precinct"],
         "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "FNAME", "first", "FIRST", "GivenName", "Given Name", "Given_Name", "NameFirst", "Name First", "NAMEFIRST", "NAME_FIRST", "name_first", "Voter First Name", "VoterFirstName", "Voter_First_Name", "Registrant First Name", "RegistrantFirstName", "Registrant_First_Name", "Given", "Given_Name", "FirstNm", "First_Nm"],
         "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "NameMiddle", "Name Middle", "NAME_MIDDLE", "name_middle", "Voter Middle Name", "VoterMiddleName", "Voter_Middle_Name", "Registrant Middle Name", "RegistrantMiddleName", "Registrant_Middle_Name", "MiddleNm", "Middle_Nm"],
         "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "LNAME", "last", "LAST", "FamilyName", "Family Name", "NameLast", "Name Last", "NAMELAST", "NAME_LAST", "name_last", "Voter Last Name", "VoterLastName", "Voter_Last_Name", "Registrant Last Name", "RegistrantLastName", "Registrant_Last_Name", "Surname", "LastNm", "Last_Nm"],
@@ -2856,7 +2941,7 @@ def source_alias_candidates():
         "voter_id": ["voter_id", "VoterID", "Voter ID", "IDNumber", "ID Number", "PA ID Number", "PA_ID_Number", "SURE_ID", "StateVoterID"],
         "County": ["County", "county", "CountyName"],
         "Municipality": ["Municipality", "municipality", "municipality_clean", "Municipality_Clean"],
-        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Current_PrecinctDesc"],
+        "Precinct": ["precinct", "Precinct"],
         "FirstName": ["FirstName", "First Name", "First_Name", "FIRSTNAME", "FIRST_NAME", "first_name", "fname", "FName", "FNAME", "first", "FIRST", "GivenName", "Given Name", "Given_Name", "NameFirst", "Name First", "NAMEFIRST", "NAME_FIRST", "name_first", "Voter First Name", "VoterFirstName", "Voter_First_Name", "Registrant First Name", "RegistrantFirstName", "Registrant_First_Name", "Given", "Given_Name", "FirstNm", "First_Nm"],
         "MiddleName": ["MiddleName", "Middle Name", "Middle_Name", "MIDDLENAME", "MIDDLE_NAME", "middle_name", "middle", "MiddleInitial", "Middle Initial", "middle_initial", "MName", "MI", "NameMiddle", "Name Middle", "NAME_MIDDLE", "name_middle", "Voter Middle Name", "VoterMiddleName", "Voter_Middle_Name", "Registrant Middle Name", "RegistrantMiddleName", "Registrant_Middle_Name", "MiddleNm", "Middle_Nm"],
         "LastName": ["LastName", "Last Name", "Last_Name", "LASTNAME", "LAST_NAME", "last_name", "surname", "lname", "LName", "LNAME", "last", "LAST", "FamilyName", "Family Name", "NameLast", "Name Last", "NAMELAST", "NAME_LAST", "name_last", "Voter Last Name", "VoterLastName", "Voter_Last_Name", "Registrant Last Name", "RegistrantLastName", "Registrant_Last_Name", "Surname", "LastNm", "Last_Nm"],
@@ -4225,54 +4310,34 @@ def _drop_unusable_rows(df: pd.DataFrame) -> pd.DataFrame:
     label_candidates = [c for c in ["Category", "Area", "County", "Municipality", "Precinct", "School District", "School Region"] if c in out.columns]
     if label_candidates:
         c = label_candidates[0]
-        bad = {"", "(blank)", "blank", "nan", "none", "null"}
-        out = out[~out[c].astype(str).str.strip().str.lower().isin(bad)].copy()
+        out = out[~out[c].map(is_unusable_label)].copy()
     return out
 
 
 def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
-    """Readable sortable Streamlit table with comma-formatted, centered cells.
+    """Stable readable table: centered cells, zebra rows, sticky header/first column.
 
-    Also removes unusable blank label rows and avoids tall empty black space below
-    small tables by shrinking the grid height when only a few rows are present.
+    Streamlit's canvas dataframe ignores some CSS depending on browser/system mode.
+    This HTML table is used for app-facing analysis tables so users always see
+    readable dark text on light rows.  Sorting remains available on the few native
+    Streamlit dataframes that are left in the app, but readability wins here.
     """
     if df is None:
         df = pd.DataFrame()
     show = _drop_unusable_rows(df.copy())
-    # Format common numeric columns with commas while preserving sort where possible.
-    fmt_cols = {}
+    if show.empty:
+        st.markdown('<div class="cc-empty-table">No rows to display.</div>', unsafe_allow_html=True)
+        return None
     for col in show.columns:
         if col in {"Voters", "Total", "Count", "Rows", "Households", "Republican", "Democrat", "Other", "R", "D", "O", "Female", "Male", "Age65Plus", "StrongGeneral", "StrongAll", "MBProspects", "MBApplicants", "MBSent", "MBReturned"} or str(col).lower().endswith(" voters"):
-            show[col] = pd.to_numeric(show[col], errors="coerce")
-            fmt_cols[col] = "{:,.0f}"
-        elif pd.api.types.is_integer_dtype(show[col]) or pd.api.types.is_float_dtype(show[col]):
-            if str(col).strip() not in {"%", "Percent", "Pct"} and not str(col).strip().endswith("%"):
-                fmt_cols[col] = "{:,.0f}"
-    if height is not None and len(show) <= 12:
-        # Keep sortable dataframe but remove empty dead space below short tables.
-        height = min(int(height), max(90, 38 + 36 * (len(show) + 1)))
-    column_config = None
-    if sticky_first_col and len(show.columns) > 0:
-        try:
-            import inspect
-            first_col = str(show.columns[0])
-            sig = inspect.signature(st.column_config.TextColumn)
-            if "pinned" in sig.parameters:
-                column_config = {first_col: st.column_config.TextColumn(first_col, pinned=True)}
-        except Exception:
-            column_config = None
-    try:
-        styler = show.style.format(fmt_cols, na_rep="").set_properties(**{"text-align": "center", "color": "#000000", "background-color": "#ffffff"}).set_table_styles([
-            {"selector": "th", "props": [("text-align", "center"), ("font-weight", "900"), ("background-color", "#9f151c"), ("color", "#ffffff")]},
-            {"selector": "td", "props": [("text-align", "center"), ("color", "#000000"), ("background-color", "#ffffff")]},
-            {"selector": "tbody tr:nth-child(even) td", "props": [("background-color", "#f3eadc")]},
-            {"selector": "tbody tr:nth-child(odd) td", "props": [("background-color", "#ffffff")]},
-        ])
-        return st.dataframe(styler, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
-    except Exception:
-        for col, spec in fmt_cols.items():
-            show[col] = show[col].map(lambda x: "" if pd.isna(x) else format(float(x), ",.0f"))
-        return st.dataframe(show, hide_index=True, width="stretch", height=height, key=key, column_config=column_config)
+            show[col] = pd.to_numeric(show[col], errors="coerce").map(lambda x: "" if pd.isna(x) else f"{int(x):,}")
+    max_h = height or 360
+    if len(show) <= 12:
+        max_h = min(max_h, max(110, 44 + 38 * (len(show) + 1)))
+    table_html = show.to_html(index=False, escape=True, classes="cc-html-table")
+    sticky_cls = " sticky-first" if sticky_first_col else ""
+    st.markdown(f'<div class="cc-table-wrap{sticky_cls}" style="max-height:{int(max_h)}px">{table_html}</div>', unsafe_allow_html=True)
+    return None
 
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
     st.markdown(
