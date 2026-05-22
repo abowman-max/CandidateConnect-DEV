@@ -1,4 +1,4 @@
-# Candidate Connect DEV — Final Hybrid Cloud App v21zp VOTER_LOOKUP_PERSIST_HISTORY_PDF_FIX
+# Candidate Connect LIVE — Final Hybrid Cloud App v21zp VOTER_LOOKUP_PERSIST_HISTORY_PDF_FIX
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 
@@ -21,11 +21,11 @@ try:
 except Exception:
     letter = canvas = inch = None
 
-R2 = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
+R2 = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
 DETAIL_SHARDS = 36
 EXPORT_ROW_LIMIT = 250_000
 
-st.set_page_config(page_title="Candidate Connect DEV", layout="wide")
+st.set_page_config(page_title="Candidate Connect", layout="wide")
 try:
     st.set_option("runner.magicEnabled", False)
 except Exception:
@@ -893,6 +893,31 @@ div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownlo
 }
 
 </style>
+<style>
+/* Final production button lock */
+.stButton > button, div[data-testid="stDownloadButton"] > button {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+}
+.stButton > button *, div[data-testid="stDownloadButton"] > button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+.stButton > button:disabled, div[data-testid="stDownloadButton"] > button:disabled {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    opacity: .55 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+button[data-baseweb="tab"], button[data-baseweb="tab"] *, [role="tab"], [role="tab"] * {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+</style>
+
 """,
     unsafe_allow_html=True,
 )
@@ -949,6 +974,100 @@ st.markdown(
         flex-direction: column !important;
         align-items: flex-start !important;
     }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# Cross-browser LIVE readability lock for Safari/Mac dark-mode quirks.
+st.markdown(
+    """
+<style>
+button, button *,
+.stButton > button, .stButton > button *,
+div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button *,
+[data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: none !important;
+}
+button:disabled, button:disabled *,
+.stButton > button:disabled, .stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownloadButton"] > button:disabled * {
+    color: #f8fafc !important;
+    -webkit-text-fill-color: #f8fafc !important;
+}
+.cc-history-table td:first-child,
+.cc-history-table td:first-child *,
+.cc-history-table th:first-child,
+.cc-history-table th:first-child * {
+    background: #111827 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# Final production readability lock for tabs/toggles/buttons after all earlier CSS blocks.
+st.markdown(
+    """
+<style>
+/* Keep Streamlit tabs readable. Generic button rules above should NOT make tab labels white. */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    background: transparent !important;
+    font-weight: 900 !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+div[data-testid="stTabs"] button[aria-selected="true"],
+div[data-testid="stTabs"] button[aria-selected="true"] *,
+button[data-baseweb="tab"][aria-selected="true"],
+button[data-baseweb="tab"][aria-selected="true"] *,
+[role="tab"][aria-selected="true"],
+[role="tab"][aria-selected="true"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 4px !important;
+}
+/* Keep checkbox/toggle/radio labels readable on Safari and dark-mode Macs. */
+[data-testid="stCheckbox"] label,
+[data-testid="stCheckbox"] label *,
+[data-testid="stToggle"] label,
+[data-testid="stToggle"] label *,
+[data-testid="stRadio"] label,
+[data-testid="stRadio"] label *,
+label[data-baseweb="checkbox"],
+label[data-baseweb="checkbox"] *,
+label[data-baseweb="radio"],
+label[data-baseweb="radio"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+/* Keep actual action/download buttons white text across Chrome/Safari. */
+.stButton > button,
+.stButton > button *,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stDownloadButton"] > button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: none !important;
 }
 </style>
 """,
@@ -1786,27 +1905,50 @@ def _load_remote_app_state() -> dict:
                 state["voter_corrections"] = _json_safe_corrections(raw)
     except Exception:
         pass
+    try:
+        r = requests.get(r2_url("app_state/security_users.json"), timeout=10)
+        if r.ok:
+            raw = r.json()
+            if isinstance(raw, dict):
+                state["security"] = raw
+    except Exception:
+        pass
     return state
 
 def _state_file_candidates():
-    """Small local DEV persistence so saved universes/corrections survive app reboot.
-    This is not a substitute for the later real cloud/mobile persistence layer, but it
-    prevents losing work during Streamlit restarts in DEV.
+    """Local persistence candidates for saved universes/corrections.
+
+    Keep both the clean production filename and the earlier DEV filename so
+    saved universes/voter edits made before the LIVE cleanup are not orphaned
+    after redeploy/reboot.
     """
     out = []
-    try:
-        out.append(Path.cwd() / ".candidate_connect_dev_state.json")
-    except Exception:
-        pass
-    try:
-        out.append(Path.home() / ".candidate_connect_dev_state.json")
-    except Exception:
-        pass
-    out.append(Path("/tmp/candidate_connect_dev_state.json"))
-    return out
+    names = [".candidate_connect_state.json", ".candidate_connect_dev_state.json"]
+    for name in names:
+        try:
+            out.append(Path.cwd() / name)
+        except Exception:
+            pass
+        try:
+            out.append(Path.home() / name)
+        except Exception:
+            pass
+        try:
+            out.append(Path("/tmp") / name)
+        except Exception:
+            pass
+    # de-duplicate while preserving order
+    deduped = []
+    seen = set()
+    for path in out:
+        s = str(path)
+        if s not in seen:
+            deduped.append(path)
+            seen.add(s)
+    return deduped
 
 
-def _load_dev_state() -> dict:
+def _load_state() -> dict:
     # Remote app_state is the durable baseline after rebuild/deploy. Local/browser state can override it.
     state = _load_remote_app_state()
     for path in _state_file_candidates():
@@ -1821,7 +1963,7 @@ def _load_dev_state() -> dict:
     return state
 
 
-def _save_dev_state(state: dict):
+def _save_state(state: dict):
     for path in _state_file_candidates():
         try:
             path.write_text(json.dumps(state or {}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1831,42 +1973,351 @@ def _save_dev_state(state: dict):
     return False
 
 
-def _persist_dev_section(section: str, data):
-    state = _load_dev_state()
+def _persist_state_section(section: str, data):
+    state = _load_state()
     state[section] = data
-    _save_dev_state(state)
+    _save_state(state)
+
+
+# ---------------------------------------------------------------------------
+# Candidate Connect Phase 1 Security
+# ---------------------------------------------------------------------------
+# Phase 1 uses local app_state plus an optional R2 baseline:
+#   app_state/security_users.json
+# The structure is intentionally simple so it can later move behind a real
+# database/API when you start selling accounts commercially.
+SECURITY_ROLES = ["Super Admin", "Campaign Admin", "Manager", "Field User", "Viewer"]
+
+ROLE_PERMISSIONS = {
+    "Super Admin": {
+        "create_universe": True,
+        "voter_lookup": True,
+        "mail_ballot_center": True,
+        "area_intelligence": True,
+        "exports_reports": True,
+        "account_admin": True,
+        "manage_all_accounts": True,
+    },
+    "Campaign Admin": {
+        "create_universe": True,
+        "voter_lookup": True,
+        "mail_ballot_center": True,
+        "area_intelligence": True,
+        "exports_reports": True,
+        "account_admin": True,
+        "manage_all_accounts": False,
+    },
+    "Manager": {
+        "create_universe": True,
+        "voter_lookup": True,
+        "mail_ballot_center": True,
+        "area_intelligence": True,
+        "exports_reports": True,
+        "account_admin": False,
+        "manage_all_accounts": False,
+    },
+    "Field User": {
+        "create_universe": False,
+        "voter_lookup": True,
+        "mail_ballot_center": False,
+        "area_intelligence": False,
+        "exports_reports": False,
+        "account_admin": False,
+        "manage_all_accounts": False,
+    },
+    "Viewer": {
+        "create_universe": True,
+        "voter_lookup": True,
+        "mail_ballot_center": True,
+        "area_intelligence": True,
+        "exports_reports": False,
+        "account_admin": False,
+        "manage_all_accounts": False,
+    },
+}
+
+def _security_slug(value: str) -> str:
+    s = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_").lower()
+    return s or "default"
+
+def _password_hash(username: str, password: str) -> str:
+    """Simple salted hash for Phase 1. Replace with managed auth before commercial sale."""
+    salt = f"candidate-connect-v1::{str(username).strip().lower()}::"
+    return hashlib.sha256((salt + str(password or "")).encode("utf-8")).hexdigest()
+
+def _empty_security_store() -> dict:
+    return {"users": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
+
+def load_security_store() -> dict:
+    raw = (_load_state().get("security") or {})
+    if not isinstance(raw, dict):
+        raw = {}
+    raw.setdefault("users", {})
+    raw.setdefault("version", 1)
+    return raw
+
+def save_security_store(store: dict) -> bool:
+    if not isinstance(store, dict):
+        store = _empty_security_store()
+    store.setdefault("users", {})
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _persist_state_section("security", store)
+    return True
+
+def current_user() -> dict:
+    return dict(st.session_state.get("auth_user") or {})
+
+def current_username() -> str:
+    return str(st.session_state.get("auth_username") or "").strip().lower()
+
+def current_role() -> str:
+    return current_user().get("role", "Viewer")
+
+def user_can(permission: str) -> bool:
+    role = current_role()
+    return bool(ROLE_PERMISSIONS.get(role, {}).get(permission, False))
+
+def is_super_admin() -> bool:
+    return current_role() == "Super Admin"
+
+def is_campaign_scoped() -> bool:
+    return bool(current_user()) and not is_super_admin()
+
+def security_scope_filters() -> dict:
+    """Hard boundary for non-super-admin users.
+
+    Campaign Admin / Manager / Field User / Viewer accounts cannot query, save,
+    export, or report outside these filters. Typical examples:
+      {"USC": ["10"]} or {"STS": ["28"]} or {"County": ["York"], "Municipality": ["York Township"]}
+    """
+    if is_super_admin():
+        return {}
+    user = current_user()
+    scope = user.get("scope_filters") or {}
+    if not isinstance(scope, dict):
+        return {}
+    clean = {}
+    for k, v in scope.items():
+        vals = v if isinstance(v, list) else [v]
+        vals = [str(x).strip() for x in vals if str(x).strip()]
+        if vals:
+            clean[str(k)] = vals
+    return clean
+
+def apply_security_scope_to_filters(filters: dict) -> dict:
+    merged = {str(k): list(v or []) for k, v in (filters or {}).items() if v}
+    scope = security_scope_filters()
+    for field, allowed in scope.items():
+        selected_vals = [str(x) for x in (merged.get(field) or [])]
+        if selected_vals:
+            allowed_set = set(map(str, allowed))
+            narrowed = [x for x in selected_vals if x in allowed_set]
+            merged[field] = narrowed or list(allowed)
+        else:
+            merged[field] = list(allowed)
+    return merged
+
+def saved_universe_state_section() -> str:
+    if is_super_admin():
+        return "saved_universes"
+    campaign = current_user().get("campaign") or current_username() or "campaign"
+    return f"saved_universes_{_security_slug(campaign)}"
+
+def security_export_json_bytes() -> bytes:
+    return json.dumps(load_security_store(), ensure_ascii=False, indent=2).encode("utf-8")
+
+def render_security_gate():
+    """Block the app until a user is logged in, or create the first Super Admin."""
+    store = load_security_store()
+    users = store.get("users") or {}
+
+    if not users:
+        st.markdown("## Candidate Connect Setup")
+        st.info("Create the first Super Admin account. After this, the app will require login.")
+        with st.form("first_admin_setup"):
+            username = st.text_input("Super Admin username")
+            pw1 = st.text_input("Password", type="password")
+            pw2 = st.text_input("Confirm password", type="password")
+            submitted = st.form_submit_button("Create Super Admin")
+        if submitted:
+            username_clean = str(username or "").strip().lower()
+            if not username_clean or not pw1:
+                st.error("Enter a username and password.")
+            elif pw1 != pw2:
+                st.error("Passwords do not match.")
+            else:
+                store = _empty_security_store()
+                store["users"][username_clean] = {
+                    "display_name": username_clean,
+                    "password_hash": _password_hash(username_clean, pw1),
+                    "role": "Super Admin",
+                    "campaign": "",
+                    "scope_filters": {},
+                    "disabled": False,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }
+                save_security_store(store)
+                st.success("Super Admin created. Log in now.")
+                st.rerun()
+        st.stop()
+
+    if st.session_state.get("auth_user"):
+        return
+
+    st.markdown("## Candidate Connect Login")
+    with st.form("candidate_connect_login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log In")
+    if submitted:
+        username_clean = str(username or "").strip().lower()
+        user = (users or {}).get(username_clean)
+        if not user or user.get("disabled"):
+            st.error("Invalid username or disabled account.")
+        elif user.get("password_hash") != _password_hash(username_clean, password):
+            st.error("Invalid username or password.")
+        else:
+            st.session_state["auth_username"] = username_clean
+            st.session_state["auth_user"] = user
+            st.success("Logged in.")
+            st.rerun()
+    st.stop()
+
+def render_account_admin_workspace(filter_options=None):
+    st.markdown("## Account Admin")
+    st.caption("Phase 1 account management. Campaign-scoped users cannot see or work outside their assigned universe.")
+
+    store = load_security_store()
+    users = store.setdefault("users", {})
+    me = current_user()
+    my_campaign = str(me.get("campaign") or "").strip()
+
+    st.markdown("### Current Accounts")
+    rows = []
+    for uname, u in sorted(users.items()):
+        if not is_super_admin() and str(u.get("campaign") or "") != my_campaign:
+            continue
+        rows.append({
+            "Username": uname,
+            "Name": u.get("display_name", ""),
+            "Role": u.get("role", ""),
+            "Campaign": u.get("campaign", ""),
+            "Scope": json.dumps(u.get("scope_filters") or {}, ensure_ascii=False),
+            "Disabled": bool(u.get("disabled", False)),
+        })
+    if rows:
+        cc_table(pd.DataFrame(rows), height=260, key="security_accounts_table")
+    else:
+        st.info("No accounts visible.")
+
+    st.markdown("### Add / Update Account")
+    allowed_roles = SECURITY_ROLES if is_super_admin() else ["Manager", "Field User", "Viewer"]
+    with st.form("account_admin_form"):
+        username = st.text_input("Username").strip().lower()
+        display_name = st.text_input("Display name")
+        password = st.text_input("New password / reset password", type="password")
+        role = st.selectbox("Role", allowed_roles)
+        campaign = st.text_input("Campaign / client name", value=("" if is_super_admin() else my_campaign), disabled=not is_super_admin())
+
+        default_scope = {} if is_super_admin() else security_scope_filters()
+        st.caption("Campaign universe scope as JSON. Examples: {\"USC\":[\"10\"]}, {\"STS\":[\"28\"]}, or {\"County\":[\"York\"],\"Municipality\":[\"York Township\"]}.")
+        scope_text = st.text_area("Campaign universe / hard boundary", value=json.dumps(default_scope, ensure_ascii=False, indent=2), height=120, disabled=not is_super_admin())
+
+        disabled = st.checkbox("Disable this account", value=False)
+        submitted = st.form_submit_button("Save Account")
+
+    if submitted:
+        if not username:
+            st.error("Username is required.")
+            return
+        if not is_super_admin() and username in users and str(users[username].get("campaign") or "") != my_campaign:
+            st.error("You can only manage accounts inside your campaign.")
+            return
+        try:
+            scope = json.loads(scope_text or "{}")
+            if not isinstance(scope, dict):
+                scope = {}
+        except Exception:
+            st.error("Scope must be valid JSON.")
+            return
+        if not is_super_admin():
+            scope = security_scope_filters()
+            campaign = my_campaign
+        existing = users.get(username, {})
+        if not password and not existing:
+            st.error("Password is required for a new account.")
+            return
+        new_user = dict(existing)
+        new_user.update({
+            "display_name": display_name or username,
+            "role": role,
+            "campaign": campaign or "",
+            "scope_filters": scope,
+            "disabled": bool(disabled),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        if password:
+            new_user["password_hash"] = _password_hash(username, password)
+        if "created_at" not in new_user:
+            new_user["created_at"] = datetime.now().isoformat(timespec="seconds")
+        users[username] = new_user
+        save_security_store(store)
+        st.success("Account saved.")
+        st.rerun()
+
+    st.markdown("### Export Security Baseline")
+    st.caption("Download this and upload it to R2 as app_state/security_users.json when you want it to survive app redeploys/reboots from a durable baseline.")
+    st.download_button("Download security_users.json", security_export_json_bytes(), "security_users.json", "application/json")
+
+    if st.button("Log Out", width="stretch"):
+        for k in ["auth_user", "auth_username"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
 
 
 def load_persistent_saved_universes():
-    """Initialize session saved universes from local DEV state, then URL query params.
-    Local DEV state is checked first so saved universes survive Streamlit app reboots.
+    """Initialize session saved universes from local state, then URL query params.
+
+    Super Admin sees the global saved universe list. Campaign-scoped users see
+    only the saved universes for their assigned campaign/account boundary.
     """
-    if "saved_universes" not in st.session_state:
-        state_saved = (_load_dev_state().get("saved_universes") or {})
+    section = saved_universe_state_section()
+    session_key = f"saved_universes::{section}"
+    if session_key not in st.session_state:
+        state_saved = (_load_state().get(section) or {})
         if state_saved:
-            st.session_state["saved_universes"] = _json_safe_saved_universes(state_saved)
+            st.session_state[session_key] = _json_safe_saved_universes(state_saved)
         else:
             try:
-                raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "")
+                raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "") if is_super_admin() else ""
             except Exception:
                 raw = ""
-            st.session_state["saved_universes"] = decode_saved_universes(raw)
-    return st.session_state.setdefault("saved_universes", {})
+            st.session_state[session_key] = decode_saved_universes(raw)
+    st.session_state["saved_universes"] = st.session_state.setdefault(session_key, {})
+    return st.session_state["saved_universes"]
 
 
 def persist_saved_universes(saved):
-    """Persist saved universes into local DEV state and the browser URL."""
+    """Persist saved universes into local state and the browser URL."""
     clean = _json_safe_saved_universes(saved)
+    section = saved_universe_state_section()
+    session_key = f"saved_universes::{section}"
+    st.session_state[session_key] = clean
+    st.session_state["saved_universes"] = clean
     try:
-        _persist_dev_section("saved_universes", clean)
+        _ = _persist_state_section(section, clean)
     except Exception:
         pass
     try:
-        encoded = encode_saved_universes(clean)
-        if encoded:
-            st.query_params[SAVED_UNIVERSES_PARAM] = encoded
-        elif SAVED_UNIVERSES_PARAM in st.query_params:
-            del st.query_params[SAVED_UNIVERSES_PARAM]
+        # Keep URL persistence only for Super Admin/global mode. Campaign users should
+        # not leak campaign saved universes into a shareable browser URL.
+        if is_super_admin():
+            encoded = encode_saved_universes(clean)
+            if encoded:
+                st.query_params[SAVED_UNIVERSES_PARAM] = encoded
+            elif SAVED_UNIVERSES_PARAM in st.query_params:
+                del st.query_params[SAVED_UNIVERSES_PARAM]
     except Exception:
         pass
 
@@ -1887,7 +2338,7 @@ def load_saved_universe_into_widgets(data):
     )
     for key in list(st.session_state.keys()):
         if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"} or key.startswith("prepared_"):
-            st.session_state.pop(key, None)
+            _ = st.session_state.pop(key, None)
     st.session_state["filter_reset_token"] = old_token + 1
 
     for f, vals in ((data or {}).get("filters") or {}).items():
@@ -1934,7 +2385,7 @@ def clear_filter_state():
     )
     for key in list(st.session_state.keys()):
         if key.startswith(prefixes) or key in {"quick_summary", "count_mode", "exact_summary"} or key.startswith("prepared_"):
-            st.session_state.pop(key, None)
+            _ = st.session_state.pop(key, None)
     st.session_state["filter_reset_token"] = old_token + 1
     st.session_state["left_section"] = "create_universe"
     st.session_state["view"] = "targeting"
@@ -1946,7 +2397,7 @@ def active_filters() -> dict:
         vals = selected(f)
         if vals:
             out[f] = vals
-    return out
+    return apply_security_scope_to_filters(out)
 
 
 def universe_label_from_filters(filters: dict) -> str:
@@ -2885,7 +3336,7 @@ def is_unusable_label(value) -> bool:
 
 def mark_downloaded(*keys):
     for k in keys:
-        st.session_state.pop(k, None)
+        _ = st.session_state.pop(k, None)
 
 
 def canonical_precinct_display(value, municipality=""):
@@ -3330,6 +3781,17 @@ def remote_search_voters(term, max_rows=25):
                 blob = "CONCAT_WS(' ', " + ", ".join([f"CAST({sql_ident(c)} AS VARCHAR)" for c in searchable]) + ")"
                 for t in search_tokens:
                     where_parts.append(f"LOWER({blob}) LIKE {sql_lit('%' + t + '%')}")
+
+    # Hard campaign boundary for scoped users. This prevents Voter Lookup from
+    # returning voters outside the campaign's assigned office/universe.
+    for scope_field, scope_vals in security_scope_filters().items():
+        scope_col = src(scope_field)
+        if scope_col and scope_vals:
+            where_parts.append(
+                f"CAST({sql_ident(scope_col)} AS VARCHAR) IN ("
+                + ",".join(sql_lit(v) for v in scope_vals)
+                + ")"
+            )
 
     if not where_parts:
         return pd.DataFrame(columns=lookup_cols)
@@ -3887,13 +4349,13 @@ def remote_household_members(row: pd.Series, max_rows: int = 25) -> pd.DataFrame
 def correction_store() -> dict:
     """Saved voter corrections with layered persistence.
 
-    DEV durability order:
+    Durability order:
       1) R2 app_state/voter_record_corrections.json uploaded by Pipeline Manager
       2) local JSON state when running locally
       3) browser URL query parameter for refresh/reboot survival of recent edits
     """
     if "voter_corrections" not in st.session_state or not isinstance(st.session_state.get("voter_corrections"), dict):
-        state_corr = _json_safe_corrections(_load_dev_state().get("voter_corrections") or {})
+        state_corr = _json_safe_corrections(_load_state().get("voter_corrections") or {})
         try:
             url_corr = decode_corrections(st.query_params.get(CORRECTIONS_PARAM, ""))
         except Exception:
@@ -3907,7 +4369,7 @@ def persist_corrections():
     clean = _json_safe_corrections(st.session_state.get("voter_corrections", {}) or {})
     st.session_state["voter_corrections"] = clean
     try:
-        _persist_dev_section("voter_corrections", clean)
+        _ = _persist_state_section("voter_corrections", clean)
     except Exception:
         pass
     # Also store in the browser URL so refresh/reboot keeps recent edits until they are committed to app_state/R2.
@@ -4066,8 +4528,9 @@ def render_election_history_table(row: pd.Series):
 .cc-history-scroll { max-width: 100%; overflow-x: auto; margin: 6px 0 14px 0; }
 .cc-history-table { border-collapse: collapse; min-width: 760px; background: #0b0f19; color: #f8fafc; font-size: 12px; }
 .cc-history-table th, .cc-history-table td { border: 1px solid rgba(148,163,184,.28); text-align: center !important; vertical-align: middle !important; padding: 8px 10px; line-height: 1.45; min-width: 38px; height: 36px; }
-.cc-history-table th:first-child, .cc-history-table td:first-child { position: sticky; left: 0; z-index: 2; background: #111827 !important; min-width: 58px; font-weight: 800; }
-.cc-history-table th { position: sticky; top: 0; z-index: 3; background: #1f2430; font-weight: 800; }
+.cc-history-table th:first-child, .cc-history-table td:first-child { position: sticky; left: 0; z-index: 2; background: #111827 !important; color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; min-width: 58px; font-weight: 800; }
+.cc-history-table th:first-child *, .cc-history-table td:first-child * { color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; }
+.cc-history-table th { position: sticky; top: 0; z-index: 3; background: #1f2430; color:#ffffff !important; font-weight: 800; }
 .cc-history-table tr:nth-child(even) td { background: #0f1724; }
 .cc-history-table tr:nth-child(odd) td { background: #090d16; }
 </style>
@@ -4138,7 +4601,7 @@ def render_voter_lookup_workspace():
                 # Clear stale per-voter display sections for the previous selection.
                 for k in list(st.session_state.keys()):
                     if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
-                        st.session_state.pop(k, None)
+                        _ = st.session_state.pop(k, None)
                 st.rerun()
 
     with right:
@@ -4273,7 +4736,7 @@ def render_voter_lookup_workspace():
                     current = dict(st.session_state.get(detail_key, {}) or {})
                     current.update(edits)
                     st.session_state[detail_key] = current
-                    st.success("Correction saved in DEV state and is available for correction CSV download.")
+                    st.success("Correction saved and is available for correction CSV download.")
                     st.rerun()
             with cb:
                 if st.button("Remove Saved Correction", key=f"remove_corr_{selected_id}"):
@@ -4357,7 +4820,7 @@ def render_voter_lookup_workspace():
                                     pass
                                 for k in list(st.session_state.keys()):
                                     if str(k).startswith(("hh_df_", "vote_history_row_", "voter_pdf_bytes_", "voter_pdf_name_")):
-                                        st.session_state.pop(k, None)
+                                        _ = st.session_state.pop(k, None)
                                 st.rerun()
         else:
             st.caption("No household members found from the selected address.")
@@ -4524,7 +4987,8 @@ def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
             df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
             total = max(1, int(df["Voters"].sum()))
             df["%"] = (df["Voters"] / total * 100).map(lambda x: f"{x:.1f}%")
-            return df[["Category", "Voters", "%"]]
+            df = df[["Category", "Voters", "%"]]
+            return _sort_category_df(df, field)
         except Exception:
             return pd.DataFrame(columns=["Category", "Voters", "%"])
 
@@ -4804,6 +5268,32 @@ def _area_pct(n, d) -> str:
         return "0.0%"
 
 
+
+def _category_sort_value(label) -> float:
+    """Sort numeric/vote-history categories in human order, keeping 65+ after the regular ranges."""
+    txt = str(label or "").strip()
+    if not txt:
+        return 999999.0
+    m = re.match(r"^(\d+)(?:\s*-\s*\d+)?", txt)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"-?\d+(?:\.\d+)?", txt)
+    if m:
+        return float(m.group(0))
+    return 999999.0
+
+
+def _sort_category_df(df: pd.DataFrame, field: str = "") -> pd.DataFrame:
+    """For Age Range and Vote History tables/charts, sort ascending by the numeric category, not by voter count."""
+    if df is None or df.empty or "Category" not in df.columns:
+        return df
+    if str(field) in {"Age_Range", "V4A", "V4G", "V4P"}:
+        out = df.copy()
+        out["__sort"] = out["Category"].map(_category_sort_value)
+        out = out.sort_values(["__sort", "Category"], kind="mergesort").drop(columns=["__sort"])
+        return out
+    return df
+
 def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
     """Fast cube-backed group table for Area Intelligence."""
     try:
@@ -4822,7 +5312,8 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
         df["Voters"] = pd.to_numeric(df["Voters"], errors="coerce").fillna(0).astype(int)
         total = max(1, int(df["Voters"].sum()))
         df["%"] = df["Voters"].map(lambda x: _area_pct(x, total))
-        return df[["Category", "Voters", "%"]]
+        df = df[["Category", "Voters", "%"]]
+        return _sort_category_df(df, field)
     except Exception:
         return pd.DataFrame(columns=["Category", "Voters", "%"])
 
@@ -4957,7 +5448,8 @@ def _area_insights(summary: dict, party_df: pd.DataFrame, age_df: pd.DataFrame, 
 def _area_bar_html(df: pd.DataFrame, title: str, max_rows: int = 8) -> str:
     if df is None or df.empty:
         return f'<div class="cc-home-card"><h3>{title}</h3><div class="cc-sub">No data available.</div></div>'
-    show = df.head(max_rows).copy()
+    sort_field = "Age_Range" if "Age" in str(title) else ("V4A" if "Vote History" in str(title) else "")
+    show = _sort_category_df(df.copy(), sort_field).head(max_rows).copy()
     maxv = max(1, int(pd.to_numeric(show["Voters"], errors="coerce").fillna(0).max()))
     rows = []
     for _, r in show.iterrows():
@@ -5840,6 +6332,385 @@ def prepared_key_for(kind: str, ftype: str) -> str:
     return f"prepared_one_export_{safe}"
 
 
+
+def _contact_tracking_cols() -> list[str]:
+    return ["F", "A", "U", "NH", "Yard Sign"]
+
+
+def _selected_filter_lines(active: dict | None) -> list[str]:
+    """Small cover-page summary of the active universe."""
+    lines = []
+    active = active or {}
+    for k in ALL_FILTER_FIELDS:
+        vals = active.get(k) or []
+        if vals:
+            label = DISPLAY_LABELS.get(k, k)
+            shown = ", ".join([cc_text(v) for v in vals[:8]])
+            if len(vals) > 8:
+                shown += f" +{len(vals)-8} more"
+            lines.append(f"{label}: {shown}")
+    try:
+        special = active_special_filters() if "active_special_filters" in globals() else {}
+        if special.get("__PhoneReach"):
+            lines.append(f"Phone reach: {special.get('__PhoneReach')}")
+    except Exception:
+        pass
+    return lines[:22]
+
+
+def _street_pdf_rows(active: dict, call_mode: bool = False) -> pd.DataFrame:
+    """Prepare the same voter rows for the polished street/call PDF."""
+    df = safe_filtered_df(active, EXPORT_ROW_LIMIT)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = normalize_download_df(df)
+    df = df.copy()
+    df["_name"] = df.apply(full_name, axis=1).map(smart_title)
+    df["_phone"] = df.apply(phone_label, axis=1)
+    muni = df.get("Municipality", pd.Series([""] * len(df), index=df.index)).astype(str)
+    df["_precinct"] = [canonical_precinct_display(p, m) for p, m in zip(df.get("Precinct", pd.Series([""] * len(df), index=df.index)), muni)]
+    df["_precinct"] = df["_precinct"].replace("", "Unassigned")
+    df["_street"] = df.get("Street Name", pd.Series([""] * len(df), index=df.index)).astype(str).map(smart_title).replace("", "Unknown Street")
+    if call_mode:
+        df = df[df["_phone"].astype(str).str.strip().ne("")].copy()
+        if df.empty:
+            return df
+    df["_precinct_sort"] = df["_precinct"].astype(str).str.upper()
+    df["_street_sort"] = df["_street"].astype(str).str.upper().str.replace(r"[^A-Z0-9 ]+", " ", regex=True).str.strip()
+    df["_house_sort"] = pd.to_numeric(df.get("House Number", "").astype(str).str.extract(r"(\d+)")[0], errors="coerce").fillna(0)
+    df["_apt_sort"] = df.get("Apartment Number", pd.Series([""] * len(df), index=df.index)).astype(str).str.upper()
+    df["_last_sort"] = df.get("LastName", pd.Series([""] * len(df), index=df.index)).astype(str).str.upper()
+    df["_first_sort"] = df.get("FirstName", pd.Series([""] * len(df), index=df.index)).astype(str).str.upper()
+    return df.sort_values(["_precinct_sort", "_street_sort", "_house_sort", "_apt_sort", "_last_sort", "_first_sort"], kind="mergesort")
+
+
+def _pdf_clean(v) -> str:
+    return cc_text(v).replace("\n", " ").replace("\r", " ").strip()
+
+
+def _pdf_logo_path(name: str) -> str | None:
+    try:
+        p = Path(name)
+        if p.exists():
+            return str(p)
+        alt = Path(__file__).resolve().parent / name
+        if alt.exists():
+            return str(alt)
+    except Exception:
+        pass
+    return None
+
+
+def _pdf_draw_fit_text(c, text: str, x: float, y: float, max_width: float, font: str = "Helvetica", size: float = 8, min_size: float = 5.5):
+    text = _pdf_clean(text)
+    c.setFont(font, size)
+    while text and c.stringWidth(text, font, size) > max_width and size > min_size:
+        size -= 0.3
+        c.setFont(font, size)
+    if text and c.stringWidth(text, font, size) > max_width:
+        while text and c.stringWidth(text + "…", font, size) > max_width:
+            text = text[:-1].rstrip()
+        text = text + "…" if text else ""
+    if text:
+        c.drawString(x, y, text)
+
+
+def _build_street_pdf(active: dict, call_mode: bool = False) -> bytes:
+    """Branded precinct/street separated street and call lists with cover, summary, bookmarks, and check boxes."""
+    if canvas is None or letter is None or inch is None:
+        return b"ReportLab is not available in this environment."
+
+    df = _street_pdf_rows(active, call_mode=call_mode)
+    title = "Candidate Connect Call List" if call_mode else "Candidate Connect Street List"
+    report_title = "Voter Call List" if call_mode else "Voter Contact List"
+    tracks = _contact_tracking_cols()
+
+    bio = io.BytesIO()
+    c = canvas.Canvas(bio, pagesize=landscape(letter))
+    w, h = landscape(letter)
+    mar_l, mar_r = 28, 28
+    usable_w = w - mar_l - mar_r
+    page_no = 0
+
+    def safe_bookmark(name, title_text, level=0):
+        try:
+            c.bookmarkPage(name)
+            c.addOutlineEntry(title_text[:80], name, level=level, closed=False)
+        except Exception:
+            pass
+
+    def draw_branded_top(heading: str, subtitle: str = "") -> float:
+        # header band
+        c.setFillColorRGB(0.94, 0.91, 0.84)
+        c.rect(0, h-72, w, 72, stroke=0, fill=1)
+        c.setFillColorRGB(0.60, 0.05, 0.08)
+        c.rect(0, h-8, w, 8, stroke=0, fill=1)
+        logo_left = _pdf_logo_path(LOGO_CANDIDATE_CONNECT)
+        logo_right = _pdf_logo_path(LOGO_TPTC)
+        try:
+            if logo_left:
+                c.drawImage(logo_left, 40, h-61, width=130, height=44, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+        try:
+            if logo_right:
+                c.drawImage(logo_right, w-145, h-55, width=100, height=34, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+        c.setFillColorRGB(0.04, 0.12, 0.24)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawCentredString(w/2, h-38, heading[:70])
+        if subtitle:
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(w/2, h-52, subtitle[:90])
+        return h - 92
+
+    def footer():
+        nonlocal page_no
+        c.setFont("Helvetica", 7)
+        c.setFillColorRGB(0.35, 0.35, 0.35)
+        c.drawString(mar_l, 18, "Powered by Candidate Connect")
+        c.drawRightString(w-mar_r, 18, f"Page {page_no}   Updated: {datetime.now().strftime('%m/%d/%Y')}")
+
+    def finish_page():
+        footer()
+        c.showPage()
+
+    def new_page(heading: str, subtitle: str = "") -> float:
+        nonlocal page_no
+        page_no += 1
+        return draw_branded_top(heading, subtitle)
+
+    def draw_table_header(y: float) -> float:
+        c.setFillColorRGB(0.60, 0.05, 0.08)
+        c.roundRect(mar_l, y-15, usable_w, 18, 4, stroke=0, fill=1)
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("Helvetica-Bold", 7.2)
+        if call_mode:
+            cols = [(34, "Full Name"), (200, "Phone"), (350, "Party"), (380, "Sex"), (420, "Age"), (452, "Precinct"), (555, "F"), (580, "A"), (605, "U"), (630, "NH"), (655, "Yard Sign"), (730, "MB Perm")]
+        else:
+            cols = [(42, "House"), (78, "Full Name"), (225, "Mobile"), (315, "Landline"), (410, "Party"), (440, "Sex"), (470, "Age"), (500, "F"), (525, "A"), (550, "U"), (575, "NH"), (600, "Yard Sign"), (690, "MB Perm")]
+        for x, lab in cols:
+            c.drawString(x, y-8, lab)
+        c.setFillColorRGB(0,0,0)
+        return y - 26
+
+    def draw_street_bar(street: str, y: float) -> float:
+        c.setFillColorRGB(0.04, 0.12, 0.24)
+        c.roundRect(mar_l, y-13, usable_w, 16, 3, stroke=0, fill=1)
+        c.setFillColorRGB(1,1,1)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(mar_l+8, y-8, smart_title(street)[:80])
+        c.setFillColorRGB(0,0,0)
+        # Larger gap after each street header so the first voter row does not crowd the bar.
+        return y - 33
+
+    def new_detail_page(precinct: str, cont: bool = False, bookmark: bool = False) -> float:
+        if bookmark:
+            safe_bookmark("pct_" + re.sub(r"[^A-Za-z0-9]+", "_", precinct)[:60], smart_title(precinct), 1)
+        heading = f"{smart_title(precinct)[:58]}{' (cont)' if cont else ''}"
+        y = new_page(report_title, heading)
+        return draw_table_header(y)
+
+    # Cover page.
+    safe_bookmark("cover", title, 0)
+    y = new_page(title, datetime.now().strftime("%m/%d/%Y"))
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(40, y-8, title)
+    c.setFillColorRGB(0.12, 0.12, 0.12)
+    c.setFont("Helvetica", 10)
+    c.drawString(40, y-31, "Prepared from the current Candidate Connect universe.")
+
+    if df is None or df.empty:
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(40, y-70, "No voters matched this report.")
+        finish_page()
+        c.save(); bio.seek(0); return bio.getvalue()
+
+    hh_key = (df.get("County", "").astype(str).str.upper() + "|" +
+              df.get("Municipality", "").astype(str).str.upper() + "|" +
+              df.get("House Number", "").astype(str).str.upper() + "|" +
+              df.get("Street Name", "").astype(str).str.upper() + "|" +
+              df.get("Apartment Number", "").astype(str).str.upper())
+    households = int(hh_key.nunique()) if len(df) else 0
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(40, y-65, f"Individuals: {len(df):,}     Households: {households:,}")
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y-100, "Selected Voters")
+    c.setFont("Helvetica", 8.7)
+    yy = y-118
+    lines = _selected_filter_lines(active)
+    if not lines:
+        lines = ["All active selected voters"]
+    for line in lines:
+        c.drawString(54, yy, "• " + line[:95])
+        yy -= 13
+        if yy < 170:
+            break
+
+    yy -= 12
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, yy, "Legend")
+    yy -= 15
+    c.setFillColorRGB(0.12, 0.12, 0.12)
+    c.setFont("Helvetica", 8.5)
+    legend_lines = [
+        "Phone labels: (m) mobile, (l) landline, (u) applicant/unknown.",
+        "Contact boxes: F = Favorable, A = Against, U = Undecided, NH = Not Home, Yard Sign = sign requested/placed.",
+        "MB prints Y for permanent mail ballot voters.",
+        "Detail pages are sorted by precinct, street, house number, apartment, last name, and first name.",
+    ]
+    for line in legend_lines:
+        c.drawString(54, yy, "• " + line)
+        yy -= 13
+    finish_page()
+
+    # Precinct summary page.
+    safe_bookmark("summary", "Precinct Summary", 0)
+    y = new_page(title, "Precinct Summary")
+    summary = df.groupby("_precinct", dropna=False).agg(
+        Individuals=("voter_id", "count") if "voter_id" in df.columns else ("_name", "count"),
+        Households=("_house_sort", "count"),
+    ).reset_index()
+    # Recalculate households per precinct using household key.
+    try:
+        tmp = df.copy()
+        tmp["_hh"] = hh_key
+        hh_summary = tmp.groupby("_precinct")["_hh"].nunique().reset_index(name="Households")
+        summary = summary.drop(columns=["Households"], errors="ignore").merge(hh_summary, on="_precinct", how="left")
+    except Exception:
+        pass
+    summary = summary.sort_values("_precinct")
+    c.setFillColorRGB(0.50, 0.05, 0.12)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(40, y, "Precinct Summary")
+    y -= 28
+    c.setFillColorRGB(0.04, 0.12, 0.24)
+    c.roundRect(36, y-14, 520, 18, 3, stroke=0, fill=1)
+    c.setFillColorRGB(1,1,1)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(46, y-8, "Precinct")
+    c.drawRightString(430, y-8, "Individuals")
+    c.drawRightString(535, y-8, "Households")
+    y -= 26
+    c.setFont("Helvetica", 8.2)
+    for _, rr in summary.iterrows():
+        if y < 42:
+            finish_page(); y = new_page(title, "Precinct Summary (cont)")
+        c.setFillColorRGB(0.12,0.12,0.12)
+        c.drawString(46, y, smart_title(rr.get("_precinct", ""))[:60])
+        c.drawRightString(430, y, f"{int(rr.get('Individuals',0)):,}")
+        c.drawRightString(535, y, f"{int(rr.get('Households',0) or 0):,}")
+        y -= 12
+    finish_page()
+
+    current_precinct = None
+    current_street = None
+    seen_precincts = set()
+    y = None
+    row_count = 0
+
+    for _, r in df.iterrows():
+        precinct = _pdf_clean(r.get("_precinct", "")) or "Unassigned"
+        street = smart_title(r.get("_street", "")) or "Unknown Street"
+        house_raw = _pdf_clean(r.get("House Number", ""))
+        m_house = re.search(r"\d+", house_raw)
+        house = m_house.group(0) if m_house else house_raw[:8]
+        apt_raw = _pdf_clean(r.get("Apartment Number", ""))
+        apt = ""
+        if re.fullmatch(r"(?i)(?:apt|unit|ste|suite|#)?\s*[A-Z0-9-]{1,8}", apt_raw or "") and not re.search(r"(?i)\b(?:dr|rd|st|ave|ln|ct|cir|blvd|way|road|street|drive|lane)\b", apt_raw or ""):
+            apt = re.sub(r"(?i)^(apt|unit|ste|suite)\s+", "", apt_raw).strip()
+        house_text = (house + (f" Apt {apt}" if apt else "")).strip()
+
+        new_precinct = precinct != current_precinct
+        if y is None or new_precinct or y < 56:
+            if y is not None:
+                finish_page()
+            y = new_detail_page(precinct, cont=False, bookmark=(precinct not in seen_precincts))
+            seen_precincts.add(precinct)
+            current_precinct = precinct
+            current_street = None
+        if not call_mode and street != current_street:
+            if y < 82:
+                finish_page()
+                y = new_detail_page(precinct, cont=True, bookmark=False)
+            y = draw_street_bar(street, y)
+            current_street = street
+
+        phone_items = phone_entries(r)
+        phone_lines = [f"{num} ({typ})" for num, typ in phone_items]
+        mobile_text = " / ".join([num for num, typ in phone_items if typ == "m"])
+        landline_text = " / ".join([num for num, typ in phone_items if typ == "l"])
+        other_phone_text = " / ".join([f"{num} ({typ})" for num, typ in phone_items if typ not in {"m", "l"}])
+        row_h = 18
+        if y - row_h < 34:
+            finish_page()
+            y = new_detail_page(precinct, cont=True, bookmark=False)
+            if not call_mode:
+                y = draw_street_bar(street, y)
+
+        if row_count % 2 == 0:
+            c.setFillColorRGB(0.965, 0.86, 0.88)
+        else:
+            c.setFillColorRGB(1, 1, 1)
+        # Keep the alternating band aligned with the fixed voter row height.
+        c.rect(mar_l+6, y-5, usable_w-12, 12, fill=1, stroke=0)
+        c.setFillColorRGB(0.08,0.08,0.08)
+        name = smart_title(r.get("_name", ""))
+        age = _pdf_clean(r.get("Age", ""))[:3]
+        party = _pdf_clean(r.get("Party", ""))[:1]
+        gender = _pdf_clean(r.get("Gender", ""))[:1]
+        if call_mode:
+            c.setFont("Helvetica", 6.7)
+            _pdf_draw_fit_text(c, name, 34, y, 152, "Helvetica", 6.7)
+            _pdf_draw_fit_text(c, _pdf_clean(r.get("_phone", "")), 200, y, 140, "Helvetica", 6.7)
+            c.drawString(350, y, party)
+            c.drawString(380, y, gender)
+            c.drawRightString(440, y, age)
+            _pdf_draw_fit_text(c, smart_title(precinct), 452, y, 88, "Helvetica", 6.4)
+            x = 555
+            for t in tracks:
+                c.rect(x, y-2, 6, 6, fill=0, stroke=1)
+                x += 25 if t != "Yard Sign" else 66
+            if str(r.get("MB_PERM", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
+                c.drawString(730, y, "Y")
+        else:
+            c.setFont("Helvetica-Bold", 7)
+            c.drawString(42, y, house_text[:17])
+            _pdf_draw_fit_text(c, name, 78, y, 138, "Helvetica", 6.8)
+            _pdf_draw_fit_text(c, mobile_text or other_phone_text, 225, y, 82, "Helvetica", 6.6)
+            _pdf_draw_fit_text(c, landline_text, 315, y, 82, "Helvetica", 6.6)
+            c.setFont("Helvetica", 6.8)
+            c.drawString(410, y, party)
+            c.drawString(440, y, gender)
+            c.drawRightString(486, y, age)
+            x = 500
+            for t in tracks:
+                c.rect(x, y-2, 6, 6, fill=0, stroke=1)
+                x += 25 if t != "Yard Sign" else 66
+            if str(r.get("MB_PERM", "")).strip().upper() in {"Y", "YES", "1", "TRUE"}:
+                c.drawString(690, y, "Y")
+        y -= row_h
+        row_count += 1
+
+    if y is not None:
+        finish_page()
+    c.save()
+    bio.seek(0)
+    return bio.getvalue()
+
+
+def street_list_pdf(active: dict) -> bytes:
+    return _build_street_pdf(active, call_mode=False)
+
+
+def call_list_pdf(active: dict) -> bytes:
+    return _build_street_pdf(active, call_mode=True)
+
+
 def build_single_export(active, export_kind: str, file_type: str, mailing_mode: str) -> tuple[str, bytes, str, int]:
     """Build one export/report at a time from a simple dropdown workflow."""
     area_level = auto_area_level_for_export(active)
@@ -5877,6 +6748,18 @@ def contact_tracking_template(kind: str) -> bytes:
     return pd.DataFrame(columns=cols).to_csv(index=False).encode()
 
 def render_output_buttons(active):
+    if not user_can("exports_reports"):
+        tabs = st.tabs(["Overview"])
+        with tabs[0]:
+            summary, mode, err = update_counts(active)
+            if summary:
+                render_metric_summary(summary)
+            if err:
+                st.warning("Counts are unavailable for this filter combination.")
+                st.caption(str(err)[:500])
+            st.info("Exports and reports are disabled for your role.")
+        return
+
     tabs = st.tabs(["Overview", "Exports", "Reports"])
     with tabs[0]:
         summary, mode, err = update_counts(active)
@@ -6000,12 +6883,12 @@ def render_output_buttons(active):
                 st.session_state[report_key] = {"filename": filename, "data": data, "mime": mime, "rows": row_count}
                 st.session_state["prepared_report_ready_key"] = report_key
                 report_is_ready = True
-            st.success(f"Prepared {filename}")
+            st.session_state["prepared_report_message"] = f"Prepared {filename}"
 
         with b2:
             if report_is_ready:
                 item = st.session_state[report_key]
-                st.download_button(
+                _ = st.download_button(
                     f"Download {item['filename']}",
                     item["data"],
                     item["filename"],
@@ -6019,13 +6902,13 @@ def render_output_buttons(active):
         st.markdown("#### Contact Tracking")
         t1, t2, t3 = st.columns([1.1, 1.1, 1.8])
         with t1:
-            st.download_button("Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv")
+            _ = st.download_button("Street Results CSV Template", contact_tracking_template("Street Results"), "street_results_template.csv", "text/csv")
         with t2:
-            st.download_button("Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv")
+            _ = st.download_button("Walk/Call Tracking CSV Template", contact_tracking_template("Walk Call"), "walk_call_tracking_template.csv", "text/csv")
         with t3:
             uploaded = st.file_uploader("Upload completed contact results", type=["csv", "xlsx"], key=special_key("contact_results_upload_clean"))
             if uploaded is not None:
-                st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
+                _ = st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
 
 # Full-width branded header fixed across both the sidebar and main workspace.
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
@@ -6045,6 +6928,9 @@ st.markdown(f'''<div class="cc-global-header">
 </div>
 ''', unsafe_allow_html=True)
 
+# Require login before loading the full data/filter layer.
+render_security_gate()
+
 try:
     with st.spinner("Loading filters from R2..."):
         manifest, filter_options, geo_hierarchy = load_filter_layer()
@@ -6056,15 +6942,23 @@ if "left_section" not in st.session_state: st.session_state["left_section"] = No
 _filter_suffix = st.session_state["filter_reset_token"]
 
 with st.sidebar:
-    st.markdown('<div class="cc-sidebar-build-note">DEV</div>', unsafe_allow_html=True)
-    if st.button("🎯 Create Universe", width="stretch"):
+    st.caption(f"Signed in: {current_username()} · {current_role()}")
+    if is_campaign_scoped():
+        st.caption(f"Campaign: {current_user().get('campaign', '')}")
+    if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
-    if st.button("🔎 Voter Lookup", width="stretch"):
+    if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
         st.session_state["left_section"]="voter_lookup"; st.session_state["view"]="dashboard"; st.rerun()
-    if st.button("📬 Mail Ballot Center", width="stretch"):
+    if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
         st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
-    if st.button("⌂ Area Intelligence", width="stretch"):
+    if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
         st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+    if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
+        st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
+    if st.button("Log Out", width="stretch"):
+        for _k in ["auth_user", "auth_username"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
     st.divider()
 
     if st.session_state.get("left_section") == "create_universe":
@@ -6108,7 +7002,7 @@ with st.sidebar:
                     if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice: load_saved_universe_into_widgets(saved.get(choice,{}))
                 with cb:
                     if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
-                        saved.pop(choice,None); persist_saved_universes(saved); st.rerun()
+                        _ = saved.pop(choice,None); persist_saved_universes(saved); st.rerun()
             else: st.caption("No saved universes saved yet.")
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
@@ -6122,7 +7016,7 @@ with st.sidebar:
         with cb:
             if st.button("Clear Lookup", key=special_key("lookup_clear_btn"), width="stretch"):
                 for k in [special_key("lookup_query"), "lookup_selected_id"]:
-                    st.session_state.pop(k, None)
+                    _ = st.session_state.pop(k, None)
                 st.rerun()
     elif st.session_state.get("left_section") == "mail_ballot_center":
         st.markdown("### Mail Ballot Center")
@@ -6141,6 +7035,9 @@ with st.sidebar:
     elif st.session_state.get("left_section") == "area_intelligence":
         st.markdown("### Area Intelligence")
         st.caption("Select the area on the right.")
+    elif st.session_state.get("left_section") == "account_admin":
+        st.markdown("### Account Admin")
+        st.caption("Manage Candidate Connect accounts and campaign scopes.")
 
 active = active_filters()
 section = st.session_state.get("left_section")
@@ -6148,10 +7045,13 @@ section = st.session_state.get("left_section")
 def render_enhanced_home():
     render_statewide_snapshot()
 
-if section == "voter_lookup": render_voter_lookup_workspace(); st.stop()
-if section == "mail_ballot_center": render_mail_ballot_workspace(); st.stop()
-if section == "area_intelligence": render_area_intelligence_workspace(); st.stop()
-if section != "create_universe": render_enhanced_home(); st.stop()
+# Route protection. If a user lands on a page they do not have permission for,
+# send them back to the dashboard instead of rendering unauthorized tools.
+if section == "voter_lookup" and user_can("voter_lookup"): render_voter_lookup_workspace(); st.stop()
+if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_mail_ballot_workspace(); st.stop()
+if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
+if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
+if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
 
 st.session_state["view"]="targeting"
 st.markdown("## Create Universe")
@@ -6191,6 +7091,79 @@ with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state
 if st.session_state.get("quick_summary"):
     st.caption("Counts updated. Use the Output Center tabs below for the overview, exports, and reports.")
 
-st.markdown("## Output Center")
-render_output_buttons(active)
-st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
+_ = st.markdown("## Output Center")
+_ = render_output_buttons(active)
+_ = st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
+
+# Absolute final UI safety lock: keep real action/download buttons red with white text,
+# while keeping tabs/toggles/read-only labels navy and readable across Chrome/Safari.
+st.markdown(
+    """
+<style>
+/* Real Streamlit action buttons */
+.stButton > button:not([disabled]),
+div[data-testid="stDownloadButton"] > button:not([disabled]),
+[data-testid="stFileUploader"] button:not([disabled]) {
+    background: linear-gradient(180deg, #b01822, #8f1018) !important;
+    background-color: #a7121b !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 12px !important;
+    font-weight: 950 !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}
+.stButton > button:not([disabled]) *,
+div[data-testid="stDownloadButton"] > button:not([disabled]) *,
+[data-testid="stFileUploader"] button:not([disabled]) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+/* Disabled placeholders should not look like broken transparent red buttons. */
+.stButton > button[disabled],
+div[data-testid="stDownloadButton"] > button[disabled] {
+    background: #e5dccb !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: .75 !important;
+}
+.stButton > button[disabled] *,
+div[data-testid="stDownloadButton"] > button[disabled] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+/* Tabs are not action buttons. */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 4px !important;
+}
+/* Toggle/checkbox/radio labels */
+[data-testid="stCheckbox"] label, [data-testid="stCheckbox"] label *,
+[data-testid="stToggle"] label, [data-testid="stToggle"] label *,
+[data-testid="stRadio"] label, [data-testid="stRadio"] label * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
