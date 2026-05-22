@@ -1227,7 +1227,7 @@ def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def duckdb_count_cube_summary(active_json: str, special_json: str) -> dict:
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     url = count_cube_url()
     where = count_cube_where_sql(active, special)
@@ -1654,7 +1654,7 @@ def index_where_sql(active: dict, special: dict | None = None) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def duckdb_index_summary(active_json: str, special_json: str) -> dict:
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     urls = index_urls_from_manifest()
     where = index_where_sql(active, special)
@@ -2117,6 +2117,31 @@ def apply_security_scope_to_filters(filters: dict) -> dict:
             merged[field] = list(allowed)
     return merged
 
+
+def enforce_security_scope(active: dict | None) -> dict:
+    """Apply the logged-in user's campaign scope as a hard query boundary.
+
+    This is intentionally used by every workspace, not just Create Universe, so
+    Mail Ballot Center, Area Intelligence, exports, reports, and lookup cannot
+    drift back to statewide for campaign-scoped accounts.
+    """
+    return apply_security_scope_to_filters(active or {})
+
+
+def security_scope_label() -> str:
+    scope = security_scope_filters()
+    if not scope:
+        return "Statewide / unrestricted"
+    pieces = []
+    for field in ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]:
+        vals = scope.get(field) or []
+        if vals:
+            shown = ", ".join(map(str, vals[:3]))
+            if len(vals) > 3:
+                shown += f" +{len(vals)-3} more"
+            pieces.append(f"{DISPLAY_LABELS.get(field, field)}: {shown}")
+    return " | ".join(pieces) if pieces else "Campaign scoped"
+
 def saved_universe_state_section() -> str:
     if is_super_admin():
         return "saved_universes"
@@ -2488,7 +2513,7 @@ def active_filters() -> dict:
         vals = selected(f)
         if vals:
             out[f] = vals
-    return apply_security_scope_to_filters(out)
+    return enforce_security_scope(out)
 
 
 def universe_label_from_filters(filters: dict) -> str:
@@ -2842,7 +2867,12 @@ def options_from_count_cube(field: str, active: dict) -> list:
 
 def field_options(filter_options: pd.DataFrame, field: str, active: dict | None = None):
     try:
-        active = active or {}
+        scope = security_scope_filters()
+        active = enforce_security_scope(active or {})
+        # If the logged-in account is scoped directly on this field, do not show
+        # values outside that campaign boundary in dropdowns.
+        if field in scope and scope.get(field):
+            return list(scope.get(field) or [])
         fixed = clean_mail_options(field)
         if fixed:
             opts = fixed
@@ -2878,6 +2908,7 @@ def is_cube_safe(active: dict) -> bool:
 
 def update_counts(active: dict):
     try:
+        active = enforce_security_scope(active or {})
         special = active_special_filters()
         if requires_remote_index_count(active or {}, special or {}):
             # Tags and specific-election filters are row-level filters. Count them
@@ -3084,7 +3115,7 @@ def duckdb_count_cube_group(field: str, limit: int = 12) -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner=False)
 def duckdb_count_cube_group_filtered(active_json: str, special_json: str, field: str, limit: int = 20) -> pd.DataFrame:
     """Remote quick-count group by from the count cube. Does not scan detail/index shards."""
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(field)):
         return pd.DataFrame(columns=["label", "Voters"])
@@ -4932,7 +4963,7 @@ def render_voter_lookup_workspace():
 
 
 def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
-    active = active or {}
+    active = enforce_security_scope(active or {})
     special = active_special_filters() if "active_special_filters" in globals() else {}
     try:
         df = duckdb_detail_filtered_df(active, special, int(max_rows))
@@ -4979,7 +5010,7 @@ def _mb_special_filters() -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _mb_index_group_cached(active_json: str, special_json: str, field: str, limit: int = 12) -> pd.DataFrame:
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     urls = index_urls_from_manifest()
     url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
@@ -5010,6 +5041,7 @@ def _mb_index_group_cached(active_json: str, special_json: str, field: str, limi
 
 
 def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
+    active = enforce_security_scope(active or {})
     """Use the prebuilt count cube for Mail Ballot Center counts.
 
     This keeps the MB workspace fast. The cube can answer filter/count questions
@@ -5035,7 +5067,7 @@ def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
 
 
 def _mb_count(active: dict, extra: dict | None = None) -> int:
-    a = dict(active or {})
+    a = enforce_security_scope(active or {})
     for k, v in (extra or {}).items():
         a[k] = v if isinstance(v, list) else [v]
     try:
@@ -5046,6 +5078,7 @@ def _mb_count(active: dict, extra: dict | None = None) -> int:
 
 
 def _mb_group_df(active: dict, field: str, limit: int = 12) -> pd.DataFrame:
+    active = enforce_security_scope(active or {})
     try:
         df = duckdb_count_cube_group_filtered(
             json.dumps(active or {}, sort_keys=True),
@@ -5141,6 +5174,7 @@ def _mb_render_metric(label: str, value: int, note: str = "", color_class: str =
 
 
 def _mb_prepare_download(active: dict, label: str, file_prefix: str, max_rows: int = 50000):
+    active = enforce_security_scope(active or {})
     key = special_key("mb_export_" + re.sub(r"[^a-z0-9]+", "_", file_prefix.lower()))
     if st.button(f"Prepare {label}", key=key + "_btn", width="stretch"):
         with st.spinner(f"Preparing {label}..."):
@@ -5176,10 +5210,13 @@ def render_mail_ballot_workspace():
     start_from_current = bool(st.session_state.get(special_key("mb_start_current"), False))
     saved_universe = get_current_universe_filters()
     base = dict(saved_universe) if (start_from_current and saved_universe) else {}
+    base = enforce_security_scope(base)
+    if is_campaign_scoped():
+        st.info(f"Campaign boundary enforced: {security_scope_label()}")
     if start_from_current and saved_universe:
         st.info(f"Starting from current universe: {st.session_state.get('current_universe_label', 'Selected universe')}")
     elif start_from_current and not saved_universe:
-        st.warning("No current universe has been applied yet. Showing statewide mail-ballot data.")
+        st.warning("No current universe has been applied yet. Showing your assigned campaign scope.")
 
     preset = st.selectbox(
         "Mail ballot mission",
@@ -5253,6 +5290,7 @@ def render_mail_ballot_workspace():
             if matched:
                 mb_active[fld] = matched
 
+    mb_active = enforce_security_scope(mb_active)
     st.session_state[special_key("mb_prob_score_range")] = score
     if st.button("Apply Mail Ballot Center Filters", width="stretch", type="primary"):
         st.session_state[special_key("mb_last_active")] = mb_active
@@ -5387,6 +5425,7 @@ def _sort_category_df(df: pd.DataFrame, field: str = "") -> pd.DataFrame:
 
 def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
     """Fast cube-backed group table for Area Intelligence."""
+    active = enforce_security_scope(active or {})
     try:
         special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
         df = duckdb_count_cube_group_filtered(
@@ -5412,7 +5451,7 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner=False)
 def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, limit: int = 250) -> pd.DataFrame:
     """One-pass geography/jurisdiction profile table from count_cube."""
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(breakdown)):
         return pd.DataFrame()
@@ -5600,7 +5639,7 @@ def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 12)
     Uses index shards and ORs duplicate raw columns into one displayed election code,
     so the report does not repeat G25/P25 if the source has date-specific variants.
     """
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     cols = selected_election_columns(types=["General", "Primary"])
     groups = {}
@@ -5659,7 +5698,7 @@ def _area_mail_ballot_turnout_by_party(active_json: str, special_json: str, limi
     This is used for the Area Intelligence report chart. It only counts rows where
     the election-history field itself indicates mail/absentee voting (M/MB/MAIL/A/AB/ABS).
     """
-    active = json.loads(active_json or "{}")
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     cols = selected_election_columns(types=["General", "Primary"])
     groups = {}
@@ -6077,8 +6116,11 @@ def render_area_intelligence_workspace():
         help="Use the universe last applied in Create Universe. If unchecked, Area Intelligence starts statewide.",
     )
     active = dict(saved) if (use_current and saved) else {}
+    active = enforce_security_scope(active)
+    if is_campaign_scoped():
+        st.info(f"Campaign boundary enforced: {security_scope_label()}")
     if active:
-        st.info(f"Analyzing current universe: {_area_universe_label(active)}")
+        st.info(f"Analyzing universe: {_area_universe_label(active)}")
     else:
         st.info("Analyzing statewide universe. Build/apply a Create Universe first to profile a district, county, municipality, or custom target universe.")
 
@@ -6096,8 +6138,9 @@ def render_area_intelligence_workspace():
             if vals:
                 area_filters[fld] = vals
         if area_filters:
-            active = {**active, **area_filters}
+            active = enforce_security_scope({**active, **area_filters})
 
+    active = enforce_security_scope(active)
     summary, mode, err = update_counts(active)
     if not summary:
         st.error(f"Area Intelligence counts are unavailable: {err}")
@@ -6229,12 +6272,13 @@ def filtered_export_columns(df: pd.DataFrame) -> list[str]:
 
 
 def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
+    active = enforce_security_scope(active or {})
     """Live-safe detail export helper used by exports and Mail Ballot Center.
 
     Keeps heavy detail scans behind explicit download/prepare actions and applies
     the current special filters, including MB probability score and election filters.
     """
-    active = active or {}
+    active = enforce_security_scope(active or {})
     special = active_special_filters() if "active_special_filters" in globals() else {}
     try:
         df = duckdb_detail_filtered_df(active, special, int(max_rows))
