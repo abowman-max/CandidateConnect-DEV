@@ -2183,9 +2183,78 @@ def render_security_gate():
             st.rerun()
     st.stop()
 
+
+def _scope_multiselect_options(filter_options: pd.DataFrame, field: str, current_scope: dict | None = None) -> list[str]:
+    """Return clean dropdown options for campaign scope assignment."""
+    try:
+        # Scope assignment should use real dataset values. Use the same filter sources as the app.
+        active = current_scope or {}
+        if field in GEO_FIELDS:
+            geo_df = load_geo_hierarchy_safe()
+            opts = options_from_geo(geo_df, field, active) if geo_df is not None and not geo_df.empty else []
+            if not opts:
+                opts = options_from_filter_table(filter_options, field)
+        else:
+            opts = options_from_filter_table(filter_options, field)
+        current = [str(v) for v in (active or {}).get(field, []) if str(v).strip()]
+        merged = list(opts or [])
+        for v in current:
+            if v not in merged:
+                merged.append(v)
+        return sorted([v for v in merged if not is_unusable_label(v)], key=smart_sort_key)
+    except Exception:
+        return []
+
+
+def build_scope_from_admin_widgets(prefix: str, filter_options: pd.DataFrame, base_scope: dict | None = None, disabled: bool = False) -> dict:
+    """Dropdown-based campaign scope builder.
+
+    This replaces manual JSON entry. Super Admins can define a campaign boundary
+    using any combination of geography and district fields. Campaign Admins can
+    only pass through their own inherited boundary when creating users.
+    """
+    base_scope = base_scope or {}
+    st.markdown("#### Campaign Universe / Hard Boundary")
+    st.caption("Use these dropdowns to define what this account is allowed to see. Leave all fields blank only for Super Admin/internal statewide access.")
+
+    scope_fields = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
+    labels = {
+        "County": "County",
+        "Municipality": "Municipality",
+        "Precinct": "Precinct",
+        "USC": "Congressional District",
+        "STS": "State Senate District",
+        "STH": "State House District",
+        "School District": "School District",
+        "School Region": "School Region",
+    }
+    out = {}
+    # Two-column layout keeps this usable without a long JSON box.
+    for i in range(0, len(scope_fields), 2):
+        cols = st.columns(2)
+        for col, field in zip(cols, scope_fields[i:i+2]):
+            with col:
+                opts = _scope_multiselect_options(filter_options, field, out or base_scope)
+                default = [v for v in (base_scope.get(field, []) or []) if v in opts]
+                # If the old saved value is not in the option list for any reason, keep it visible.
+                for v in (base_scope.get(field, []) or []):
+                    if v not in opts:
+                        opts.append(v)
+                        default.append(v)
+                vals = st.multiselect(labels.get(field, field), options=opts, default=default, key=f"{prefix}_scope_{field}", disabled=disabled)
+                vals = [str(v).strip() for v in vals if str(v).strip()]
+                if vals:
+                    out[field] = vals
+    if out:
+        st.info("This account will be limited to: " + json.dumps(out, ensure_ascii=False))
+    else:
+        st.warning("No scope selected. Only use blank scope for Super Admin/internal statewide access.")
+    return out
+
+
 def render_account_admin_workspace(filter_options=None):
     st.markdown("## Account Admin")
-    st.caption("Phase 1 account management. Campaign-scoped users cannot see or work outside their assigned universe.")
+    st.caption("Manage Candidate Connect accounts and campaign scopes. Campaign-scoped users cannot see, search, export, or report outside their assigned universe.")
 
     store = load_security_store()
     users = store.setdefault("users", {})
@@ -2210,20 +2279,37 @@ def render_account_admin_workspace(filter_options=None):
     else:
         st.info("No accounts visible.")
 
+    existing_names = [""] + sorted([u for u in users.keys() if is_super_admin() or str(users.get(u, {}).get("campaign") or "") == my_campaign])
+    edit_user = st.selectbox("Optional: load existing account to edit", existing_names, key="security_edit_user")
+    existing = users.get(edit_user, {}) if edit_user else {}
+
     st.markdown("### Add / Update Account")
     allowed_roles = SECURITY_ROLES if is_super_admin() else ["Manager", "Field User", "Viewer"]
+
+    username_default = edit_user or ""
+    display_default = existing.get("display_name", "") if existing else ""
+    role_default = existing.get("role", "Campaign Admin") if existing else ("Campaign Admin" if is_super_admin() else "Manager")
+    role_index = allowed_roles.index(role_default) if role_default in allowed_roles else 0
+    campaign_default = existing.get("campaign", "") if existing else ("" if is_super_admin() else my_campaign)
+    scope_default = existing.get("scope_filters", {}) if existing else ({} if is_super_admin() else security_scope_filters())
+
     with st.form("account_admin_form"):
-        username = st.text_input("Username").strip().lower()
-        display_name = st.text_input("Display name")
+        username = st.text_input("Username", value=username_default).strip().lower()
+        display_name = st.text_input("Display name", value=display_default)
         password = st.text_input("New password / reset password", type="password")
-        role = st.selectbox("Role", allowed_roles)
-        campaign = st.text_input("Campaign / client name", value=("" if is_super_admin() else my_campaign), disabled=not is_super_admin())
+        role = st.selectbox("Role", allowed_roles, index=role_index)
+        campaign = st.text_input("Campaign / client name", value=campaign_default, disabled=not is_super_admin())
+        disabled = st.checkbox("Disable this account", value=bool(existing.get("disabled", False)) if existing else False)
 
-        default_scope = {} if is_super_admin() else security_scope_filters()
-        st.caption("Campaign universe scope as JSON. Examples: {\"USC\":[\"10\"]}, {\"STS\":[\"28\"]}, or {\"County\":[\"York\"],\"Municipality\":[\"York Township\"]}.")
-        scope_text = st.text_area("Campaign universe / hard boundary", value=json.dumps(default_scope, ensure_ascii=False, indent=2), height=120, disabled=not is_super_admin())
+        if is_super_admin():
+            scope = build_scope_from_admin_widgets("acct", filter_options if filter_options is not None else pd.DataFrame(), base_scope=scope_default, disabled=(role == "Super Admin"))
+            if role == "Super Admin":
+                scope = {}
+        else:
+            st.info("Users you create inherit your campaign boundary automatically.")
+            scope = security_scope_filters()
+            st.code(json.dumps(scope, ensure_ascii=False, indent=2), language="json")
 
-        disabled = st.checkbox("Disable this account", value=False)
         submitted = st.form_submit_button("Save Account")
 
     if submitted:
@@ -2231,50 +2317,55 @@ def render_account_admin_workspace(filter_options=None):
             st.error("Username is required.")
             return
         if not is_super_admin() and username in users and str(users[username].get("campaign") or "") != my_campaign:
-            st.error("You can only manage accounts inside your campaign.")
+            st.error("You can only edit accounts in your campaign.")
             return
-        try:
-            scope = json.loads(scope_text or "{}")
-            if not isinstance(scope, dict):
-                scope = {}
-        except Exception:
-            st.error("Scope must be valid JSON.")
-            return
-        if not is_super_admin():
-            scope = security_scope_filters()
-            campaign = my_campaign
-        existing = users.get(username, {})
-        if not password and not existing:
+        if not password and username not in users:
             st.error("Password is required for a new account.")
             return
-        new_user = dict(existing)
-        new_user.update({
+        if role != "Super Admin" and not scope:
+            st.error("Campaign-scoped accounts need a scope. Select at least one county, municipality, precinct, or district.")
+            return
+
+        prior = users.get(username, {})
+        record = dict(prior)
+        record.update({
             "display_name": display_name or username,
             "role": role,
-            "campaign": campaign or "",
+            "campaign": str(campaign or "").strip(),
             "scope_filters": scope,
             "disabled": bool(disabled),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         })
         if password:
-            new_user["password_hash"] = _password_hash(username, password)
-        if "created_at" not in new_user:
-            new_user["created_at"] = datetime.now().isoformat(timespec="seconds")
-        users[username] = new_user
+            record["password_hash"] = _password_hash(username, password)
+        if "created_at" not in record:
+            record["created_at"] = datetime.now().isoformat(timespec="seconds")
+        users[username] = record
         save_security_store(store)
-        st.success("Account saved.")
+        st.success("Account saved. The scope is now a hard boundary for filters, lookup, exports, reports, and saved universes.")
         st.rerun()
 
-    st.markdown("### Export Security Baseline")
-    st.caption("Download this and upload it to R2 as app_state/security_users.json when you want it to survive app redeploys/reboots from a durable baseline.")
-    st.download_button("Download security_users.json", security_export_json_bytes(), "security_users.json", "application/json")
-
-    if st.button("Log Out", width="stretch"):
-        for k in ["auth_user", "auth_username"]:
-            st.session_state.pop(k, None)
-        st.rerun()
-
-
+    st.markdown("### Backup / Restore")
+    st.download_button(
+        "Download security_users.json backup",
+        data=security_export_json_bytes(),
+        file_name="security_users.json",
+        mime="application/json",
+        width="stretch",
+    )
+    uploaded = st.file_uploader("Restore security_users.json", type=["json"], key="security_restore_upload")
+    if uploaded is not None:
+        try:
+            restored = json.loads(uploaded.read().decode("utf-8"))
+            if isinstance(restored, dict) and isinstance(restored.get("users"), dict):
+                if st.button("Apply restored security file", width="stretch"):
+                    save_security_store(restored)
+                    st.success("Security file restored.")
+                    st.rerun()
+            else:
+                st.error("That file does not look like a Candidate Connect security file.")
+        except Exception as e:
+            st.error(f"Could not restore security file: {e}")
 
 def load_persistent_saved_universes():
     """Initialize session saved universes from local state, then URL query params.
