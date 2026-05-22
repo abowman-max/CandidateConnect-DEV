@@ -5040,30 +5040,34 @@ def _mb_index_group_cached(active_json: str, special_json: str, field: str, limi
             pass
 
 
-def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
-    active = enforce_security_scope(active or {})
-    """Use the prebuilt count cube for Mail Ballot Center counts.
-
-    This keeps the MB workspace fast. The cube can answer filter/count questions
-    instantly as long as the filter fields are in the cube. Full voter files still
-    use detail shards only after the user clicks a prepare-download button.
-    """
+@st.cache_data(ttl=300, show_spinner=False)
+def _mb_summary_cached(active_json: str, special_json: str) -> tuple[dict | None, str, str]:
+    """Cached Mail Ballot summary. Returns plain strings only so Streamlit never prints debug objects."""
+    active = enforce_security_scope(json.loads(active_json or "{}"))
     try:
         summary = duckdb_count_cube_summary(
             json.dumps(active or {}, sort_keys=True),
-            json.dumps(_mb_special_filters(), sort_keys=True),
+            special_json or "{}",
         )
-        return summary, "mail-ballot-cube", None
+        return summary, "mail-ballot-cube", ""
     except Exception as e:
-        # Fallback: index shards are slower, but better than returning nothing.
         try:
             summary = duckdb_index_summary(
                 json.dumps(active or {}, sort_keys=True),
-                json.dumps(_mb_special_filters(), sort_keys=True),
+                special_json or "{}",
             )
-            return summary, "mail-ballot-index-fallback", None
+            return summary, "mail-ballot-index-fallback", ""
         except Exception:
-            return None, "unavailable", e
+            return None, "unavailable", str(e)
+
+
+def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
+    active = enforce_security_scope(active or {})
+    summary, mode, err_text = _mb_summary_cached(
+        json.dumps(active or {}, sort_keys=True),
+        json.dumps(_mb_special_filters(), sort_keys=True),
+    )
+    return summary, mode, Exception(err_text) if err_text else None
 
 
 def _mb_count(active: dict, extra: dict | None = None) -> int:
@@ -5297,8 +5301,7 @@ def render_mail_ballot_workspace():
         st.success("Mail Ballot Center filters applied here. Create Universe filters were not changed.")
 
     summary, mode, err = _mb_summary(mb_active)
-    if mode == "mail-ballot-cube":
-        st.caption("Counts are using the fast prebuilt count cube. Full voter files are prepared only when you click a download button.")
+    # Counts are cached and scoped silently; do not show technical/debug messages to users.
     total = _mb_total_from_summary(summary)
     applied = _mb_count(mb_active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(mb_active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
     not_applied = _mb_count(mb_active, {"MB_App": ["No", "N", "DNA", "Not Applied"]}) or max(0, total - applied)
