@@ -6573,7 +6573,7 @@ def render_area_intelligence_workspace():
             cc_table(turnout_df, height=300, key=special_key("area_tbl_turnout"))
             st.markdown("#### Ballot Status")
             cc_table(mb_status_df, height=220, key=special_key("area_tbl_mb_status"))
-    if mb_tab == "Analyze":
+    if area_tab == "Report":
         report_title = _area_universe_label(active)
         st.markdown("### Client-ready Area Intelligence Report")
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
@@ -6617,7 +6617,7 @@ def render_area_intelligence_workspace():
                     "candidate_connect_area_intelligence_report.pdf",
                     "application/pdf",
                 )
-    if mb_tab == "Build Files":
+    if area_tab == "Notes":
         st.text_area("Area Intelligence notes / strategy", key=special_key("area_notes"), height=180)
 
 def filtered_export_columns(df: pd.DataFrame) -> list[str]:
@@ -7275,7 +7275,9 @@ def render_output_buttons(active):
         elif err:
             st.warning(err)
 
-    if mb_tab == "Analyze":
+    output_tab = st.radio("Output Center section", ["Overview", "Exports", "Reports"], horizontal=True, label_visibility="collapsed", key=special_key("output_tab"))
+
+    if output_tab == "Exports":
         st.markdown("### Export Center")
         st.caption("Pick one output type and one file type, prepare it, then download. Excel summaries are chosen automatically: county/multi-municipality universes summarize by municipality; one municipality summarizes by precinct.")
         e1, e2, e3 = st.columns([1.2, .8, 1.0])
@@ -7336,7 +7338,7 @@ def render_output_buttons(active):
             if st.session_state.get(zip_key):
                 st.download_button("Download Selected ZIP", st.session_state[zip_key], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=(zip_key,))
 
-    if mb_tab == "Build Files":
+    if output_tab == "Reports":
         st.markdown("### Reports + Tracking")
         st.caption("Prepare one PDF/report at a time. Street and call lists are sorted like the local list and include mobile/landline phone labels.")
 
