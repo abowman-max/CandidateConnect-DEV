@@ -1506,6 +1506,116 @@ div[data-testid="stDownloadButton"] > button:not(:disabled) * {
 </style>
 """, unsafe_allow_html=True)
 
+# UI cleanup patch: card spacing and compact strategy readout.
+st.markdown("""
+<style>
+
+/* === UI CLEANUP PATCH v4: spacing, compact cards, one insight bubble === */
+
+/* Fix top card overlap: Streamlit column children need real breathing room. */
+div[data-testid="stHorizontalBlock"] {
+    gap: 1rem !important;
+}
+div[data-testid="stHorizontalBlock"] > div {
+    box-sizing: border-box !important;
+    min-width: 0 !important;
+    padding-left: .35rem !important;
+    padding-right: .35rem !important;
+}
+
+/* Metric cards: compact, but not crushed/overlapping. */
+.cc-icon-metric,
+.cc-metric,
+div[data-testid="stMetric"] {
+    min-height: 76px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 8px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+.cc-icon-value,
+.cc-metric .value,
+div[data-testid="stMetricValue"] {
+    font-size: 18pt !important;
+    line-height: 1.05 !important;
+}
+.cc-icon-sub,
+.cc-metric .sub,
+div[data-testid="stMetricDelta"] {
+    font-size: 8.5pt !important;
+    line-height: 1.05 !important;
+    margin-top: 2px !important;
+}
+
+/* Text-only header cards should not be tall. */
+.cc-home-card {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+}
+.cc-home-card h3 {
+    margin-top: 0 !important;
+    margin-bottom: 4px !important;
+}
+
+/* More compact tables/cards without crushing controls. */
+.cc-html-table th,
+.cc-html-table td,
+.cc-home-table th,
+.cc-home-table td {
+    padding: 6px 8px !important;
+    font-size: 10pt !important;
+}
+.cc-card {
+    padding: 10px !important;
+    margin-bottom: 9px !important;
+}
+
+/* Compact the blue strategy readout into one box with normal bullet spacing. */
+.cc-note-compact {
+    padding: 10px 16px !important;
+    margin: 8px 0 12px 0 !important;
+    border-radius: 10px !important;
+    background: #d9e8f8 !important;
+    border: 1px solid #8aa3bf !important;
+    color: #071d3a !important;
+}
+.cc-note-compact ul {
+    margin: 0 !important;
+    padding-left: 18px !important;
+}
+.cc-note-compact li {
+    margin: 3px 0 !important;
+    line-height: 1.25 !important;
+    color: #071d3a !important;
+    font-size: 10pt !important;
+}
+
+/* Keep donut center readable. */
+.cc-donut:after {
+    background: #071d3a !important;
+}
+.cc-donut-center,
+.cc-donut-center *,
+.cc-donut-center div,
+.cc-donut-center span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    fill: #ffffff !important;
+    opacity: 1 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+}
+
+/* Slightly tighten the page without breaking dropdowns/buttons. */
+.element-container {
+    margin-bottom: .2rem !important;
+}
+div[data-testid="stVerticalBlock"] {
+    gap: .4rem !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
@@ -6679,8 +6789,9 @@ def render_area_intelligence_workspace():
     insights = _area_insights(summary, party_df, age_df, mb_app_df)
 
     st.markdown("### Executive Strategy Readout")
-    for ins in insights:
-        st.markdown(f"<div class='cc-note'>• {ins}</div>", unsafe_allow_html=True)
+    if insights:
+        _insight_items = "".join([f"<li>{str(ins)}</li>" for ins in insights])
+        st.markdown(f"<div class='cc-note cc-note-compact'><ul>{_insight_items}</ul></div>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([1, 1])
     with c1:
