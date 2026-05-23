@@ -25,7 +25,7 @@ R2 = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
 DETAIL_SHARDS = 36
 EXPORT_ROW_LIMIT = 250_000
 
-st.set_page_config(page_title="Candidate Connect", layout="wide")
+st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sidebar_state="expanded")
 try:
     st.set_option("runner.magicEnabled", False)
 except Exception:
@@ -1068,6 +1068,61 @@ div[data-testid="stDownloadButton"] > button * {
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
     text-shadow: none !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# Final sidebar recovery lock: keep the left navigation from collapsing into an unrecoverable state.
+# This is intentionally placed after the main CSS stack so it wins over earlier Streamlit chrome-hiding rules.
+st.markdown(
+    """
+<style>
+/* Keep Streamlit's header/toggle recoverable. Earlier CSS hides most Streamlit chrome; do not hide this. */
+header[data-testid="stHeader"] {
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: transparent !important;
+}
+
+/* Prevent the sidebar from disappearing when a user clicks the collapse control. */
+[data-testid="stSidebar"][aria-expanded="false"],
+section[data-testid="stSidebar"][aria-expanded="false"] {
+    display: block !important;
+    visibility: visible !important;
+    transform: none !important;
+    left: 0 !important;
+    margin-left: 0 !important;
+    min-width: 260px !important;
+    width: 260px !important;
+}
+
+/* Keep the sidebar contents visible/recoverable even after collapse attempts. */
+[data-testid="stSidebar"][aria-expanded="false"] > div,
+section[data-testid="stSidebar"][aria-expanded="false"] > div {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+}
+
+/* Make sure the main content does not slide under the locked-open sidebar. */
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMain"] {
+    margin-left: 0 !important;
+}
+
+/* If Streamlit renders the collapse/expand button, keep it clickable and visible. */
+button[kind="header"],
+[data-testid="stHeader"] button,
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
 }
 </style>
 """,
