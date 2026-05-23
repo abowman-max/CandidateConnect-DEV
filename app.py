@@ -1447,6 +1447,89 @@ label[data-baseweb="radio"], label[data-baseweb="radio"] * {
     unsafe_allow_html=True,
 )
 
+st.markdown("""
+<style>
+
+/* === v24 universal polish patch: sidebar lock, tooltip cleanup, donut center readability === */
+
+/* Keep sidebar expanded/recoverable and prevent hidden-collapse trap. */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"] {
+    min-width: 270px !important;
+    width: 270px !important;
+    transform: none !important;
+    visibility: visible !important;
+    display: block !important;
+}
+
+/* Hide Streamlit's sidebar collapse/expand controls so users can't get stuck. */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="collapsedControl"],
+button[aria-label="Close sidebar"],
+button[aria-label="Open sidebar"],
+button[title="Close sidebar"],
+button[title="Open sidebar"],
+button[title*="sidebar"],
+button[aria-label*="sidebar"] {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Remove stray hover/tooltips such as keyboard_double. */
+div[role="tooltip"],
+[data-baseweb="tooltip"],
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stTooltipContent"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+/* If Streamlit renders material-icon text in the sidebar, hide only the control area. */
+[data-testid="stSidebar"] [class*="sidebar"] button,
+[data-testid="stSidebar"] [class*="Sidebar"] button {
+    text-indent: -9999px !important;
+    overflow: hidden !important;
+}
+
+/* Keep legitimate Candidate Connect sidebar nav buttons readable. */
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton > button * {
+    text-indent: 0 !important;
+    overflow: visible !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Donut chart center readability: dark center with white text. */
+.cc-donut:after {
+    background: #071d3a !important;
+}
+.cc-donut-center,
+.cc-donut-center *,
+.cc-donut-center div,
+.cc-donut-center span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    fill: #ffffff !important;
+    opacity: 1 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+}
+
+/* Left brand/tagline stays Impact. */
+.cc-global-tagline,
+.cc-global-tagline span,
+.left-header-text,
+.left-header-text span {
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
