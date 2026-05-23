@@ -2698,9 +2698,59 @@ def render_security_gate():
     store = load_security_store()
     users = store.get("users") or {}
 
+    # Login/setup screens use a compact centered card instead of full-width inputs.
+    st.markdown("""
+<style>
+/* Login/setup screen only. This is only rendered before authentication, so it will not affect the main app. */
+.cc-login-spacer { height: 2.1rem; }
+.cc-login-title {
+    text-align: center;
+    color: #071d3a !important;
+    font-size: 18pt !important;
+    font-weight: 950 !important;
+    margin-bottom: .25rem !important;
+}
+.cc-login-subtitle {
+    text-align: center;
+    color: #5f6b7a !important;
+    font-size: 10pt !important;
+    margin-bottom: 1rem !important;
+}
+div[data-testid="stForm"] {
+    max-width: 430px !important;
+    margin: 0 auto !important;
+    padding: 22px 24px 18px 24px !important;
+    background: #f8f4ea !important;
+    border: 1px solid #c8bca8 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 28px rgba(7,29,58,.16) !important;
+}
+div[data-testid="stForm"] label,
+div[data-testid="stForm"] label * {
+    color: #071d3a !important;
+    font-weight: 800 !important;
+    font-size: 10pt !important;
+}
+div[data-testid="stForm"] input {
+    font-size: 10pt !important;
+}
+div[data-testid="stForm"] .stButton > button {
+    width: 100% !important;
+    margin-top: .35rem !important;
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 10px !important;
+    font-weight: 900 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
     if not users:
-        st.markdown("## Candidate Connect Setup")
-        st.info("Create the first Super Admin account. After this, the app will require login.")
+        st.markdown('<div class="cc-login-spacer"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-login-title">Candidate Connect Setup</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-login-subtitle">Create the first Super Admin account. After this, the app will require login.</div>', unsafe_allow_html=True)
         with st.form("first_admin_setup"):
             username = st.text_input("Super Admin username")
             pw1 = st.text_input("Password", type="password")
@@ -2731,7 +2781,9 @@ def render_security_gate():
     if st.session_state.get("auth_user"):
         return
 
-    st.markdown("## Candidate Connect Login")
+    st.markdown('<div class="cc-login-spacer"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-login-title">Candidate Connect Login</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-login-subtitle">Sign in to access your campaign universe, reports, and tools.</div>', unsafe_allow_html=True)
     with st.form("candidate_connect_login"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
