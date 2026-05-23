@@ -1337,6 +1337,175 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
 </style>
 """, unsafe_allow_html=True)
 
+# Compact UX patch: tabs restored and page length reduced.
+st.markdown("""
+<style>
+
+/* === COMPACT UX PATCH v3: less vertical scrolling, tabs restored, tighter cards/sidebar === */
+
+/* Tighten global text/spacing while preserving readability. */
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    font-size: 10pt !important;
+}
+
+/* Bring sidebar content closer to the fixed header. */
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 6.35rem !important;
+}
+.cc-sidebar-build-note {
+    margin-top: -10px !important;
+    margin-bottom: 4px !important;
+}
+
+/* Keep main content left aligned and a bit tighter. */
+.main .block-container,
+[data-testid="stMain"] .block-container,
+section.main .block-container {
+    max-width: 1280px !important;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+    padding-left: 1.3rem !important;
+    padding-right: 1rem !important;
+}
+
+/* Tighter headings and captions. */
+h1 { font-size: 22pt !important; margin-bottom: .35rem !important; }
+h2 { font-size: 18pt !important; margin-top: .8rem !important; margin-bottom: .35rem !important; }
+h3 { font-size: 14pt !important; margin-top: .55rem !important; margin-bottom: .25rem !important; }
+p, .stCaption, [data-testid="stCaptionContainer"] {
+    font-size: 10pt !important;
+}
+
+/* Reduce default vertical gaps between Streamlit elements. */
+div[data-testid="stVerticalBlock"] {
+    gap: .45rem !important;
+}
+.element-container {
+    margin-bottom: .25rem !important;
+}
+
+/* Restore tab look and make it compact. */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 3px !important;
+}
+
+/* Compact summary/metric cards. */
+.cc-icon-metric,
+.cc-metric,
+div[data-testid="stMetric"] {
+    min-height: 58px !important;
+    padding: 8px 10px !important;
+}
+.cc-icon-value,
+.cc-metric .value,
+div[data-testid="stMetricValue"] {
+    font-size: 18pt !important;
+    line-height: 1.05 !important;
+}
+.cc-icon-label,
+.cc-metric .label,
+div[data-testid="stMetricLabel"] {
+    font-size: 8.5pt !important;
+    line-height: 1.05 !important;
+}
+.cc-icon-sub,
+.cc-metric .sub,
+div[data-testid="stMetricDelta"] {
+    font-size: 8.5pt !important;
+    line-height: 1.05 !important;
+}
+
+/* Compact home/report cards and tables. */
+.cc-home-card,
+.cc-card {
+    padding: 10px !important;
+    margin-bottom: 9px !important;
+    border-radius: 10px !important;
+}
+.cc-home-card h3,
+.cc-card h3 {
+    font-size: 13pt !important;
+    margin: 0 0 6px 0 !important;
+}
+.cc-html-table th,
+.cc-html-table td,
+.cc-home-table th,
+.cc-home-table td {
+    padding: 6px 8px !important;
+    font-size: 10pt !important;
+}
+
+/* Donuts slightly smaller and center text readable. */
+.cc-donut {
+    width: 130px !important;
+    height: 130px !important;
+}
+.cc-donut:after {
+    inset: 35px !important;
+    background: #071d3a !important;
+}
+.cc-donut-center,
+.cc-donut-center *,
+.cc-donut-center div,
+.cc-donut-center span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    fill: #ffffff !important;
+    font-size: 9pt !important;
+    line-height: 1.05 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+}
+.cc-donut-wrap {
+    min-height: 145px !important;
+    gap: 12px !important;
+}
+
+/* Executive Strategy Readout should be compact bullet text, not big blue boxes. */
+.cc-note {
+    padding: 6px 8px !important;
+    margin: 5px 0 !important;
+    border-radius: 8px !important;
+}
+
+/* Force active action buttons consistently red/white, without affecting tabs. */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 9px !important;
+    font-weight: 850 !important;
+}
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
@@ -5664,9 +5833,9 @@ def render_mail_ballot_workspace():
     with m4: _mb_render_metric("Ballots Sent", sent_count, "Sent to voters", "gold")
     with m5: _mb_render_metric("Chase Universe", chase, "Sent minus returned", "")
 
-    mb_tab = st.radio("Mail Ballot Center section", ["Plan", "Analyze", "Build Files", "Notes"], horizontal=True, label_visibility="collapsed", key=special_key("mb_tab"))
+    tabs = st.tabs(["Plan", "Analyze", "Build Files", "Notes"])
 
-    if mb_tab == "Plan":
+    with tabs[0]:
         st.markdown("### Recommended workflow")
         st.markdown("""
 **1. Cultivate applications:** start with high MB probability voters who have not applied. Prioritize reliable general-election voters and voters with phones/email.  
@@ -5677,7 +5846,7 @@ def render_mail_ballot_workspace():
 """)
         st.info("This section stays inside Mail Ballot Center. It does not overwrite the main Create Universe filters unless we intentionally add a Send to Universe button later.")
 
-    if mb_tab == "Analyze":
+    with tabs[1]:
         left, right = st.columns(2)
         with left:
             st.markdown("#### Party")
@@ -5694,7 +5863,7 @@ def render_mail_ballot_workspace():
             st.markdown("#### Ballot Status")
             cc_table(_mb_group_df(mb_active, "MB_Status", 12), height=240, key=special_key("mb_tbl_mb_status"))
 
-    if mb_tab == "Build Files":
+    with tabs[2]:
         st.markdown("### Build Mail Ballot Files")
         st.caption("Files are prepared only when you click a button, so the page stays fast. Each file respects the Mail Ballot Center filters currently shown above.")
         st.info("For application cultivation, use the Mail Ballot Application filter above and choose DNA / No / Not Applied. Application Status is for voters who already have an application record, such as Approved or Declined.")
@@ -5727,7 +5896,7 @@ def render_mail_ballot_workspace():
         st.caption("A general-purpose export of exactly the current Mail Ballot Center universe after your mission and quick filters.")
         _mb_prepare_download(mb_active, "Current Mail Ballot Center Universe", "mail_ballot_center_current_universe", 100000)
 
-    if mb_tab == "Notes":
+    with tabs[3]:
         st.text_area("Mail ballot notes / plan", key=special_key("mb_notes"), height=180)
 
 
@@ -6549,8 +6718,8 @@ def render_area_intelligence_workspace():
     else:
         cc_table(breakdown_df, height=520, key=special_key("area_breakdown_table"), sticky_first_col=True)
 
-    area_tab = st.radio("Area Intelligence section", ["Profile Tables", "Report", "Notes"], horizontal=True, label_visibility="collapsed", key=special_key("area_tab"))
-    if area_tab == "Profile Tables":
+    tabs = st.tabs(["Profile Tables", "Report", "Notes"])
+    with tabs[0]:
         left, right = st.columns(2)
         with left:
             st.markdown("#### Party")
@@ -6573,7 +6742,7 @@ def render_area_intelligence_workspace():
             cc_table(turnout_df, height=300, key=special_key("area_tbl_turnout"))
             st.markdown("#### Ballot Status")
             cc_table(mb_status_df, height=220, key=special_key("area_tbl_mb_status"))
-    if area_tab == "Report":
+    with tabs[1]:
         report_title = _area_universe_label(active)
         st.markdown("### Client-ready Area Intelligence Report")
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
@@ -6617,7 +6786,7 @@ def render_area_intelligence_workspace():
                     "candidate_connect_area_intelligence_report.pdf",
                     "application/pdf",
                 )
-    if area_tab == "Notes":
+    with tabs[2]:
         st.text_area("Area Intelligence notes / strategy", key=special_key("area_notes"), height=180)
 
 def filtered_export_columns(df: pd.DataFrame) -> list[str]:
@@ -7275,9 +7444,8 @@ def render_output_buttons(active):
         elif err:
             st.warning(err)
 
-    output_tab = st.radio("Output Center section", ["Overview", "Exports", "Reports"], horizontal=True, label_visibility="collapsed", key=special_key("output_tab"))
-
-    if output_tab == "Exports":
+    # Export Center
+    with tabs[1]:
         st.markdown("### Export Center")
         st.caption("Pick one output type and one file type, prepare it, then download. Excel summaries are chosen automatically: county/multi-municipality universes summarize by municipality; one municipality summarizes by precinct.")
         e1, e2, e3 = st.columns([1.2, .8, 1.0])
@@ -7338,7 +7506,7 @@ def render_output_buttons(active):
             if st.session_state.get(zip_key):
                 st.download_button("Download Selected ZIP", st.session_state[zip_key], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=(zip_key,))
 
-    if output_tab == "Reports":
+    with tabs[2]:
         st.markdown("### Reports + Tracking")
         st.caption("Prepare one PDF/report at a time. Street and call lists are sorted like the local list and include mobile/landline phone labels.")
 
