@@ -1268,6 +1268,75 @@ input {
 </style>
 """, unsafe_allow_html=True)
 
+# Final safe button consistency patch.
+st.markdown("""
+<style>
+
+/* === SAFE BUTTON PATCH v3: force all active buttons to Candidate Connect red === */
+/* This is placed last so it wins over Streamlit secondary-button styling. */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 10px !important;
+    font-weight: 850 !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}
+
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[kind="primary"]:not(:disabled) *,
+button[kind="secondary"]:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *,
+button[data-testid="baseButton-secondary"]:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: none !important;
+}
+
+/* Disabled buttons can stay muted, but should still be readable. */
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled,
+button[kind="primary"]:disabled,
+button[kind="secondary"]:disabled,
+button[data-testid="baseButton-primary"]:disabled,
+button[data-testid="baseButton-secondary"]:disabled {
+    background: #d8cfc0 !important;
+    background-color: #d8cfc0 !important;
+    color: #7a0d14 !important;
+    -webkit-text-fill-color: #7a0d14 !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: 1 !important;
+}
+
+/* Keep tabs from being treated like red action buttons. */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 def r2_url(key: str) -> str:
     return f"{R2}/{key.lstrip('/')}"
 
