@@ -5333,6 +5333,90 @@ def _mb_summary(active: dict) -> tuple[dict | None, str, Exception | None]:
     return summary, mode, Exception(err_text) if err_text else None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _mb_snapshot_bundle_cached(active_json: str, special_json: str) -> dict:
+    """One cached Mail Ballot snapshot query instead of several separate count scans."""
+    active = enforce_security_scope(json.loads(active_json or "{}"))
+    special = json.loads(special_json or "{}")
+    url = count_cube_url()
+    where = count_cube_where_sql(active or {}, special or {})
+
+    def norm_expr(field: str) -> str:
+        return f"UPPER(TRIM(COALESCE(CAST({sql_ident(field)} AS VARCHAR), '')))"
+
+    mb_app = norm_expr("MB_App")
+    mb_app_status = norm_expr("MB_App_Status")
+    mb_sent = norm_expr("MB_Sent")
+    mb_status = norm_expr("MB_Status")
+
+    q = f"""
+        SELECT
+            SUM(Voters) AS total,
+            SUM(CASE WHEN {mb_app} IN ('Y','YES','TRUE','T','1','APPLIED')
+                      OR {mb_app_status} IN ('APPLIED','APPROVED','PENDING')
+                     THEN Voters ELSE 0 END) AS applied,
+            SUM(CASE WHEN {mb_sent} IN ('Y','YES','TRUE','T','1','SENT')
+                     THEN Voters ELSE 0 END) AS sent_count,
+            SUM(CASE WHEN {mb_status} IN ('VOTED','RETURNED','BALLOT RETURNED')
+                     THEN Voters ELSE 0 END) AS returned
+        FROM read_parquet({sql_lit(url)})
+        {where}
+    """
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
+        row = con.execute(q).fetchone()
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+    total = int(row[0] or 0) if row else 0
+    applied = int(row[1] or 0) if row else 0
+    sent_count = int(row[2] or 0) if row else 0
+    returned = int(row[3] or 0) if row else 0
+    not_applied = max(0, total - applied)
+    chase = max(0, sent_count - returned)
+    return {
+        "total": total,
+        "applied": applied,
+        "not_applied": not_applied,
+        "sent_count": sent_count,
+        "returned": returned,
+        "chase": chase,
+    }
+
+
+def _mb_snapshot_counts(active: dict) -> dict:
+    active = enforce_security_scope(active or {})
+    try:
+        return _mb_snapshot_bundle_cached(
+            json.dumps(active or {}, sort_keys=True),
+            json.dumps(_mb_special_filters(), sort_keys=True),
+        )
+    except Exception:
+        summary, _mode, _err = _mb_summary(active)
+        total = _mb_total_from_summary(summary)
+        applied = _mb_count(active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
+        sent_count = _mb_count(active, {"MB_Sent": ["Yes", "Y", "Sent"]})
+        returned = _mb_count(active, {"MB_Status": ["Voted", "Returned", "Ballot Returned"]})
+        return {
+            "total": total,
+            "applied": applied,
+            "not_applied": max(0, total - applied),
+            "sent_count": sent_count,
+            "returned": returned,
+            "chase": max(0, sent_count - returned),
+        }
+
+
 def _mb_count(active: dict, extra: dict | None = None) -> int:
     a = enforce_security_scope(active or {})
     for k, v in (extra or {}).items():
@@ -5563,14 +5647,14 @@ def render_mail_ballot_workspace():
         st.session_state[special_key("mb_last_active")] = mb_active
         st.success("Mail Ballot Center filters applied here. Create Universe filters were not changed.")
 
-    summary, mode, err = _mb_summary(mb_active)
-    # Counts are cached and scoped silently; do not show technical/debug messages to users.
-    total = _mb_total_from_summary(summary)
-    applied = _mb_count(mb_active, {"MB_App": ["Yes", "Y", "Applied"]}) or _mb_count(mb_active, {"MB_App_Status": ["Applied", "Approved", "Pending"]})
-    not_applied = _mb_count(mb_active, {"MB_App": ["No", "N", "DNA", "Not Applied"]}) or max(0, total - applied)
-    sent_count = _mb_count(mb_active, {"MB_Sent": ["Yes", "Y", "Sent"]})
-    returned = _mb_count(mb_active, {"MB_Status": ["Voted", "Returned", "Ballot Returned"]})
-    chase = max(0, sent_count - returned) if sent_count else _mb_count(mb_active, {"MB_Status": ["Not Voted", "Not Returned"]})
+    # One cached snapshot query keeps Mail Ballot Center from running several full count scans.
+    mb_snapshot = _mb_snapshot_counts(mb_active)
+    total = int(mb_snapshot.get("total", 0) or 0)
+    applied = int(mb_snapshot.get("applied", 0) or 0)
+    not_applied = int(mb_snapshot.get("not_applied", 0) or 0)
+    sent_count = int(mb_snapshot.get("sent_count", 0) or 0)
+    returned = int(mb_snapshot.get("returned", 0) or 0)
+    chase = int(mb_snapshot.get("chase", 0) or 0)
 
     st.markdown("### Mail Ballot Snapshot")
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -5580,9 +5664,9 @@ def render_mail_ballot_workspace():
     with m4: _mb_render_metric("Ballots Sent", sent_count, "Sent to voters", "gold")
     with m5: _mb_render_metric("Chase Universe", chase, "Sent minus returned", "")
 
-    tabs = st.tabs(["Plan", "Analyze", "Build Files", "Notes"])
+    mb_tab = st.radio("Mail Ballot Center section", ["Plan", "Analyze", "Build Files", "Notes"], horizontal=True, label_visibility="collapsed", key=special_key("mb_tab"))
 
-    with tabs[0]:
+    if mb_tab == "Plan":
         st.markdown("### Recommended workflow")
         st.markdown("""
 **1. Cultivate applications:** start with high MB probability voters who have not applied. Prioritize reliable general-election voters and voters with phones/email.  
@@ -5593,7 +5677,7 @@ def render_mail_ballot_workspace():
 """)
         st.info("This section stays inside Mail Ballot Center. It does not overwrite the main Create Universe filters unless we intentionally add a Send to Universe button later.")
 
-    with tabs[1]:
+    if mb_tab == "Analyze":
         left, right = st.columns(2)
         with left:
             st.markdown("#### Party")
@@ -5610,7 +5694,7 @@ def render_mail_ballot_workspace():
             st.markdown("#### Ballot Status")
             cc_table(_mb_group_df(mb_active, "MB_Status", 12), height=240, key=special_key("mb_tbl_mb_status"))
 
-    with tabs[2]:
+    if mb_tab == "Build Files":
         st.markdown("### Build Mail Ballot Files")
         st.caption("Files are prepared only when you click a button, so the page stays fast. Each file respects the Mail Ballot Center filters currently shown above.")
         st.info("For application cultivation, use the Mail Ballot Application filter above and choose DNA / No / Not Applied. Application Status is for voters who already have an application record, such as Approved or Declined.")
@@ -5643,7 +5727,7 @@ def render_mail_ballot_workspace():
         st.caption("A general-purpose export of exactly the current Mail Ballot Center universe after your mission and quick filters.")
         _mb_prepare_download(mb_active, "Current Mail Ballot Center Universe", "mail_ballot_center_current_universe", 100000)
 
-    with tabs[3]:
+    if mb_tab == "Notes":
         st.text_area("Mail ballot notes / plan", key=special_key("mb_notes"), height=180)
 
 
@@ -6420,16 +6504,9 @@ def render_area_intelligence_workspace():
     v4a_df = _area_group_df(active, "V4A", 8)
     mb_app_df = _area_group_df(active, "MB_App", 8)
     mb_status_df = _area_group_df(active, "MB_Status", 8)
-    turnout_df = _area_turnout_by_party(
-        json.dumps(count_safe_filters(active or {}), sort_keys=True),
-        json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
-        14,
-    )
-    mb_turnout_df = _area_mail_ballot_turnout_by_party(
-        json.dumps(count_safe_filters(active or {}), sort_keys=True),
-        json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
-        12,
-    )
+    # Defer expensive historical turnout queries until Profile Tables or Report is actually opened.
+    turnout_df = pd.DataFrame()
+    mb_turnout_df = pd.DataFrame()
     insights = _area_insights(summary, party_df, age_df, mb_app_df)
 
     st.markdown("### Executive Strategy Readout")
@@ -6472,8 +6549,8 @@ def render_area_intelligence_workspace():
     else:
         cc_table(breakdown_df, height=520, key=special_key("area_breakdown_table"), sticky_first_col=True)
 
-    tabs = st.tabs(["Profile Tables", "Report", "Notes"])
-    with tabs[0]:
+    area_tab = st.radio("Area Intelligence section", ["Profile Tables", "Report", "Notes"], horizontal=True, label_visibility="collapsed", key=special_key("area_tab"))
+    if area_tab == "Profile Tables":
         left, right = st.columns(2)
         with left:
             st.markdown("#### Party")
@@ -6488,10 +6565,15 @@ def render_area_intelligence_workspace():
             st.markdown("#### Vote History - All Elections")
             cc_table(v4a_df, height=220, key=special_key("area_tbl_v4a"))
             st.markdown("#### Historical Turnout by Party")
+            turnout_df = _area_turnout_by_party(
+                json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+                14,
+            )
             cc_table(turnout_df, height=300, key=special_key("area_tbl_turnout"))
             st.markdown("#### Ballot Status")
             cc_table(mb_status_df, height=220, key=special_key("area_tbl_mb_status"))
-    with tabs[1]:
+    if mb_tab == "Analyze":
         report_title = _area_universe_label(active)
         st.markdown("### Client-ready Area Intelligence Report")
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
@@ -6500,6 +6582,16 @@ def render_area_intelligence_workspace():
             prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary")
         if prep_clicked:
             with st.spinner("Preparing Area Intelligence report..."):
+                turnout_df = _area_turnout_by_party(
+                    json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                    json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+                    14,
+                )
+                mb_turnout_df = _area_mail_ballot_turnout_by_party(
+                    json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                    json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
+                    12,
+                )
                 pdf = _area_pdf_bytes(
                     report_title,
                     active,
@@ -6525,7 +6617,7 @@ def render_area_intelligence_workspace():
                     "candidate_connect_area_intelligence_report.pdf",
                     "application/pdf",
                 )
-    with tabs[2]:
+    if mb_tab == "Build Files":
         st.text_area("Area Intelligence notes / strategy", key=special_key("area_notes"), height=180)
 
 def filtered_export_columns(df: pd.DataFrame) -> list[str]:
@@ -7183,7 +7275,7 @@ def render_output_buttons(active):
         elif err:
             st.warning(err)
 
-    with tabs[1]:
+    if mb_tab == "Analyze":
         st.markdown("### Export Center")
         st.caption("Pick one output type and one file type, prepare it, then download. Excel summaries are chosen automatically: county/multi-municipality universes summarize by municipality; one municipality summarizes by precinct.")
         e1, e2, e3 = st.columns([1.2, .8, 1.0])
@@ -7244,7 +7336,7 @@ def render_output_buttons(active):
             if st.session_state.get(zip_key):
                 st.download_button("Download Selected ZIP", st.session_state[zip_key], "candidate_connect_exports.zip", "application/zip", width="stretch", on_click=mark_downloaded, args=(zip_key,))
 
-    with tabs[2]:
+    if mb_tab == "Build Files":
         st.markdown("### Reports + Tracking")
         st.caption("Prepare one PDF/report at a time. Street and call lists are sorted like the local list and include mobile/landline phone labels.")
 
@@ -7345,6 +7437,12 @@ with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
         st.caption(f"Campaign: {current_user().get('campaign', '')}")
+
+    if st.button("🏠 Home", width="stretch"):
+        st.session_state["left_section"] = None
+        st.session_state["view"] = "dashboard"
+        st.rerun()
+
     if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
