@@ -975,15 +975,6 @@ st.markdown(
         align-items: flex-start !important;
     }
 }
-
-/* Final Impact font lock for left header tagline */
-.cc-global-tagline,
-.cc-global-tagline span,
-.left-header-text,
-.left-header-text span {
-    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
-}
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -1084,427 +1075,151 @@ div[data-testid="stDownloadButton"] > button * {
 )
 
 
-# === Candidate Connect Universal Design System v1 ===
-# Generated from user's UI design template. This is intentionally placed at the end
-# so it wins over older conflicting CSS blocks while preserving app/security logic.
+# Final sidebar recovery lock: keep the left navigation from collapsing into an unrecoverable state.
+# This is intentionally placed after the main CSS stack so it wins over earlier Streamlit chrome-hiding rules.
 st.markdown(
     """
-<style id="candidate-connect-design-system-v1">
-:root {
-    color-scheme: light !important;
-
-    --cc-primary-red: #9f151c;
-    --cc-primary-red-dark: #6f0f14;
-    --cc-secondary-red: #c91f27;
-
-    --cc-navy: #071d3a;
-    --cc-white: #ffffff;
-    --cc-black: #000000;
-    --cc-muted: #6b7280;
-
-    --cc-page-bg: #efe8d8;
-    --cc-sidebar-bg: #e6ddcc;
-    --cc-card-bg: #f8f4ea;
-    --cc-row-odd: #efe8d8;
-    --cc-row-even: #f3eadc;
-    --cc-border: #9f151c;
-
-    --cc-green: #166534;
-    --cc-light-blue: #d9e8f8;
-    --cc-light-red: #fde2e2;
-    --cc-radius: 12px;
-    --cc-font: Arial, Helvetica, sans-serif;
+<style>
+/* Keep Streamlit's header/toggle recoverable. Earlier CSS hides most Streamlit chrome; do not hide this. */
+header[data-testid="stHeader"] {
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: transparent !important;
 }
 
-/* Keep the sidebar open/recoverable. Users should not be able to get stuck without navigation. */
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"],
-[data-testid="stSidebar"][aria-expanded="false"] {
+/* Prevent the sidebar from disappearing when a user clicks the collapse control. */
+[data-testid="stSidebar"][aria-expanded="false"],
+section[data-testid="stSidebar"][aria-expanded="false"] {
     display: block !important;
     visibility: visible !important;
     transform: none !important;
-    min-width: 300px !important;
-    width: 300px !important;
-    max-width: 300px !important;
     left: 0 !important;
+    margin-left: 0 !important;
+    min-width: 260px !important;
+    width: 260px !important;
 }
 
-/* Hide collapse control where Streamlit exposes it, but keep header itself available. */
-button[title="Collapse sidebar"],
-button[title="Expand sidebar"],
-[data-testid="collapsedControl"] {
-    display: none !important;
-    visibility: hidden !important;
-}
-
-/* Do not hide the Streamlit header completely; hiding it is what made the sidebar unrecoverable. */
-header[data-testid="stHeader"] {
+/* Keep the sidebar contents visible/recoverable even after collapse attempts. */
+[data-testid="stSidebar"][aria-expanded="false"] > div,
+section[data-testid="stSidebar"][aria-expanded="false"] > div {
+    display: block !important;
     visibility: visible !important;
-    height: 0 !important;
-    background: transparent !important;
+    opacity: 1 !important;
+    transform: none !important;
 }
 
-/* Global foundation */
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .main {
-    background: var(--cc-page-bg) !important;
-    color: var(--cc-navy) !important;
-    font-family: var(--cc-font) !important;
-}
-
-/* Left-align the working area. Content should stay near the left pane instead of drifting centered on wide screens. */
-.block-container {
-    max-width: none !important;
-    width: auto !important;
+/* Make sure the main content does not slide under the locked-open sidebar. */
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMain"] {
     margin-left: 0 !important;
-    margin-right: 0 !important;
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-    color: var(--cc-navy) !important;
-}
-[data-testid="stMainBlockContainer"] {
-    max-width: none !important;
-    margin-left: 0 !important;
-    margin-right: auto !important;
-}
-[data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"] {
-    align-items: stretch !important;
 }
 
-/* Text */
-h1, h2, h3, h4, h5, h6,
-p, span, label, div, small,
-.stMarkdown, .stMarkdown *, [data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"] {
-    color: var(--cc-navy) !important;
-    font-family: var(--cc-font) !important;
-}
-small, .stCaption, [data-testid="stCaptionContainer"], .cc-muted, .cc-sub {
-    color: var(--cc-muted) !important;
-}
-
-/* Sidebar */
-[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
-    background: var(--cc-sidebar-bg) !important;
-    color: var(--cc-navy) !important;
-    border-right: 2px solid var(--cc-border) !important;
-}
-[data-testid="stSidebar"] *,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-}
-[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details[open],
-[data-testid="stSidebar"] details > summary,
-[data-testid="stSidebar"] details[open] > summary {
-    background: var(--cc-card-bg) !important;
-    color: var(--cc-navy) !important;
-    border-color: var(--cc-border) !important;
-    border-radius: var(--cc-radius) !important;
-}
-[data-testid="stSidebar"] details > summary *,
-[data-testid="stSidebar"] details[open] > summary * {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-}
-
-/* Cards and panels */
-.cc-card, .cc-home-card, .cc-metric, .cc-icon-metric,
-div[data-testid="stMetric"], div[data-testid="stExpander"], div[data-testid="stForm"] {
-    background: var(--cc-card-bg) !important;
-    color: var(--cc-navy) !important;
-    border: 1px solid var(--cc-border) !important;
-    border-radius: var(--cc-radius) !important;
-}
-.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric {
-    box-shadow: 0 8px 18px rgba(7,29,58,.16) !important;
-}
-.cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric *, div[data-testid="stMetric"] * {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-}
-
-/* Buttons: red primary, navy secondary can be applied with .cc-secondary-button when needed. */
-.stButton > button,
-div[data-testid="stDownloadButton"] > button,
-button[kind="primary"],
-button[kind="secondary"] {
-    background: linear-gradient(180deg, var(--cc-primary-red), var(--cc-primary-red-dark)) !important;
-    color: var(--cc-white) !important;
-    -webkit-text-fill-color: var(--cc-white) !important;
-    border: 1px solid var(--cc-primary-red-dark) !important;
-    border-radius: 10px !important;
-    font-weight: 850 !important;
-    text-shadow: none !important;
-}
-.stButton > button *,
-div[data-testid="stDownloadButton"] > button *,
-button[kind="primary"] *,
-button[kind="secondary"] * {
-    color: var(--cc-white) !important;
-    -webkit-text-fill-color: var(--cc-white) !important;
-    text-shadow: none !important;
-}
-.stButton > button:hover,
-div[data-testid="stDownloadButton"] > button:hover,
-button[kind="primary"]:hover,
-button[kind="secondary"]:hover {
-    background: var(--cc-primary-red-dark) !important;
-    color: var(--cc-white) !important;
-    -webkit-text-fill-color: var(--cc-white) !important;
-}
-.stButton > button:disabled,
-div[data-testid="stDownloadButton"] > button:disabled {
-    background: #d1d5db !important;
-    color: var(--cc-black) !important;
-    -webkit-text-fill-color: var(--cc-black) !important;
+/* If Streamlit renders the collapse/expand button, keep it clickable and visible. */
+button[kind="header"],
+[data-testid="stHeader"] button,
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
+    visibility: visible !important;
     opacity: 1 !important;
-}
-
-/* Download buttons get the dark green action color. */
-div[data-testid="stDownloadButton"] > button {
-    background: linear-gradient(180deg, var(--cc-green), #0f3d22) !important;
-    border-color: #0f3d22 !important;
-}
-
-/* Tabs */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"], button[data-baseweb="tab"] *,
-[role="tab"], [role="tab"] * {
-    background: transparent !important;
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    font-weight: 900 !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-div[data-testid="stTabs"] button:hover,
-button[data-baseweb="tab"]:hover,
-[role="tab"]:hover {
-    background: #e5e7eb !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: var(--cc-navy) !important;
-    height: 4px !important;
-}
-
-/* Form controls */
-[data-baseweb="select"] > div,
-[data-baseweb="input"] > div,
-textarea, input {
-    background: var(--cc-white) !important;
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    border-color: var(--cc-navy) !important;
-    border-radius: 9px !important;
-}
-[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"],
-[data-baseweb="popover"] div, [data-baseweb="menu"] div, [role="option"], [role="option"] * {
-    background: var(--cc-white) !important;
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-}
-[role="option"]:hover, [role="option"][aria-selected="true"], [data-baseweb="menu"] li:hover {
-    background: #e5e7eb !important;
-    color: var(--cc-navy) !important;
-}
-[data-baseweb="tag"] {
-    background: #d1d5db !important;
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    border: 1px solid var(--cc-navy) !important;
-}
-[data-baseweb="tag"] * {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-}
-[data-testid="stCheckbox"] label,
-[data-testid="stCheckbox"] label *,
-[data-testid="stToggle"] label,
-[data-testid="stToggle"] label *,
-[data-testid="stRadio"] label,
-[data-testid="stRadio"] label *,
-label[data-baseweb="checkbox"], label[data-baseweb="checkbox"] *,
-label[data-baseweb="radio"], label[data-baseweb="radio"] * {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    opacity: 1 !important;
-}
-
-/* Tables and dataframes */
-[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame, .stTable,
-.cc-table-wrap {
-    background: var(--cc-white) !important;
-    color: var(--cc-navy) !important;
-    border: 1px solid var(--cc-border) !important;
-    border-radius: 10px !important;
-    overflow: auto !important;
-}
-[data-testid="stDataFrame"] *, [data-testid="stTable"] * {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stTable"] th, [data-testid="stTable"] th *,
-.cc-html-table th {
-    background: var(--cc-primary-red) !important;
-    color: var(--cc-white) !important;
-    -webkit-text-fill-color: var(--cc-white) !important;
-    text-align: center !important;
-    font-weight: 900 !important;
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 5 !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataFrame"] [role="rowheader"],
-[data-testid="stTable"] td,
-.cc-html-table td {
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    text-align: center !important;
-    justify-content: center !important;
-    background: var(--cc-row-odd) !important;
-}
-[data-testid="stDataFrame"] [role="row"]:nth-child(even) [role="gridcell"],
-[data-testid="stTable"] tr:nth-child(even) td,
-.cc-html-table tbody tr:nth-child(even) td {
-    background: var(--cc-row-even) !important;
-}
-.cc-html-table tbody tr:nth-child(odd) td {
-    background: var(--cc-row-odd) !important;
-}
-.cc-table-wrap.sticky-first .cc-html-table th:first-child,
-.cc-table-wrap.sticky-first .cc-html-table td:first-child,
-.cc-history-table th:first-child,
-.cc-history-table td:first-child {
-    position: sticky !important;
-    left: 0 !important;
-    z-index: 7 !important;
-}
-.cc-table-wrap.sticky-first .cc-html-table th:first-child,
-.cc-history-table th:first-child {
-    background: var(--cc-primary-red) !important;
-    color: var(--cc-white) !important;
-    -webkit-text-fill-color: var(--cc-white) !important;
-}
-.cc-table-wrap.sticky-first .cc-html-table td:first-child,
-.cc-history-table td:first-child {
-    background: var(--cc-row-even) !important;
-    color: var(--cc-navy) !important;
-    -webkit-text-fill-color: var(--cc-navy) !important;
-    font-weight: 900 !important;
-}
-
-/* Alerts */
-.cc-note, .stInfo, div[data-testid="stAlert"] {
-    background: var(--cc-row-even) !important;
-    color: var(--cc-black) !important;
-    border: 1px solid var(--cc-border) !important;
-    border-radius: var(--cc-radius) !important;
-}
-.cc-verify, .stWarning {
-    background: var(--cc-light-blue) !important;
-    color: var(--cc-navy) !important;
-    border: 1px solid #8aa3bf !important;
-}
-.stException, .stError {
-    background: var(--cc-light-red) !important;
-    color: var(--cc-primary-red) !important;
-    border: 1px solid var(--cc-primary-red) !important;
-}
-
-/* Charts */
-.cc-swatch.dem, .party-democrat { background: var(--cc-navy) !important; }
-.cc-swatch.rep, .party-republican { background: var(--cc-primary-red) !important; }
-.cc-swatch.other, .party-other { background: var(--cc-green) !important; }
-
-/* Plotly modebar/hover */
-.modebar, .modebar-container, .modebar-group, .modebar-btn {
-    background: var(--cc-white) !important;
-    color: var(--cc-navy) !important;
-    border: 1px solid var(--cc-border) !important;
-}
-.modebar-btn svg path, .modebar-btn svg, .modebar-btn * {
-    fill: var(--cc-navy) !important;
-    color: var(--cc-navy) !important;
-}
-.hoverlayer .hovertext path { fill: var(--cc-white) !important; stroke: var(--cc-border) !important; }
-.hoverlayer .hovertext text { fill: var(--cc-navy) !important; }
-
-/* Avoid transparent/ghost surfaces. */
-* {
-    text-shadow: none;
+    pointer-events: auto !important;
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+# Safe design system patch added after legacy CSS stack.
 st.markdown("""
 <style>
 
-/* === v24 universal polish patch: sidebar lock, tooltip cleanup, donut center readability === */
+/* === SAFE DESIGN PATCH v1: 10pt base, left-aligned content, sidebar recoverable, Impact tagline === */
 
-/* Keep sidebar expanded/recoverable and prevent hidden-collapse trap. */
+/* Normal text sizing only. Do not target icons or all div/span globally. */
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    font-size: 10pt !important;
+}
+
+/* Keep the main working area close to the left pane instead of centered on wide screens. */
+.main .block-container,
+[data-testid="stMain"] .block-container,
+section.main .block-container {
+    max-width: 1280px !important;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+    padding-left: 2rem !important;
+    padding-right: 1.25rem !important;
+}
+
+/* Keep sidebar expanded/recoverable without hiding Streamlit internals. */
 [data-testid="stSidebar"],
 section[data-testid="stSidebar"] {
     min-width: 270px !important;
     width: 270px !important;
-    transform: none !important;
+}
+
+/* Do not hide the Streamlit header completely, because it contains recovery controls. */
+header[data-testid="stHeader"] {
     visibility: visible !important;
-    display: block !important;
+    height: auto !important;
+    background: transparent !important;
 }
 
-/* Hide Streamlit's sidebar collapse/expand controls so users can't get stuck. */
-[data-testid="stSidebarCollapseButton"],
-[data-testid="collapsedControl"],
-button[aria-label="Close sidebar"],
-button[aria-label="Open sidebar"],
-button[title="Close sidebar"],
-button[title="Open sidebar"],
-button[title*="sidebar"],
-button[aria-label*="sidebar"] {
-    display: none !important;
-    visibility: hidden !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-}
-
-/* Remove stray hover/tooltips such as keyboard_double. */
+/* Prevent tooltip artifacts from showing as text. */
 div[role="tooltip"],
 [data-baseweb="tooltip"],
-[data-testid="stTooltipHoverTarget"],
 [data-testid="stTooltipContent"] {
     display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
 }
 
-/* If Streamlit renders material-icon text in the sidebar, hide only the control area. */
-[data-testid="stSidebar"] [class*="sidebar"] button,
-[data-testid="stSidebar"] [class*="Sidebar"] button {
-    text-indent: -9999px !important;
-    overflow: hidden !important;
+/* Important: preserve icon fonts so Streamlit icons do not appear as text like keyboard_double_arrow_right. */
+[class*="material"],
+span[class*="material"],
+i[class*="material"],
+[data-testid="stIconMaterial"],
+[data-testid="stIconMaterial"] * {
+    font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons", sans-serif !important;
+    font-size: 20px !important;
+    line-height: 1 !important;
 }
 
-/* Keep legitimate Candidate Connect sidebar nav buttons readable. */
-[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton > button * {
-    text-indent: 0 !important;
-    overflow: visible !important;
+/* Left brand/tagline must stay Impact. */
+.cc-global-tagline,
+.cc-global-tagline span,
+.left-header-text,
+.left-header-text span {
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+}
+
+/* Keep action buttons readable but do not affect dropdown internals. */
+.stButton > button,
+div[data-testid="stDownloadButton"] > button {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 10pt !important;
+}
+.stButton > button *,
+div[data-testid="stDownloadButton"] > button * {
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
 }
 
-/* Donut chart center readability: dark center with white text. */
+/* Tabs stay dark text on the light background. */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    background: transparent !important;
+    font-size: 10pt !important;
+}
+
+/* Donut center readability. */
 .cc-donut:after {
     background: #071d3a !important;
 }
@@ -1519,12 +1234,35 @@ div[role="tooltip"],
     text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
 }
 
-/* Left brand/tagline stays Impact. */
-.cc-global-tagline,
-.cc-global-tagline span,
-.left-header-text,
-.left-header-text span {
-    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+/* Keep form controls readable without changing their internal layout. */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+textarea,
+input {
+    font-size: 10pt !important;
+}
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"],
+[role="option"] {
+    font-size: 10pt !important;
+}
+
+/* Table text sizing and readability. */
+.cc-html-table,
+.cc-home-table,
+[data-testid="stDataFrame"],
+[data-testid="stTable"] {
+    font-size: 10pt !important;
+}
+.cc-html-table th,
+.cc-home-table th {
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+}
+.cc-html-table td,
+.cc-home-table td {
+    font-size: 10pt !important;
 }
 
 </style>
