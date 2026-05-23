@@ -6469,7 +6469,6 @@ def filtered_export_columns(df: pd.DataFrame) -> list[str]:
 
 
 def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
-    active = enforce_security_scope(active or {})
     """Live-safe detail export helper used by exports and Mail Ballot Center.
 
     Keeps heavy detail scans behind explicit download/prepare actions and applies
