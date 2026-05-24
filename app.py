@@ -21,7 +21,7 @@ try:
 except Exception:
     letter = canvas = inch = None
 
-R2 = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
+R2 = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
 DETAIL_SHARDS = 36
 EXPORT_ROW_LIMIT = 250_000
 
