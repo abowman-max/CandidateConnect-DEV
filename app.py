@@ -1616,6 +1616,80 @@ div[data-testid="stVerticalBlock"] {
 </style>
 """, unsafe_allow_html=True)
 
+# Theme readability fix for code chips, alerts, and password icons.
+st.markdown("""
+<style>
+
+/* === THEME FIX: readable inline code/help chips across the app === */
+code,
+pre code,
+span[data-testid="stCodeBlock"],
+div[data-testid="stCodeBlock"],
+.stMarkdown code {
+    background-color: #e8e2d3 !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #c8bca8 !important;
+    border-radius: 5px !important;
+    padding: 2px 6px !important;
+    font-size: 9pt !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+    text-shadow: none !important;
+}
+
+/* Full code blocks should be readable too, but not visually heavy. */
+pre,
+div[data-testid="stCodeBlock"] pre {
+    background-color: #f8f4ea !important;
+    color: #071d3a !important;
+    border: 1px solid #c8bca8 !important;
+    border-radius: 8px !important;
+}
+
+/* Info/help boxes stay theme-readable. */
+.stAlert,
+.stAlert *,
+div[data-testid="stAlert"],
+div[data-testid="stAlert"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    text-shadow: none !important;
+}
+
+/* Password reveal button / icon must remain visible. */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stPasswordInput"] button,
+[data-testid="stPasswordInput"] button * {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Form text should never become white on light inputs. */
+input,
+textarea,
+[data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+/* Keep action buttons white text after input/code fixes. */
+.stButton > button:not(:disabled),
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 def r2_url(key: str) -> str:
     base = current_data_base_url()
     return f"{base.rstrip('/')}/{key.lstrip('/')}"
