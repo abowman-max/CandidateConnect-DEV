@@ -2449,11 +2449,14 @@ def _load_remote_app_state() -> dict:
     except Exception:
         pass
     try:
-        r = requests.get(r2_url("app_state/security_users.json"), timeout=10)
-        if r.ok:
-            raw = r.json()
-            if isinstance(raw, dict):
-                state["security"] = raw
+        # Security/account store. Try the newer clearer name first, then the earlier export name.
+        for _security_key in ("app_state/security_store.json", "app_state/security_users.json"):
+            r = requests.get(r2_url(_security_key), timeout=10)
+            if r.ok:
+                raw = r.json()
+                if isinstance(raw, dict):
+                    state["security"] = raw
+                    break
     except Exception:
         pass
     return state
@@ -2603,8 +2606,21 @@ def save_security_store(store: dict) -> bool:
     if not isinstance(store, dict):
         store = _empty_security_store()
     store.setdefault("users", {})
+    store.setdefault("campaigns", {})
     store["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _persist_state_section("security", store)
+
+    # Also write a plain backup file wherever the app has write access.
+    # In Streamlit Cloud this is temporary, but it gives Super Admins a clean file
+    # to download/export and manually place in R2 app_state/security_store.json.
+    try:
+        Path("security_store.json").write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        Path("/tmp/security_store.json").write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
     return True
 
 def current_user() -> dict:
@@ -2809,6 +2825,31 @@ div[data-testid="stForm"] .stButton > button {
     border-radius: 10px !important;
     font-weight: 900 !important;
 }
+
+/* Login/setup password reveal control readability */
+div[data-testid="stForm"] button[aria-label*="password"],
+div[data-testid="stForm"] button[title*="password"],
+div[data-testid="stForm"] [data-testid="stPasswordInput"] button,
+div[data-testid="stForm"] button[kind="icon"] {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+div[data-testid="stForm"] button[aria-label*="password"] *,
+div[data-testid="stForm"] button[title*="password"] *,
+div[data-testid="stForm"] [data-testid="stPasswordInput"] button *,
+div[data-testid="stForm"] button[kind="icon"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+}
+div[data-testid="stForm"] input {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3114,14 +3155,15 @@ def render_account_admin_workspace(filter_options=None):
         st.rerun()
 
     st.markdown("### Backup / Restore")
+    st.info("Important: download this backup after account changes and upload it to R2 at app_state/security_store.json so accounts survive app rebuilds/reboots.")
     st.download_button(
-        "Download security_users.json backup",
+        "Download security_store.json backup",
         data=security_export_json_bytes(),
-        file_name="security_users.json",
+        file_name="security_store.json",
         mime="application/json",
         width="stretch",
     )
-    uploaded = st.file_uploader("Restore security_users.json", type=["json"], key="security_restore_upload")
+    uploaded = st.file_uploader("Restore security_store.json / security_users.json", type=["json"], key="security_restore_upload")
     if uploaded is not None:
         try:
             restored = json.loads(uploaded.read().decode("utf-8"))
