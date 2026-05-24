@@ -2705,24 +2705,23 @@ def campaign_dataset_base_url(campaign_id: str) -> str:
     return f"{R2}/app_state/campaigns/{cid}/dataset"
 
 
-def campaign_state_base_url(campaign_id: str) -> str:
-    cid = _campaign_slug(campaign_id)
-    return f"{R2}/app_state/campaigns/{cid}"
-
-
 def current_campaign_record() -> dict:
-    user = current_user() or {}
-    store = load_security_store()
-    campaigns = store.get("campaigns") or {}
-    cid = user.get("campaign_id") or _campaign_slug(user.get("campaign") or "")
-    if cid and cid in campaigns:
-        return campaigns.get(cid) or {}
+    try:
+        user = current_user() or {}
+        store = load_security_store()
+        campaigns = store.get("campaigns") or {}
+        cid = user.get("campaign_id") or _campaign_slug(user.get("campaign") or "")
+        if cid and cid in campaigns:
+            return campaigns.get(cid) or {}
+    except Exception:
+        pass
     return {}
 
 
 def current_data_base_url() -> str:
-    """Super Admin uses statewide R2. Campaign users can use their approved mini dataset."""
     try:
+        if not st.session_state.get("auth_user"):
+            return R2
         if current_role() == "Super Admin":
             return R2
         rec = current_campaign_record()
@@ -2733,39 +2732,31 @@ def current_data_base_url() -> str:
     return R2
 
 
-def campaign_dataset_active() -> bool:
-    try:
-        return current_data_base_url().rstrip("/") != R2.rstrip("/")
-    except Exception:
-        return False
-
-
 def campaign_dataset_status_label() -> str:
-    rec = current_campaign_record()
-    status = rec.get("dataset_status") or "statewide-filtered"
-    if campaign_dataset_active():
-        return f"Campaign mini dataset active · {status}"
-    return f"Using statewide dataset with enforced campaign boundary · {status}"
+    try:
+        rec = current_campaign_record()
+        status = rec.get("dataset_status") or "statewide-filtered"
+        if current_data_base_url().rstrip("/") != R2.rstrip("/"):
+            return f"Campaign mini dataset active · {status}"
+        return f"Using statewide dataset with enforced campaign boundary · {status}"
+    except Exception:
+        return "Using statewide dataset"
 
 
 def upsert_campaign_record(store: dict, campaign_id: str, data: dict) -> dict:
     store.setdefault("campaigns", {})
-    cid = _campaign_slug(campaign_id or data.get("campaign_name") or data.get("name") or "")
-    existing = store["campaigns"].get(cid, {})
-    existing.update(data or {})
-    existing["campaign_id"] = cid
-    existing.setdefault("dataset_status", "not_built")
-    existing.setdefault("account_status", "pending_approval")
-    existing.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
-    existing["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    existing.setdefault("dataset_base_url", campaign_dataset_base_url(cid))
-    existing.setdefault("state_base_url", campaign_state_base_url(cid))
-    store["campaigns"][cid] = existing
-    return existing
+    cid = _campaign_slug(campaign_id or data.get("campaign_name") or "")
+    rec = store["campaigns"].get(cid, {})
+    rec.update(data or {})
+    rec["campaign_id"] = cid
+    rec.setdefault("dataset_status", "not_built")
+    rec.setdefault("account_status", "pending_approval")
+    rec.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
+    rec["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    rec.setdefault("dataset_base_url", campaign_dataset_base_url(cid))
+    store["campaigns"][cid] = rec
+    return rec
 
-
-def security_export_json_bytes() -> bytes:
-    return json.dumps(load_security_store(), ensure_ascii=False, indent=2).encode("utf-8")
 
 def render_security_gate():
     """Block the app until a user is logged in, or create the first Super Admin."""
@@ -2966,7 +2957,6 @@ def render_account_admin_workspace(filter_options=None):
             "Name": u.get("display_name", ""),
             "Role": u.get("role", ""),
             "Campaign": u.get("campaign", ""),
-            "Campaign ID": u.get("campaign_id", ""),
             "Scope": json.dumps(u.get("scope_filters") or {}, ensure_ascii=False),
             "Disabled": bool(u.get("disabled", False)),
         })
@@ -2980,7 +2970,7 @@ def render_account_admin_workspace(filter_options=None):
     existing = users.get(edit_user, {}) if edit_user else {}
 
     st.markdown("### Campaigns / Mini Datasets")
-    st.caption("Phase 2A: campaign users can be assigned to a campaign record. Once its mini dataset is built and uploaded, their app reads that smaller dataset instead of statewide.")
+    st.caption("Phase 2A: define campaign records now. Once its mini dataset is built/uploaded, campaign users can read the smaller dataset instead of statewide.")
 
     campaigns = store.setdefault("campaigns", {})
     camp_rows = []
@@ -2991,76 +2981,62 @@ def render_account_admin_workspace(filter_options=None):
             "Office": c.get("office", ""),
             "Contact": c.get("contact_name", ""),
             "Email": c.get("email", ""),
-            "Status": c.get("account_status", ""),
-            "Dataset": c.get("dataset_status", ""),
-            "Dataset URL": c.get("dataset_base_url", ""),
+            "Account Status": c.get("account_status", ""),
+            "Dataset Status": c.get("dataset_status", ""),
             "Scope": json.dumps(c.get("scope_filters") or {}, ensure_ascii=False),
         })
     if camp_rows:
-        cc_table(pd.DataFrame(camp_rows), height=260, key="campaigns_admin_table")
+        cc_table(pd.DataFrame(camp_rows), height=220, key="campaigns_admin_table")
     else:
         st.info("No campaign records yet.")
 
     if is_super_admin():
-        st.markdown("#### Add / Update Campaign")
-        existing_campaign_ids = [""] + sorted(campaigns.keys())
-        edit_campaign_id = st.selectbox("Optional: load existing campaign", existing_campaign_ids, key="campaign_edit_id")
-        existing_campaign = campaigns.get(edit_campaign_id, {}) if edit_campaign_id else {}
+        with st.expander("Add / Update Campaign", expanded=False):
+            campaign_ids_existing = [""] + sorted(campaigns.keys())
+            edit_campaign_id = st.selectbox("Optional: load existing campaign", campaign_ids_existing, key="campaign_edit_id")
+            existing_campaign = campaigns.get(edit_campaign_id, {}) if edit_campaign_id else {}
+            with st.form("campaign_admin_form"):
+                campaign_name = st.text_input("Campaign name", value=existing_campaign.get("campaign_name", ""))
+                office = st.text_input("Office sought", value=existing_campaign.get("office", ""))
+                contact_name = st.text_input("Contact name", value=existing_campaign.get("contact_name", ""))
+                address = st.text_input("Address", value=existing_campaign.get("address", ""))
+                phone = st.text_input("Phone", value=existing_campaign.get("phone", ""))
+                email = st.text_input("Email", value=existing_campaign.get("email", ""))
+                account_status_options = ["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"]
+                dataset_status_options = ["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"]
+                account_status_val = existing_campaign.get("account_status", "pending_approval")
+                dataset_status_val = existing_campaign.get("dataset_status", "not_built")
+                account_status = st.selectbox("Account status", account_status_options, index=account_status_options.index(account_status_val) if account_status_val in account_status_options else 0)
+                dataset_status = st.selectbox("Dataset status", dataset_status_options, index=dataset_status_options.index(dataset_status_val) if dataset_status_val in dataset_status_options else 0)
+                campaign_id_preview = _campaign_slug(edit_campaign_id or campaign_name)
+                dataset_base_url = st.text_input("Dataset base URL", value=existing_campaign.get("dataset_base_url") or campaign_dataset_base_url(campaign_id_preview))
+                st.caption("Build/upload target:")
+                st.code(f"app_state/campaigns/{campaign_id_preview}/dataset/", language="text")
+                campaign_scope = build_scope_from_admin_widgets("campaign", filter_options if filter_options is not None else pd.DataFrame(), base_scope=existing_campaign.get("scope_filters", {}), disabled=False)
+                campaign_submitted = st.form_submit_button("Save Campaign")
 
-        with st.form("campaign_admin_form"):
-            campaign_name = st.text_input("Campaign name", value=existing_campaign.get("campaign_name", ""))
-            office = st.text_input("Office sought", value=existing_campaign.get("office", ""))
-            contact_name = st.text_input("Contact name", value=existing_campaign.get("contact_name", ""))
-            address = st.text_input("Address", value=existing_campaign.get("address", ""))
-            phone = st.text_input("Phone", value=existing_campaign.get("phone", ""))
-            email = st.text_input("Email", value=existing_campaign.get("email", ""))
-            account_status = st.selectbox(
-                "Account status",
-                ["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"],
-                index=(["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"].index(existing_campaign.get("account_status", "pending_approval")) if existing_campaign.get("account_status", "pending_approval") in ["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"] else 0),
-            )
-            dataset_status = st.selectbox(
-                "Dataset status",
-                ["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"],
-                index=(["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"].index(existing_campaign.get("dataset_status", "not_built")) if existing_campaign.get("dataset_status", "not_built") in ["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"] else 0),
-            )
-            campaign_id_preview = _campaign_slug(edit_campaign_id or campaign_name)
-            default_dataset_url = existing_campaign.get("dataset_base_url") or campaign_dataset_base_url(campaign_id_preview)
-            dataset_base_url = st.text_input("Dataset base URL", value=default_dataset_url)
-            st.caption("Build/upload target:")
-            st.code(f"app_state/campaigns/{campaign_id_preview}/dataset/", language="text")
-
-            campaign_scope = build_scope_from_admin_widgets(
-                "campaign",
-                filter_options if filter_options is not None else pd.DataFrame(),
-                base_scope=existing_campaign.get("scope_filters", {}),
-                disabled=False,
-            )
-
-            campaign_submitted = st.form_submit_button("Save Campaign")
-
-        if campaign_submitted:
-            if not campaign_name:
-                st.error("Campaign name is required.")
-            elif not campaign_scope:
-                st.error("Campaign needs a scope. Select at least one county, municipality, precinct, district, school district, or school region.")
-            else:
-                cid = _campaign_slug(edit_campaign_id or campaign_name)
-                rec = upsert_campaign_record(store, cid, {
-                    "campaign_name": campaign_name,
-                    "office": office,
-                    "contact_name": contact_name,
-                    "address": address,
-                    "phone": phone,
-                    "email": email,
-                    "account_status": account_status,
-                    "dataset_status": dataset_status,
-                    "dataset_base_url": str(dataset_base_url or campaign_dataset_base_url(cid)).rstrip("/"),
-                    "scope_filters": campaign_scope,
-                })
-                save_security_store(store)
-                st.success(f"Campaign saved: {rec['campaign_id']}")
-                st.rerun()
+            if campaign_submitted:
+                if not campaign_name:
+                    st.error("Campaign name is required.")
+                elif not campaign_scope:
+                    st.error("Campaign needs a scope.")
+                else:
+                    cid = _campaign_slug(edit_campaign_id or campaign_name)
+                    rec = upsert_campaign_record(store, cid, {
+                        "campaign_name": campaign_name,
+                        "office": office,
+                        "contact_name": contact_name,
+                        "address": address,
+                        "phone": phone,
+                        "email": email,
+                        "account_status": account_status,
+                        "dataset_status": dataset_status,
+                        "dataset_base_url": str(dataset_base_url or campaign_dataset_base_url(cid)).rstrip("/"),
+                        "scope_filters": campaign_scope,
+                    })
+                    save_security_store(store)
+                    st.success(f"Campaign saved: {rec['campaign_id']}")
+                    st.rerun()
 
 
     st.markdown("### Add / Update Account")
