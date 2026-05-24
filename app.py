@@ -7,6 +7,7 @@ import json
 import base64
 import re
 import hashlib
+import html
 from datetime import datetime
 from pathlib import Path
 
@@ -5697,11 +5698,18 @@ def render_voter_lookup_workspace():
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Party", cc_text(r.get("Party", "")) or "—")
-        m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
-        m3.metric("Age", cc_text(r.get("Age", "")) or "—")
-        m4.metric("DOB", cc_text(r.get("DOB", "")) or "—")
+        _voter_metrics = [
+            ("Party", cc_text(r.get("Party", "")) or "—"),
+            ("Gender", cc_text(r.get("Gender", "")) or "—"),
+            ("Age", cc_text(r.get("Age", "")) or "—"),
+            ("DOB", cc_text(r.get("DOB", "")) or "—"),
+        ]
+        st.markdown(
+            '<div class="cc-voter-mini-metrics">' +
+            ''.join([f'<div class="cc-voter-mini-card"><div class="cc-voter-mini-label">{html.escape(str(k))}</div><div class="cc-voter-mini-value">{html.escape(str(v))}</div></div>' for k, v in _voter_metrics]) +
+            '</div>',
+            unsafe_allow_html=True,
+        )
         pdf_key = f"voter_pdf_bytes_{selected_id}"
         pdf_name_key = f"voter_pdf_name_{selected_id}"
         pc1, pc2 = st.columns([0.35, 1.65])
@@ -6480,31 +6488,116 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _count_cube_columns_for_base(base_url: str) -> list[str]:
+    """Return count_cube columns for the active dataset base."""
+    try:
+        manifest = _load_manifest_from_base(base_url)
+        key = ((manifest.get("speed", {}) or {}).get("tables", {}) or {}).get("count_cube", "speed/count_cube.parquet")
+        url = f"{base_url.rstrip('/')}/{str(key).lstrip('/')}"
+        con = duckdb.connect(database=":memory:")
+        try:
+            try:
+                con.execute("INSTALL httpfs; LOAD httpfs;")
+            except Exception:
+                try:
+                    con.execute("LOAD httpfs;")
+                except Exception:
+                    pass
+            return [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_lit(url)})").fetchall()]
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+    except Exception:
+        return []
+
+
+def _cube_col_name(requested: str, available_cols: list[str]) -> str:
+    """Map canonical app field names to whatever exists in the current count cube."""
+    aliases = {
+        "County": ["County", "county"],
+        "Municipality": ["Municipality", "municipality", "Municipality_1"],
+        "Precinct": ["Precinct", "precinct", "Precinct_1", "precinct_code"],
+        "USC": ["USC", "congressional_num", "congressional_name"],
+        "STS": ["STS", "state_senate_num", "state_senate_name"],
+        "STH": ["STH", "state_house_num", "state_house_name"],
+        "School District": ["School District", "school_district"],
+        "School Region": ["School Region", "school_region"],
+        "Party": ["Party", "Party_1", "party", "party_raw"],
+        "Gender": ["Gender", "Gender_1", "gender"],
+        "Age_Range": ["Age_Range", "age_group"],
+        "V4A": ["V4A", "VoteHistory_Last4_All"],
+        "V4G": ["V4G", "VoteHistory_Last4_General"],
+        "V4P": ["V4P", "VoteHistory_Last4_Primary"],
+        "MB_Prob_Score": ["MB_Prob_Score"],
+        "MB_App": ["MB_App", "MIB_Applied"],
+        "MB_App_Status": ["MB_App_Status"],
+        "MB_Sent": ["MB_Sent", "BallotSentStatus", "MIB_BALLOT"],
+        "MB_Status": ["MB_Status", "BallotReturnedStatus"],
+    }
+    lookup = {str(c).lower(): str(c) for c in available_cols or []}
+    for cand in aliases.get(requested, [requested]):
+        hit = lookup.get(str(cand).lower())
+        if hit:
+            return hit
+    return ""
+
+
+def _cube_expr(requested: str, available_cols: list[str], default: str = "NULL") -> str:
+    col = _cube_col_name(requested, available_cols)
+    return f"CAST({sql_ident(col)} AS VARCHAR)" if col else f"CAST({default} AS VARCHAR)"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, limit: int = 250) -> pd.DataFrame:
-    """One-pass geography/jurisdiction profile table from count_cube."""
+    """One-pass geography/jurisdiction profile table from count_cube.
+
+    Robust for campaign mini datasets: older mini count cubes may not have every
+    strategic column, so missing columns are treated as zero/blank instead of
+    returning an empty breakdown.
+    """
     active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(breakdown)):
         return pd.DataFrame()
+
     url = count_cube_url()
+    available = _count_cube_columns_for_base(current_data_base_url())
+    actual_breakdown = _cube_col_name(breakdown, available)
+    if not actual_breakdown:
+        return pd.DataFrame()
+
     where = count_cube_where_sql(active, special)
-    b = sql_ident(breakdown)
+    b = sql_ident(actual_breakdown)
+
+    party_expr = _cube_expr("Party", available, "''")
+    gender_expr = _cube_expr("Gender", available, "''")
+    age_expr = _cube_expr("Age_Range", available, "''")
+    v4g_expr = _cube_expr("V4G", available, "0")
+    v4a_expr = _cube_expr("V4A", available, "0")
+    mb_prob_expr = _cube_expr("MB_Prob_Score", available, "0")
+    mb_app_expr = _cube_expr("MB_App", available, "''")
+    mb_app_status_expr = _cube_expr("MB_App_Status", available, "''")
+    mb_sent_expr = _cube_expr("MB_Sent", available, "''")
+    mb_status_expr = _cube_expr("MB_Status", available, "''")
+
     q = f"""
         SELECT
             CAST({b} AS VARCHAR) AS Area,
             SUM(Voters) AS Total,
-            SUM(CASE WHEN CAST(Party AS VARCHAR) = 'R' THEN Voters ELSE 0 END) AS R,
-            SUM(CASE WHEN CAST(Party AS VARCHAR) = 'D' THEN Voters ELSE 0 END) AS D,
-            SUM(CASE WHEN CAST(Party AS VARCHAR) NOT IN ('R','D') THEN Voters ELSE 0 END) AS O,
-            SUM(CASE WHEN CAST(Gender AS VARCHAR) = 'F' THEN Voters ELSE 0 END) AS Female,
-            SUM(CASE WHEN CAST(Gender AS VARCHAR) = 'M' THEN Voters ELSE 0 END) AS Male,
-            SUM(CASE WHEN CAST(Age_Range AS VARCHAR) IN ('65+', '65 Plus', '65 and over') THEN Voters ELSE 0 END) AS Age65Plus,
-            SUM(CASE WHEN TRY_CAST(V4G AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongGeneral,
-            SUM(CASE WHEN TRY_CAST(V4A AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongAll,
-            SUM(CASE WHEN TRY_CAST(MB_Prob_Score AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS MBProspects,
-            SUM(CASE WHEN UPPER(CAST(MB_App AS VARCHAR)) IN ('Y','YES','APPLIED','TRUE','1') OR UPPER(CAST(MB_App_Status AS VARCHAR)) IN ('APPROVED','PENDING') THEN Voters ELSE 0 END) AS MBApplicants,
-            SUM(CASE WHEN UPPER(CAST(MB_Sent AS VARCHAR)) IN ('Y','YES','SENT','TRUE','1') THEN Voters ELSE 0 END) AS MBSent,
-            SUM(CASE WHEN UPPER(CAST(MB_Status AS VARCHAR)) IN ('VOTED','RETURNED','BALLOT RETURNED') THEN Voters ELSE 0 END) AS MBReturned
+            SUM(CASE WHEN {party_expr} = 'R' THEN Voters ELSE 0 END) AS R,
+            SUM(CASE WHEN {party_expr} = 'D' THEN Voters ELSE 0 END) AS D,
+            SUM(CASE WHEN {party_expr} NOT IN ('R','D') THEN Voters ELSE 0 END) AS O,
+            SUM(CASE WHEN {gender_expr} = 'F' THEN Voters ELSE 0 END) AS Female,
+            SUM(CASE WHEN {gender_expr} = 'M' THEN Voters ELSE 0 END) AS Male,
+            SUM(CASE WHEN {age_expr} IN ('65+', '65 Plus', '65 and over') THEN Voters ELSE 0 END) AS Age65Plus,
+            SUM(CASE WHEN TRY_CAST({v4g_expr} AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongGeneral,
+            SUM(CASE WHEN TRY_CAST({v4a_expr} AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS StrongAll,
+            SUM(CASE WHEN TRY_CAST({mb_prob_expr} AS DOUBLE) >= 3 THEN Voters ELSE 0 END) AS MBProspects,
+            SUM(CASE WHEN UPPER({mb_app_expr}) IN ('Y','YES','APPLIED','TRUE','1') OR UPPER({mb_app_status_expr}) IN ('APPROVED','PENDING') THEN Voters ELSE 0 END) AS MBApplicants,
+            SUM(CASE WHEN UPPER({mb_sent_expr}) IN ('Y','YES','SENT','TRUE','1') THEN Voters ELSE 0 END) AS MBSent,
+            SUM(CASE WHEN UPPER({mb_status_expr}) IN ('VOTED','RETURNED','BALLOT RETURNED') THEN Voters ELSE 0 END) AS MBReturned
         FROM read_parquet({sql_lit(url)})
         {where}
         GROUP BY CAST({b} AS VARCHAR)
@@ -6517,13 +6610,14 @@ def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, li
         try:
             con.execute("INSTALL httpfs; LOAD httpfs;")
         except Exception:
-            try: con.execute("LOAD httpfs;")
-            except Exception: pass
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
         df = con.execute(q).df()
         if df is None or df.empty:
             return pd.DataFrame()
         df["Area"] = df["Area"].map(_area_clean_label)
-        # Hide blank geography/jurisdiction rows in Area Intelligence breakdowns.
         df = df[df["Area"].astype(str).str.strip().ne("(Blank)")].copy()
         if df.empty:
             return pd.DataFrame()
@@ -6537,11 +6631,14 @@ def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, li
         df["MB Prospect %"] = df.apply(lambda r: _area_pct(r["MBProspects"], r["Total"]), axis=1)
         df["MB Return %"] = df.apply(lambda r: _area_pct(r["MBReturned"], r["MBSent"]), axis=1)
         return df[["Area", "Total", "R", "D", "O", "R %", "D %", "O %", "Female", "Male", "Age65Plus", "65+ %", "StrongGeneral", "Strong Gen %", "MBProspects", "MB Prospect %", "MBApplicants", "MBSent", "MBReturned", "MB Return %"]]
-    except Exception:
+    except Exception as e:
+        st.caption(f"Breakdown unavailable: {e}")
         return pd.DataFrame()
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            pass
 
 
 def _area_default_breakdown(active: dict) -> str:
@@ -8351,3 +8448,37 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     unsafe_allow_html=True,
 )
 
+
+st.markdown("""
+<style>
+.cc-voter-mini-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(110px, 1fr));
+    gap: 10px;
+    margin: 6px 0 14px 0;
+}
+.cc-voter-mini-card {
+    background: #f8f4ea !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 12px !important;
+    padding: 10px 12px !important;
+    box-shadow: 0 4px 10px rgba(7,29,58,.08) !important;
+}
+.cc-voter-mini-label {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+    font-weight: 900 !important;
+    letter-spacing: .05em !important;
+    text-transform: uppercase !important;
+}
+.cc-voter-mini-value {
+    color: #071d3a !important;
+    font-size: 13pt !important;
+    font-weight: 950 !important;
+    margin-top: 3px !important;
+}
+@media (max-width: 900px) {
+    .cc-voter-mini-metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
+</style>
+""", unsafe_allow_html=True)
