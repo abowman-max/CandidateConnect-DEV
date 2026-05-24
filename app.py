@@ -2309,36 +2309,58 @@ def requires_remote_index_count(active: dict, special: dict) -> bool:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def get_bytes(key: str) -> bytes:
-    r = requests.get(r2_url(key), timeout=120)
+def _get_bytes_from_base(base_url: str, key: str) -> bytes:
+    r = requests.get(f"{str(base_url).rstrip('/')}/{key.lstrip('/')}", timeout=120)
     r.raise_for_status()
     return r.content
 
 
+def get_bytes(key: str) -> bytes:
+    # Cache must include the active data base URL. Otherwise an Admin statewide
+    # cache entry can be reused for a campaign mini dataset, causing slow/spinning
+    # campaign logins.
+    return _get_bytes_from_base(current_data_base_url(), key)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
+def _load_manifest_from_base(base_url: str):
+    return json.loads(_get_bytes_from_base(base_url, "dataset_manifest.json").decode("utf-8"))
+
+
 def load_manifest():
-    return json.loads(get_bytes("dataset_manifest.json").decode("utf-8"))
+    return _load_manifest_from_base(current_data_base_url())
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _load_parquet_from_base(base_url: str, key: str, columns_tuple=None) -> pd.DataFrame:
+    columns = list(columns_tuple) if columns_tuple else None
+    return pd.read_parquet(io.BytesIO(_get_bytes_from_base(base_url, key)), columns=columns)
+
+
 def load_parquet(key: str, columns=None) -> pd.DataFrame:
-    return pd.read_parquet(io.BytesIO(get_bytes(key)), columns=columns)
+    columns_tuple = tuple(columns) if columns is not None else None
+    return _load_parquet_from_base(current_data_base_url(), key, columns_tuple)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load_filter_layer():
-    """Load only the small filter layer needed to draw the UI.
-
-    v21g startup-safe fix:
-    - Load manifest + filter_options only on startup.
-    - Do NOT load count_cube while the sidebar is being drawn.
-    - Do NOT load geo_hierarchy until Create Universe needs geo options.
-    """
-    manifest = load_manifest()
+def _load_filter_layer_from_base(base_url: str):
+    """Load only the small filter layer needed to draw the UI for one dataset base."""
+    manifest = _load_manifest_from_base(base_url)
     speed = manifest.get("speed", {}).get("tables", {})
-    filter_options = load_parquet(speed.get("filter_options", "speed/filter_options.parquet"))
+    filter_options_key = speed.get("filter_options", "speed/filter_options.parquet")
+    try:
+        filter_options = _load_parquet_from_base(base_url, filter_options_key, None)
+    except Exception:
+        # Campaign mini datasets may not include filter_options yet. Fall back to
+        # the statewide filter layer for dropdown labels; hard security scope still
+        # prevents access outside the campaign universe.
+        filter_options = _load_parquet_from_base(R2, "speed/filter_options.parquet", None)
     geo_hierarchy = pd.DataFrame()
     return manifest, filter_options, geo_hierarchy
+
+
+def load_filter_layer():
+    return _load_filter_layer_from_base(current_data_base_url())
 
 
 def r2_content_length(key: str) -> int:
@@ -2568,15 +2590,46 @@ def _state_file_candidates():
     return deduped
 
 
+def _security_store_prefer_newer(remote_security, local_security):
+    """Choose the safest security store when both R2 and local temp state exist.
+
+    Streamlit Cloud can leave a stale local/temp security file behind after a reboot.
+    R2 is the durable source of truth, but immediately after a Super Admin edit the
+    local file can be newer until the exported security_store.json is uploaded.
+    """
+    if not isinstance(remote_security, dict):
+        remote_security = {}
+    if not isinstance(local_security, dict):
+        local_security = {}
+    remote_users = remote_security.get("users") if isinstance(remote_security.get("users"), dict) else {}
+    local_users = local_security.get("users") if isinstance(local_security.get("users"), dict) else {}
+    if not remote_users and local_users:
+        return local_security
+    if remote_users and not local_users:
+        return remote_security
+    if remote_users and local_users:
+        r_time = str(remote_security.get("updated_at") or "")
+        l_time = str(local_security.get("updated_at") or "")
+        return local_security if l_time and l_time >= r_time else remote_security
+    return remote_security or local_security or {}
+
+
 def _load_state() -> dict:
-    # Remote app_state is the durable baseline after rebuild/deploy. Local/browser state can override it.
+    # Remote app_state is the durable baseline after rebuild/deploy.
+    # Local/browser state can override saved universes/corrections, but security
+    # must prefer the newest valid store so stale temp files do not trigger setup.
     state = _load_remote_app_state()
+    remote_security = state.get("security") if isinstance(state, dict) else {}
     for path in _state_file_candidates():
         try:
             if path.exists():
                 local_state = json.loads(path.read_text(encoding="utf-8")) or {}
                 if isinstance(local_state, dict):
+                    local_security = local_state.get("security")
                     state.update(local_state)
+                    chosen_security = _security_store_prefer_newer(remote_security, local_security)
+                    if chosen_security:
+                        state["security"] = chosen_security
                     return state
         except Exception:
             continue
@@ -2816,8 +2869,14 @@ def current_data_base_url() -> str:
         if current_role() == "Super Admin":
             return R2
         rec = current_campaign_record()
-        if rec.get("dataset_status") == "active" and rec.get("dataset_base_url"):
-            return str(rec.get("dataset_base_url")).rstrip("/")
+        if rec.get("dataset_status") == "active":
+            # Always derive the mini-dataset URL from the current app R2 base.
+            # This prevents a DEV app from spinning against an old LIVE dataset_base_url.
+            cid = rec.get("campaign_id") or _campaign_slug(rec.get("campaign_name") or current_user().get("campaign") or "")
+            if cid:
+                return campaign_dataset_base_url(cid).rstrip("/")
+            if rec.get("dataset_base_url"):
+                return str(rec.get("dataset_base_url")).rstrip("/")
     except Exception:
         pass
     return R2
