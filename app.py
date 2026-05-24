@@ -1617,7 +1617,8 @@ div[data-testid="stVerticalBlock"] {
 """, unsafe_allow_html=True)
 
 def r2_url(key: str) -> str:
-    return f"{R2}/{key.lstrip('/')}"
+    base = current_data_base_url()
+    return f"{base.rstrip('/')}/{key.lstrip('/')}"
 
 
 def sql_ident(name: str) -> str:
@@ -2693,6 +2694,79 @@ def saved_universe_state_section() -> str:
 def security_export_json_bytes() -> bytes:
     return json.dumps(load_security_store(), ensure_ascii=False, indent=2).encode("utf-8")
 
+
+def _campaign_slug(name: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", str(name or "").strip().lower()).strip("-")
+    return s or "campaign"
+
+
+def campaign_dataset_base_url(campaign_id: str) -> str:
+    cid = _campaign_slug(campaign_id)
+    return f"{R2}/app_state/campaigns/{cid}/dataset"
+
+
+def campaign_state_base_url(campaign_id: str) -> str:
+    cid = _campaign_slug(campaign_id)
+    return f"{R2}/app_state/campaigns/{cid}"
+
+
+def current_campaign_record() -> dict:
+    user = current_user() or {}
+    store = load_security_store()
+    campaigns = store.get("campaigns") or {}
+    cid = user.get("campaign_id") or _campaign_slug(user.get("campaign") or "")
+    if cid and cid in campaigns:
+        return campaigns.get(cid) or {}
+    return {}
+
+
+def current_data_base_url() -> str:
+    """Super Admin uses statewide R2. Campaign users can use their approved mini dataset."""
+    try:
+        if current_role() == "Super Admin":
+            return R2
+        rec = current_campaign_record()
+        if rec.get("dataset_status") == "active" and rec.get("dataset_base_url"):
+            return str(rec.get("dataset_base_url")).rstrip("/")
+    except Exception:
+        pass
+    return R2
+
+
+def campaign_dataset_active() -> bool:
+    try:
+        return current_data_base_url().rstrip("/") != R2.rstrip("/")
+    except Exception:
+        return False
+
+
+def campaign_dataset_status_label() -> str:
+    rec = current_campaign_record()
+    status = rec.get("dataset_status") or "statewide-filtered"
+    if campaign_dataset_active():
+        return f"Campaign mini dataset active · {status}"
+    return f"Using statewide dataset with enforced campaign boundary · {status}"
+
+
+def upsert_campaign_record(store: dict, campaign_id: str, data: dict) -> dict:
+    store.setdefault("campaigns", {})
+    cid = _campaign_slug(campaign_id or data.get("campaign_name") or data.get("name") or "")
+    existing = store["campaigns"].get(cid, {})
+    existing.update(data or {})
+    existing["campaign_id"] = cid
+    existing.setdefault("dataset_status", "not_built")
+    existing.setdefault("account_status", "pending_approval")
+    existing.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
+    existing["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    existing.setdefault("dataset_base_url", campaign_dataset_base_url(cid))
+    existing.setdefault("state_base_url", campaign_state_base_url(cid))
+    store["campaigns"][cid] = existing
+    return existing
+
+
+def security_export_json_bytes() -> bytes:
+    return json.dumps(load_security_store(), ensure_ascii=False, indent=2).encode("utf-8")
+
 def render_security_gate():
     """Block the app until a user is logged in, or create the first Super Admin."""
     store = load_security_store()
@@ -2793,6 +2867,8 @@ div[data-testid="stForm"] .stButton > button {
         user = (users or {}).get(username_clean)
         if not user or user.get("disabled"):
             st.error("Invalid username or disabled account.")
+        elif user.get("campaign_id") and ((store.get("campaigns") or {}).get(user.get("campaign_id"), {}) or {}).get("account_status") not in ("active", "", None):
+            st.error("This campaign account is not active yet.")
         elif user.get("password_hash") != _password_hash(username_clean, password):
             st.error("Invalid username or password.")
         else:
@@ -2890,6 +2966,7 @@ def render_account_admin_workspace(filter_options=None):
             "Name": u.get("display_name", ""),
             "Role": u.get("role", ""),
             "Campaign": u.get("campaign", ""),
+            "Campaign ID": u.get("campaign_id", ""),
             "Scope": json.dumps(u.get("scope_filters") or {}, ensure_ascii=False),
             "Disabled": bool(u.get("disabled", False)),
         })
@@ -2901,6 +2978,90 @@ def render_account_admin_workspace(filter_options=None):
     existing_names = [""] + sorted([u for u in users.keys() if is_super_admin() or str(users.get(u, {}).get("campaign") or "") == my_campaign])
     edit_user = st.selectbox("Optional: load existing account to edit", existing_names, key="security_edit_user")
     existing = users.get(edit_user, {}) if edit_user else {}
+
+    st.markdown("### Campaigns / Mini Datasets")
+    st.caption("Phase 2A: campaign users can be assigned to a campaign record. Once its mini dataset is built and uploaded, their app reads that smaller dataset instead of statewide.")
+
+    campaigns = store.setdefault("campaigns", {})
+    camp_rows = []
+    for cid, c in sorted(campaigns.items()):
+        camp_rows.append({
+            "Campaign ID": cid,
+            "Campaign": c.get("campaign_name", ""),
+            "Office": c.get("office", ""),
+            "Contact": c.get("contact_name", ""),
+            "Email": c.get("email", ""),
+            "Status": c.get("account_status", ""),
+            "Dataset": c.get("dataset_status", ""),
+            "Dataset URL": c.get("dataset_base_url", ""),
+            "Scope": json.dumps(c.get("scope_filters") or {}, ensure_ascii=False),
+        })
+    if camp_rows:
+        cc_table(pd.DataFrame(camp_rows), height=260, key="campaigns_admin_table")
+    else:
+        st.info("No campaign records yet.")
+
+    if is_super_admin():
+        st.markdown("#### Add / Update Campaign")
+        existing_campaign_ids = [""] + sorted(campaigns.keys())
+        edit_campaign_id = st.selectbox("Optional: load existing campaign", existing_campaign_ids, key="campaign_edit_id")
+        existing_campaign = campaigns.get(edit_campaign_id, {}) if edit_campaign_id else {}
+
+        with st.form("campaign_admin_form"):
+            campaign_name = st.text_input("Campaign name", value=existing_campaign.get("campaign_name", ""))
+            office = st.text_input("Office sought", value=existing_campaign.get("office", ""))
+            contact_name = st.text_input("Contact name", value=existing_campaign.get("contact_name", ""))
+            address = st.text_input("Address", value=existing_campaign.get("address", ""))
+            phone = st.text_input("Phone", value=existing_campaign.get("phone", ""))
+            email = st.text_input("Email", value=existing_campaign.get("email", ""))
+            account_status = st.selectbox(
+                "Account status",
+                ["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"],
+                index=(["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"].index(existing_campaign.get("account_status", "pending_approval")) if existing_campaign.get("account_status", "pending_approval") in ["pending_approval", "active", "disabled", "pending_payment", "cancelled", "payment_failed"] else 0),
+            )
+            dataset_status = st.selectbox(
+                "Dataset status",
+                ["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"],
+                index=(["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"].index(existing_campaign.get("dataset_status", "not_built")) if existing_campaign.get("dataset_status", "not_built") in ["not_built", "pending_build", "uploaded", "active", "rebuild_needed", "disabled"] else 0),
+            )
+            campaign_id_preview = _campaign_slug(edit_campaign_id or campaign_name)
+            default_dataset_url = existing_campaign.get("dataset_base_url") or campaign_dataset_base_url(campaign_id_preview)
+            dataset_base_url = st.text_input("Dataset base URL", value=default_dataset_url)
+            st.caption("Build/upload target:")
+            st.code(f"app_state/campaigns/{campaign_id_preview}/dataset/", language="text")
+
+            campaign_scope = build_scope_from_admin_widgets(
+                "campaign",
+                filter_options if filter_options is not None else pd.DataFrame(),
+                base_scope=existing_campaign.get("scope_filters", {}),
+                disabled=False,
+            )
+
+            campaign_submitted = st.form_submit_button("Save Campaign")
+
+        if campaign_submitted:
+            if not campaign_name:
+                st.error("Campaign name is required.")
+            elif not campaign_scope:
+                st.error("Campaign needs a scope. Select at least one county, municipality, precinct, district, school district, or school region.")
+            else:
+                cid = _campaign_slug(edit_campaign_id or campaign_name)
+                rec = upsert_campaign_record(store, cid, {
+                    "campaign_name": campaign_name,
+                    "office": office,
+                    "contact_name": contact_name,
+                    "address": address,
+                    "phone": phone,
+                    "email": email,
+                    "account_status": account_status,
+                    "dataset_status": dataset_status,
+                    "dataset_base_url": str(dataset_base_url or campaign_dataset_base_url(cid)).rstrip("/"),
+                    "scope_filters": campaign_scope,
+                })
+                save_security_store(store)
+                st.success(f"Campaign saved: {rec['campaign_id']}")
+                st.rerun()
+
 
     st.markdown("### Add / Update Account")
     allowed_roles = SECURITY_ROLES if is_super_admin() else ["Manager", "Field User", "Viewer"]
@@ -2918,6 +3079,13 @@ def render_account_admin_workspace(filter_options=None):
         password = st.text_input("New password / reset password", type="password")
         role = st.selectbox("Role", allowed_roles, index=role_index)
         campaign = st.text_input("Campaign / client name", value=campaign_default, disabled=not is_super_admin())
+        campaign_ids = [""] + sorted((store.get("campaigns") or {}).keys())
+        existing_campaign_id = existing.get("campaign_id", "")
+        campaign_id_index = campaign_ids.index(existing_campaign_id) if existing_campaign_id in campaign_ids else 0
+        campaign_id = st.selectbox("Link to campaign mini dataset", campaign_ids, index=campaign_id_index, disabled=not is_super_admin())
+        if campaign_id:
+            linked_campaign = (store.get("campaigns") or {}).get(campaign_id, {})
+            st.caption(f"Linked dataset: {linked_campaign.get('dataset_status', 'not_built')} · {linked_campaign.get('dataset_base_url', '')}")
         disabled = st.checkbox("Disable this account", value=bool(existing.get("disabled", False)) if existing else False)
 
         if is_super_admin():
@@ -2941,6 +3109,10 @@ def render_account_admin_workspace(filter_options=None):
         if not password and username not in users:
             st.error("Password is required for a new account.")
             return
+        if role != "Super Admin" and campaign_id:
+            linked_scope = ((store.get("campaigns") or {}).get(campaign_id, {}) or {}).get("scope_filters") or {}
+            if linked_scope:
+                scope = linked_scope
         if role != "Super Admin" and not scope:
             st.error("Campaign-scoped accounts need a scope. Select at least one county, municipality, precinct, or district.")
             return
@@ -2951,6 +3123,7 @@ def render_account_admin_workspace(filter_options=None):
             "display_name": display_name or username,
             "role": role,
             "campaign": str(campaign or "").strip(),
+            "campaign_id": str(campaign_id or "").strip(),
             "scope_filters": scope,
             "disabled": bool(disabled),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -7770,6 +7943,7 @@ with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
         st.caption(f"Campaign: {current_user().get('campaign', '')}")
+        st.caption(campaign_dataset_status_label())
 
     if st.button("🏠 Home", width="stretch"):
         st.session_state["left_section"] = None
