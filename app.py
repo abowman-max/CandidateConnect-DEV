@@ -1695,6 +1695,11 @@ def r2_url(key: str) -> str:
     return f"{base.rstrip('/')}/{key.lstrip('/')}"
 
 
+def root_r2_url(key: str) -> str:
+    """Always read durable app_state from the root R2 bucket, not a campaign mini dataset."""
+    return f"{R2.rstrip('/')}/{str(key).lstrip('/')}"
+
+
 def sql_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
@@ -2393,28 +2398,34 @@ def load_geo_hierarchy_safe(max_bytes: int = 90_000_000) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_count_cube_columns(cols_tuple):
-    """Read only requested columns from the quick-count cube.
-
-    v21i: never fall back to a full count_cube read. A full read can exceed
-    Streamlit Cloud memory and kill the app health check when a selected field
-    is missing/mismatched. Callers can catch the exception and choose a safer
-    fallback.
-    """
-    manifest = load_manifest()
+def _load_count_cube_columns_from_base(base_url: str, cols_tuple):
+    """Read only requested columns from the quick-count cube for one dataset base."""
+    manifest = _load_manifest_from_base(base_url)
     speed = manifest.get("speed", {}).get("tables", {})
     key = speed.get("count_cube", "speed/count_cube.parquet")
-    return load_parquet(key, columns=list(cols_tuple))
+    return _load_parquet_from_base(base_url, key, tuple(cols_tuple))
+
+
+def load_count_cube_columns(cols_tuple):
+    return _load_count_cube_columns_from_base(current_data_base_url(), tuple(cols_tuple))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _load_index_columns_from_base(base_url: str, key: str, cols_tuple):
+    return _load_parquet_from_base(base_url, key, tuple(cols_tuple))
+
+
 def load_index_columns(key: str, cols_tuple):
-    return load_parquet(key, columns=list(cols_tuple))
+    return _load_index_columns_from_base(current_data_base_url(), key, tuple(cols_tuple))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _load_detail_columns_from_base(base_url: str, key: str, cols_tuple):
+    return _load_parquet_from_base(base_url, key, tuple(cols_tuple))
+
+
 def load_detail_columns(key: str, cols_tuple):
-    return load_parquet(key, columns=list(cols_tuple))
+    return _load_detail_columns_from_base(current_data_base_url(), key, tuple(cols_tuple))
 
 
 def clean_value(value) -> str:
@@ -2530,13 +2541,13 @@ def _load_remote_app_state() -> dict:
     """Read durable app_state uploaded to R2 by Pipeline Manager, when available."""
     state = {}
     try:
-        r = requests.get(r2_url("app_state/saved_universes.json"), timeout=10)
+        r = requests.get(root_r2_url("app_state/saved_universes.json"), timeout=10)
         if r.ok:
             state["saved_universes"] = _json_safe_saved_universes(r.json())
     except Exception:
         pass
     try:
-        r = requests.get(r2_url("app_state/voter_record_corrections.json"), timeout=10)
+        r = requests.get(root_r2_url("app_state/voter_record_corrections.json"), timeout=10)
         if r.ok:
             raw = r.json()
             # Accept either direct correction-store JSON or a rows/list export.
@@ -2547,7 +2558,7 @@ def _load_remote_app_state() -> dict:
     try:
         # Security/account store. Try the newer clearer name first, then the earlier export name.
         for _security_key in ("app_state/security_store.json", "app_state/security_users.json"):
-            r = requests.get(r2_url(_security_key), timeout=10)
+            r = requests.get(root_r2_url(_security_key), timeout=10)
             if r.ok:
                 raw = r.json()
                 if isinstance(raw, dict):
@@ -4282,9 +4293,10 @@ def build_export(active: dict, columns: list[str]):
     progress = st.progress(0)
     status = st.empty()
 
-    for i in range(DETAIL_SHARDS):
+    detail_count = int((load_manifest().get("detail", {}) or {}).get("count", DETAIL_SHARDS) or DETAIL_SHARDS)
+    for i in range(detail_count):
         key = f"detail/voters_detail_{i:03d}.parquet"
-        status.write(f"Building export from shard {i+1} of {DETAIL_SHARDS}: {key}")
+        status.write(f"Building export from shard {i+1} of {detail_count}: {key}")
         df = load_detail_columns(key, cols)
 
         for col, vals in active.items():
@@ -4307,7 +4319,7 @@ def build_export(active: dict, columns: list[str]):
             if total > EXPORT_ROW_LIMIT:
                 raise RuntimeError(f"Export exceeds {EXPORT_ROW_LIMIT:,} rows. Narrow filters before exporting.")
 
-        progress.progress((i + 1) / DETAIL_SHARDS)
+        progress.progress((i + 1) / detail_count)
 
     status.empty()
     if not parts:
