@@ -2592,13 +2592,14 @@ def _password_hash(username: str, password: str) -> str:
     return hashlib.sha256((salt + str(password or "")).encode("utf-8")).hexdigest()
 
 def _empty_security_store() -> dict:
-    return {"users": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
+    return {"users": {}, "campaigns": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
 
 def load_security_store() -> dict:
     raw = (_load_state().get("security") or {})
     if not isinstance(raw, dict):
         raw = {}
     raw.setdefault("users", {})
+    raw.setdefault("campaigns", {})
     raw.setdefault("version", 1)
     return raw
 
@@ -3031,6 +3032,14 @@ def render_account_admin_workspace(filter_options=None):
     else:
         st.info("No campaign records yet.")
 
+    st.markdown("#### Dataset Routing Rules")
+    st.markdown("""
+- **Super Admin** uses the statewide dataset.
+- **Campaign users** use their assigned campaign mini dataset only when that campaign's `Dataset Status` is `active`.
+- Until the mini dataset is active, campaign users remain protected by the hard campaign boundary but still read from statewide data.
+- After changing accounts/campaigns, download `security_store.json` below and upload it to R2 `app_state/security_store.json`.
+""")
+
     if is_super_admin():
         with st.expander("Add / Update Campaign", expanded=False):
             campaign_ids_existing = [""] + sorted(campaigns.keys())
@@ -3076,6 +3085,8 @@ def render_account_admin_workspace(filter_options=None):
                         "scope_filters": campaign_scope,
                     })
                     save_security_store(store)
+                    if dataset_status == "active" and not str(dataset_base_url or "").strip():
+                        st.warning("Campaign saved, but active datasets need a Dataset base URL.")
                     st.success(f"Campaign saved: {rec['campaign_id']}")
                     st.rerun()
 
@@ -3134,12 +3145,15 @@ def render_account_admin_workspace(filter_options=None):
             st.error("Campaign-scoped accounts need a scope. Select at least one county, municipality, precinct, or district.")
             return
 
+        linked_campaign_record = ((store.get("campaigns") or {}).get(campaign_id, {}) or {}) if campaign_id else {}
+        campaign_name_final = str(campaign or linked_campaign_record.get("campaign_name") or "").strip()
+
         prior = users.get(username, {})
         record = dict(prior)
         record.update({
             "display_name": display_name or username,
             "role": role,
-            "campaign": str(campaign or "").strip(),
+            "campaign": campaign_name_final,
             "campaign_id": str(campaign_id or "").strip(),
             "scope_filters": scope,
             "disabled": bool(disabled),
@@ -7962,6 +7976,8 @@ with st.sidebar:
     if is_campaign_scoped():
         st.caption(f"Campaign: {current_user().get('campaign', '')}")
         st.caption(campaign_dataset_status_label())
+    elif is_super_admin():
+        st.caption("Dataset: Statewide")
 
     if st.button("🏠 Home", width="stretch"):
         st.session_state["left_section"] = None
