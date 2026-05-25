@@ -1768,23 +1768,68 @@ def save_security_store(store: dict) -> bool:
 
 
 def campaign_boundary_filters() -> dict:
-    """Return the logged-in user's fixed campaign boundary.
+    """Return the logged-in user's immutable campaign boundary.
 
-    This is separate from the active working universe. It should always be applied
-    when building left-pane filter option lists, so campaign users cannot browse
-    option values outside their assigned campaign universe.
+    Campaign users may only see/filter/select values inside this boundary.
+    Super Admin remains unrestricted.
     """
     try:
         user = current_user() or {}
         if is_super_admin():
             return {}
         boundary = user.get("scope_filters") or {}
+        if not boundary:
+            cid = str(user.get("campaign_id") or "").strip()
+            campaign_name = str(user.get("campaign") or "").strip()
+            store = load_security_store()
+            campaigns = store.get("campaigns") or {}
+            campaign = campaigns.get(cid) if cid else None
+            if not campaign and campaign_name:
+                for rec in campaigns.values():
+                    if str((rec or {}).get("campaign_name") or "").strip() == campaign_name:
+                        campaign = rec
+                        break
+            boundary = (campaign or {}).get("scope_filters") or {}
         if not isinstance(boundary, dict):
             return {}
         return {k: v for k, v in boundary.items() if v not in (None, "", [], {})}
     except Exception:
         return {}
 
+
+def option_filters_for_field(current_filters: dict | None, field: str) -> dict:
+    """Filters to use when populating one dropdown's options.
+
+    Drop the field being populated so users can change it, then re-apply the
+    campaign boundary so downstream geo lists never escape the campaign.
+    """
+    f = dict(current_filters or {})
+    f.pop(field, None)
+    return with_campaign_boundary(f)
+
+
+
+
+def campaign_scoped_option_values(field: str, current_filters: dict | None = None, limit: int = 5000) -> list[str]:
+    """Return dropdown options scoped to the campaign hard boundary."""
+    try:
+        f = option_filters_for_field(current_filters or {}, field)
+        df = duckdb_count_cube_group_filtered(
+            json.dumps(count_safe_filters(f), sort_keys=True),
+            json.dumps({}, sort_keys=True),
+            field,
+            int(limit or 5000),
+        )
+        if df is None or df.empty or "label" not in df.columns:
+            return []
+        vals = []
+        for x in df["label"].tolist():
+            s = str(x).strip()
+            if s and s.lower() not in ("nan", "none", "null", "(blank)", "blank"):
+                vals.append(s)
+        return vals
+    except Exception:
+        return []
 
 
 def option_filters_for_field(current_filters: dict | None, field: str) -> dict:
@@ -9038,6 +9083,29 @@ st.markdown("""
         grid-template-columns: 1fr !important;
         gap: 4px !important;
     }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Readable tooltip/help popovers only. No theme/color redesign.
+st.markdown("""
+<style>
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+[data-baseweb="popover"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
 }
 </style>
 """, unsafe_allow_html=True)
