@@ -8428,3 +8428,105 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     unsafe_allow_html=True,
 )
 
+
+# Final Voter Lookup/sidebar layout lock.
+st.markdown("""
+<style>
+/* === FINAL LAYOUT LOCK v1 ===
+   This is intentionally last. It prevents Voter Lookup and sidebar controls
+   from being stretched by broad global CSS rules.
+*/
+
+/* Sidebar navigation buttons: consistent height/width, not oversized. */
+[data-testid="stSidebar"] .stButton > button {
+    min-height: 42px !important;
+    height: 42px !important;
+    max-height: 42px !important;
+    padding: 6px 10px !important;
+    margin: 0 0 4px 0 !important;
+    width: 100% !important;
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+    border-radius: 9px !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stButton > button p {
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+    margin: 0 !important;
+}
+
+/* Keep sidebar from becoming too wide and pushing the page around. */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"] {
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
+}
+
+/* Voter Lookup search result column/card: keep compact and readable. */
+.cc-search-results,
+.cc-search-card,
+.voter-search-results,
+.voter-result-card {
+    max-width: 430px !important;
+}
+
+/* Red Streamlit button cards used for search results should not stretch too tall/wide. */
+div[data-testid="column"] .stButton > button {
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+    font-size: 10pt !important;
+    line-height: 1.2 !important;
+}
+
+/* Voter profile quick fields under the voter name: restore readable size and spacing. */
+.cc-voter-summary,
+.cc-voter-summary *,
+.voter-summary,
+.voter-summary * {
+    font-size: 11pt !important;
+    line-height: 1.25 !important;
+    color: #071d3a !important;
+}
+
+/* If those fields are rendered by Streamlit columns/markdown, prevent tiny inherited text. */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li {
+    font-size: 10.5pt !important;
+    line-height: 1.35 !important;
+}
+
+/* But keep table cells compact. */
+.cc-html-table td,
+.cc-html-table th,
+.cc-home-table td,
+.cc-home-table th {
+    font-size: 10pt !important;
+    line-height: 1.2 !important;
+}
+
+/* Voter lookup detail area should not start too far right or create giant gaps. */
+section.main .block-container,
+[data-testid="stMain"] .block-container {
+    max-width: 1280px !important;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+}
+
+/* Fix default st.metric-like field labels/values if any remain in lookup. */
+[data-testid="stMetric"] {
+    min-height: 54px !important;
+    padding: 4px 0 !important;
+}
+[data-testid="stMetric"] label,
+[data-testid="stMetric"] label *,
+[data-testid="stMetric"] [data-testid="stMetricValue"],
+[data-testid="stMetric"] [data-testid="stMetricValue"] * {
+    font-size: 11pt !important;
+    line-height: 1.2 !important;
+    color: #071d3a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
