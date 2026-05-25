@@ -548,6 +548,7 @@ DISPLAY_LABELS = {
     "USC": "Congressional District",
     "STS": "State Senate District",
     "STH": "State House District",
+    "Magisterial District": "Magisterial District",
     "Age_Range": "Age Range",
     "MB_App": "Mail Ballot Application",
     "MB_App_Status": "Application Status",
@@ -1962,39 +1963,160 @@ def _parse_scope_text_lines(raw: str) -> dict:
     return scope
 
 
-def render_public_campaign_signup_request(store: dict):
-    """Public request form below login.
+def _signup_options(field: str) -> list[str]:
+    """Small helper for public signup dropdowns.
 
-    Creates a disabled Campaign Admin user plus a pending campaign record. Super Admin
-    approval enables the username; Step 9 then builds the mini dataset from the same
-    security_store.json record.
+    Uses the statewide filter_options table when available. If the public request
+    screen cannot load it, the form still works with blank/manual options.
     """
+    try:
+        _, filter_options, _ = load_filter_layer()
+        vals = options_from_filter_table(filter_options, field)
+        return [str(v).strip() for v in vals if str(v).strip()]
+    except Exception:
+        return []
+
+
+def _signup_scope_for_campaign_type(campaign_type: str, values: dict) -> tuple[dict, bool, str]:
+    """Return (scope_filters, manual_boundary_required, manual_note)."""
+    t = str(campaign_type or '').strip()
+    scope: dict[str, list[str]] = {}
+    manual_required = False
+    manual_note = ''
+
+    def add(field: str, value):
+        vals = value if isinstance(value, list) else [value]
+        vals = [str(v).strip() for v in vals if str(v).strip()]
+        if vals:
+            scope[field] = vals
+
+    if t == 'Municipal':
+        add('County', values.get('county'))
+        add('Municipality', values.get('municipality'))
+    elif t == 'Countywide':
+        add('County', values.get('county'))
+    elif t == 'School District':
+        # Do not use School Region here. SURE is too inconsistent for that.
+        add('School District', values.get('school_district'))
+    elif t == 'State House':
+        add('STH', values.get('state_house'))
+    elif t == 'State Senate':
+        add('STS', values.get('state_senate'))
+    elif t == 'Congressional':
+        add('USC', values.get('congressional'))
+    elif t == 'Statewide':
+        # A true statewide account intentionally has no geography boundary.
+        scope = {}
+    elif t == 'Magisterial District':
+        # Placeholder for later. Do not pretend the boundary is enforceable until
+        # we normalize/add MDJ fields to shards/cubes.
+        manual_required = True
+        manual_note = 'Magisterial District requested: ' + str(values.get('magisterial') or '').strip()
+    elif t == 'Custom / Other':
+        scope = _parse_scope_text_lines(values.get('custom_scope') or '')
+        manual_note = str(values.get('custom_scope') or '').strip()
+        manual_required = not bool(scope)
+    return scope, manual_required, manual_note
+
+
+def render_public_campaign_signup_request(store: dict):
+    """Public campaign request form with structured address + structured campaign scope."""
     with st.expander("Request Campaign Account", expanded=False):
         st.caption("Submit a campaign account request. A Super Admin must approve it before login is enabled.")
-        with st.form("public_campaign_signup_request"):
-            username = st.text_input("Requested username")
-            pw1 = st.text_input("Password", type="password")
-            pw2 = st.text_input("Confirm password", type="password")
-            campaign_name = st.text_input("Campaign name")
-            office = st.text_input("Office sought")
-            contact_name = st.text_input("Contact name")
-            email = st.text_input("Email")
-            phone = st.text_input("Phone")
-            address = st.text_input("Campaign / billing address")
-            scope_text = st.text_area(
-                "Campaign universe / boundary",
-                value="County: \nMunicipality: ",
-                help="Use one field per line. Example: County: Allegheny    Municipality: Dormont",
-                height=95,
+
+        st.markdown("#### Account")
+        c1, c2 = st.columns(2)
+        with c1:
+            username = st.text_input("Requested username", key="signup_username")
+            pw1 = st.text_input("Password", type="password", key="signup_pw1")
+        with c2:
+            email = st.text_input("Email", key="signup_email")
+            pw2 = st.text_input("Confirm password", type="password", key="signup_pw2")
+
+        st.markdown("#### Campaign Information")
+        c1, c2 = st.columns(2)
+        with c1:
+            campaign_name = st.text_input("Campaign name", key="signup_campaign_name")
+            office = st.text_input("Office sought", key="signup_office")
+            contact_name = st.text_input("Contact name", key="signup_contact_name")
+        with c2:
+            phone = st.text_input("Phone", key="signup_phone")
+            campaign_type = st.selectbox(
+                "Campaign type",
+                [
+                    "Municipal",
+                    "School District",
+                    "Countywide",
+                    "State House",
+                    "State Senate",
+                    "Congressional",
+                    "Magisterial District",
+                    "Statewide",
+                    "Custom / Other",
+                ],
+                key="signup_campaign_type",
+                help="This determines the voter universe Candidate Connect will build for the campaign.",
             )
-            submitted = st.form_submit_button("Submit Campaign Request", type="primary")
+
+        st.markdown("#### Campaign / Billing Address")
+        a1, a2, a3, a4 = st.columns([2.3, 1.2, .6, .8])
+        with a1:
+            street = st.text_input("Street address", key="signup_street")
+        with a2:
+            city = st.text_input("City", key="signup_city")
+        with a3:
+            state = st.text_input("State", value="PA", key="signup_state")
+        with a4:
+            zip_code = st.text_input("ZIP", key="signup_zip")
+
+        st.markdown("#### Campaign Universe / Boundary")
+        st.caption("Select the geographic scope of the campaign. This determines the voter dataset we build after approval.")
+
+        vals = {}
+        if campaign_type == "Municipal":
+            c1, c2 = st.columns(2)
+            counties = _signup_options("County")
+            munis = _signup_options("Municipality")
+            with c1:
+                vals["county"] = st.selectbox("County", [""] + counties, key="signup_scope_county")
+            with c2:
+                vals["municipality"] = st.selectbox("Municipality", [""] + munis, key="signup_scope_municipality")
+        elif campaign_type == "Countywide":
+            counties = _signup_options("County")
+            vals["county"] = st.selectbox("County", [""] + counties, key="signup_scope_countywide")
+        elif campaign_type == "School District":
+            sds = _signup_options("School District")
+            vals["school_district"] = st.selectbox("School District", [""] + sds, key="signup_scope_school_district")
+            st.caption("School Region is intentionally not used because the SURE data is inconsistent.")
+        elif campaign_type == "State House":
+            vals["state_house"] = st.selectbox("State House District", [""] + _signup_options("STH"), key="signup_scope_sth")
+        elif campaign_type == "State Senate":
+            vals["state_senate"] = st.selectbox("State Senate District", [""] + _signup_options("STS"), key="signup_scope_sts")
+        elif campaign_type == "Congressional":
+            vals["congressional"] = st.selectbox("Congressional District", [""] + _signup_options("USC"), key="signup_scope_usc")
+        elif campaign_type == "Magisterial District":
+            vals["magisterial"] = st.text_input("Magisterial District", key="signup_scope_magisterial", help="Placeholder for MDJ district support. Super Admin review required before activation.")
+            st.warning("Magisterial District is a placeholder until MDJ fields are normalized in the data pipeline. This request will need manual Super Admin review before approval.")
+        elif campaign_type == "Statewide":
+            st.info("Statewide campaigns have no geographic boundary. Approval should be limited to authorized statewide clients only.")
+        else:
+            vals["custom_scope"] = st.text_area(
+                "Custom boundary request",
+                value="County: \nMunicipality: ",
+                help="Use one field per line. Example: County: Allegheny    School District: Keystone Oaks SD",
+                height=95,
+                key="signup_scope_custom",
+            )
+
+        submitted = st.button("Submit Campaign Request", key="signup_submit_request", type="primary")
 
         if submitted:
             username_clean = str(username or "").strip().lower()
             cid = _campaign_slug(campaign_name or username_clean)
-            scope = _parse_scope_text_lines(scope_text)
+            scope, manual_boundary_required, manual_note = _signup_scope_for_campaign_type(campaign_type, vals)
             users = store.setdefault("users", {})
             campaigns = store.setdefault("campaigns", {})
+            address = ", ".join([x for x in [str(street or '').strip(), str(city or '').strip(), str(state or '').strip() + (" " + str(zip_code or '').strip() if str(zip_code or '').strip() else "")] if x.strip()])
 
             if not username_clean:
                 st.error("Enter a requested username.")
@@ -2004,19 +2126,30 @@ def render_public_campaign_signup_request(store: dict):
                 st.error("Enter matching passwords.")
             elif not campaign_name:
                 st.error("Campaign name is required.")
-            elif not scope:
-                st.error("Campaign boundary is required. Add at least County, Municipality, Precinct, or District.")
+            elif not email:
+                st.error("Email is required.")
+            elif campaign_type != "Statewide" and not scope and not manual_boundary_required:
+                st.error("Campaign boundary is required. Select the district/geography for this campaign.")
             else:
                 campaigns[cid] = {
                     **(campaigns.get(cid, {}) or {}),
                     "campaign_id": cid,
                     "campaign_name": campaign_name,
+                    "campaign_type": campaign_type,
                     "office": office,
                     "contact_name": contact_name,
                     "email": email,
                     "phone": phone,
                     "address": address,
+                    "billing_address": {
+                        "street": street,
+                        "city": city,
+                        "state": state,
+                        "zip": zip_code,
+                    },
                     "scope_filters": scope,
+                    "manual_boundary_required": bool(manual_boundary_required),
+                    "manual_boundary_note": manual_note,
                     "account_status": "pending_approval",
                     "dataset_status": "not_built",
                     "dataset_base_url": campaign_dataset_base_url(cid),
@@ -2030,7 +2163,19 @@ def render_public_campaign_signup_request(store: dict):
                     "role": "Campaign Admin",
                     "campaign": campaign_name,
                     "campaign_id": cid,
+                    "campaign_type": campaign_type,
+                    "email": email,
+                    "phone": phone,
+                    "address": address,
+                    "billing_address": {
+                        "street": street,
+                        "city": city,
+                        "state": state,
+                        "zip": zip_code,
+                    },
                     "scope_filters": scope,
+                    "manual_boundary_required": bool(manual_boundary_required),
+                    "manual_boundary_note": manual_note,
                     "disabled": True,
                     "pending_approval": True,
                     "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -2044,6 +2189,12 @@ def approve_campaign_request(store: dict, campaign_id: str):
     users = store.setdefault("users", {})
     campaign = campaigns.get(campaign_id) or {}
     if not campaign:
+        return False
+    if campaign.get("manual_boundary_required"):
+        campaign["account_status"] = "pending_manual_boundary"
+        campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        campaigns[campaign_id] = campaign
+        save_security_store(store)
         return False
     campaign["account_status"] = "active"
     campaign["dataset_status"] = campaign.get("dataset_status") if campaign.get("dataset_status") in ("uploaded", "active") else "pending_build"
@@ -2199,6 +2350,7 @@ def build_scope_from_admin_widgets(prefix: str, filter_options: pd.DataFrame, ba
         "USC": "Congressional District",
         "STS": "State Senate District",
         "STH": "State House District",
+    "Magisterial District": "Magisterial District",
         "School District": "School District",
         "School Region": "School Region",
     }
@@ -2279,7 +2431,7 @@ def render_account_admin_workspace(filter_options=None):
         st.info("No campaign records yet.")
 
     if is_super_admin():
-        pending_campaigns = {cid: c for cid, c in campaigns.items() if str(c.get("account_status") or "") in ("pending_approval", "pending_payment", "payment_failed")}
+        pending_campaigns = {cid: c for cid, c in campaigns.items() if str(c.get("account_status") or "") in ("pending_approval", "pending_manual_boundary", "pending_payment", "payment_failed")}
         if pending_campaigns:
             st.markdown("### Pending Campaign Requests")
             pending_rows = []
@@ -2291,6 +2443,7 @@ def render_account_admin_workspace(filter_options=None):
                     "Email": c.get("email", ""),
                     "Scope": scope_summary(c.get("scope_filters") or {}),
                     "Status": c.get("account_status", ""),
+                    "Manual Review": "Yes" if c.get("manual_boundary_required") else "",
                 })
             cc_table(pd.DataFrame(pending_rows), height=220, key="pending_campaign_requests_table")
             selected_pending = st.selectbox("Select pending campaign", [""] + sorted(pending_campaigns.keys()), key="pending_campaign_select")
@@ -2300,6 +2453,8 @@ def render_account_admin_workspace(filter_options=None):
                     if approve_campaign_request(store, selected_pending):
                         st.success("Campaign approved and linked user enabled. Run Step 9, upload campaign datasets, then mark Dataset Status active.")
                         st.rerun()
+                    else:
+                        st.error("This request needs manual boundary review before approval. Edit the campaign scope first, then approve it.")
             with c2:
                 if st.button("Disable Campaign", key="disable_pending_campaign", disabled=not bool(selected_pending)):
                     if disable_campaign_request(store, selected_pending):
@@ -2333,6 +2488,9 @@ def render_account_admin_workspace(filter_options=None):
             existing_campaign = campaigns.get(edit_campaign_id, {}) if edit_campaign_id else {}
             with st.form("campaign_admin_form"):
                 campaign_name = st.text_input("Campaign name", value=existing_campaign.get("campaign_name", ""))
+                campaign_type_options = ["Municipal", "School District", "Countywide", "State House", "State Senate", "Congressional", "Magisterial District", "Statewide", "Custom / Other"]
+                campaign_type_val = existing_campaign.get("campaign_type", "Municipal")
+                campaign_type = st.selectbox("Campaign type", campaign_type_options, index=campaign_type_options.index(campaign_type_val) if campaign_type_val in campaign_type_options else 0)
                 office = st.text_input("Office sought", value=existing_campaign.get("office", ""))
                 contact_name = st.text_input("Contact name", value=existing_campaign.get("contact_name", ""))
                 address = st.text_input("Address", value=existing_campaign.get("address", ""))
@@ -2360,6 +2518,7 @@ def render_account_admin_workspace(filter_options=None):
                     cid = _campaign_slug(edit_campaign_id or campaign_name)
                     rec = upsert_campaign_record(store, cid, {
                         "campaign_name": campaign_name,
+                        "campaign_type": campaign_type,
                         "office": office,
                         "contact_name": contact_name,
                         "address": address,
@@ -2369,6 +2528,8 @@ def render_account_admin_workspace(filter_options=None):
                         "dataset_status": dataset_status,
                         "dataset_base_url": str(dataset_base_url or campaign_dataset_base_url(cid)).rstrip("/"),
                         "scope_filters": campaign_scope,
+                        "manual_boundary_required": False,
+                        "manual_boundary_note": "",
                     })
                     save_security_store(store)
                     if dataset_status == "active" and not str(dataset_base_url or "").strip():
