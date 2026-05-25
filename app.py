@@ -2184,31 +2184,173 @@ def render_public_campaign_signup_request(store: dict):
                 st.success("Request submitted. A Super Admin must approve this campaign before login is enabled.")
 
 
+
+def _campaign_name_from_user(username: str, user: dict) -> str:
+    return str(
+        user.get("campaign")
+        or user.get("campaign_name")
+        or user.get("display_name")
+        or username
+        or ""
+    ).strip()
+
+
+def _ensure_campaign_record_for_user(store: dict, username: str) -> tuple[str, bool]:
+    """Ensure every non-super-admin campaign user has a matching campaigns[campaign_id].
+
+    This is the auto-create bridge:
+      signup/manual account -> campaign record -> Step 9 buildable mini dataset.
+    """
+    users = store.setdefault("users", {})
+    campaigns = store.setdefault("campaigns", {})
+    user = users.get(username) or {}
+    if not user or str(user.get("role") or "") == "Super Admin":
+        return "", False
+
+    campaign_name = _campaign_name_from_user(username, user)
+    scope = user.get("scope_filters") or {}
+    cid = str(user.get("campaign_id") or "").strip()
+    if not cid:
+        cid = _campaign_slug(campaign_name or username)
+        user["campaign_id"] = cid
+
+    existing = campaigns.get(cid) or {}
+    changed = False
+
+    account_status = str(existing.get("account_status") or "").strip()
+    if not account_status:
+        account_status = "pending_approval" if bool(user.get("pending_approval")) or bool(user.get("disabled")) else "active"
+
+    dataset_status = str(existing.get("dataset_status") or "").strip()
+    if account_status == "active" and dataset_status in ("", "not_built", "pending_approval"):
+        dataset_status = "pending_build"
+    elif not dataset_status:
+        dataset_status = "not_built"
+
+    record = dict(existing)
+    defaults = {
+        "campaign_id": cid,
+        "campaign_name": campaign_name,
+        "campaign_type": user.get("campaign_type") or existing.get("campaign_type") or "Custom / Other",
+        "office": user.get("office") or existing.get("office") or "",
+        "contact_name": user.get("display_name") or existing.get("contact_name") or "",
+        "email": user.get("email") or existing.get("email") or "",
+        "phone": user.get("phone") or existing.get("phone") or "",
+        "address": user.get("address") or existing.get("address") or "",
+        "billing_address": user.get("billing_address") or existing.get("billing_address") or {},
+        "scope_filters": scope or existing.get("scope_filters") or {},
+        "manual_boundary_required": bool(existing.get("manual_boundary_required") or user.get("manual_boundary_required", False)),
+        "manual_boundary_note": existing.get("manual_boundary_note") or user.get("manual_boundary_note") or "",
+        "account_status": account_status,
+        "dataset_status": dataset_status,
+        "dataset_base_url": existing.get("dataset_base_url") or campaign_dataset_base_url(cid),
+        "signup_username": existing.get("signup_username") or username,
+        "created_at": existing.get("created_at") or user.get("created_at") or datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    for k, v in defaults.items():
+        if record.get(k) != v:
+            record[k] = v
+            changed = True
+
+    if campaigns.get(cid) != record:
+        campaigns[cid] = record
+        changed = True
+    if users.get(username) != user:
+        users[username] = user
+        changed = True
+
+    return cid, changed
+
+
+def reconcile_security_campaign_records(store: dict) -> bool:
+    """Backfill missing campaign records from existing users and normalize build statuses."""
+    changed = False
+    users = store.setdefault("users", {})
+    campaigns = store.setdefault("campaigns", {})
+
+    for uname, user in list(users.items()):
+        role = str(user.get("role") or "")
+        if role and role != "Super Admin":
+            _, did = _ensure_campaign_record_for_user(store, uname)
+            changed = changed or did
+
+    for cid, campaign in list(campaigns.items()):
+        rec = dict(campaign or {})
+        rec["campaign_id"] = rec.get("campaign_id") or cid
+        rec["dataset_base_url"] = rec.get("dataset_base_url") or campaign_dataset_base_url(cid)
+        status = str(rec.get("account_status") or "").strip().lower()
+        dstatus = str(rec.get("dataset_status") or "").strip().lower()
+        if status == "active" and dstatus in ("", "not_built", "pending_approval"):
+            rec["dataset_status"] = "pending_build"
+        if campaigns.get(cid) != rec:
+            campaigns[cid] = rec
+            changed = True
+
+    return changed
+
+
+
 def approve_campaign_request(store: dict, campaign_id: str):
     campaigns = store.setdefault("campaigns", {})
     users = store.setdefault("users", {})
+    campaign_id = str(campaign_id or "").strip()
+
+    # Auto-create missing campaign record if an older/manual account has the campaign_id
+    # but no campaigns[campaign_id] row yet.
     campaign = campaigns.get(campaign_id) or {}
     if not campaign:
+        for uname, user in list(users.items()):
+            if str(user.get("campaign_id") or "").strip() == campaign_id:
+                _ensure_campaign_record_for_user(store, uname)
+                campaign = campaigns.get(campaign_id) or {}
+                break
+
+    if not campaign:
         return False
+
     if campaign.get("manual_boundary_required"):
         campaign["account_status"] = "pending_manual_boundary"
         campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
         campaigns[campaign_id] = campaign
         save_security_store(store)
         return False
+
+    campaign["campaign_id"] = campaign.get("campaign_id") or campaign_id
     campaign["account_status"] = "active"
-    campaign["dataset_status"] = campaign.get("dataset_status") if campaign.get("dataset_status") in ("uploaded", "active") else "pending_build"
+    campaign["dataset_status"] = "pending_build" if str(campaign.get("dataset_status") or "").strip() not in ("uploaded", "active") else campaign.get("dataset_status")
+    campaign["dataset_base_url"] = campaign.get("dataset_base_url") or campaign_dataset_base_url(campaign_id)
     campaign["approved_at"] = datetime.now().isoformat(timespec="seconds")
     campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
     campaigns[campaign_id] = campaign
-    for uname, user in users.items():
-        if str(user.get("campaign_id") or "") == str(campaign_id):
+
+    linked_any = False
+    for uname, user in list(users.items()):
+        if str(user.get("campaign_id") or "").strip() == str(campaign_id) or str(user.get("campaign") or "").strip() == str(campaign.get("campaign_name") or "").strip():
+            user["campaign_id"] = campaign_id
             user["disabled"] = False
             user["pending_approval"] = False
             user["scope_filters"] = campaign.get("scope_filters") or user.get("scope_filters") or {}
             user["campaign"] = campaign.get("campaign_name") or user.get("campaign") or ""
+            user["campaign_type"] = campaign.get("campaign_type") or user.get("campaign_type") or ""
             user["updated_at"] = datetime.now().isoformat(timespec="seconds")
             users[uname] = user
+            linked_any = True
+
+    # If this was a campaign signup with username saved on campaign but no user linked, link it.
+    signup_username = str(campaign.get("signup_username") or "").strip().lower()
+    if signup_username and signup_username in users and not linked_any:
+        user = users[signup_username]
+        user["campaign_id"] = campaign_id
+        user["disabled"] = False
+        user["pending_approval"] = False
+        user["scope_filters"] = campaign.get("scope_filters") or user.get("scope_filters") or {}
+        user["campaign"] = campaign.get("campaign_name") or user.get("campaign") or ""
+        user["campaign_type"] = campaign.get("campaign_type") or user.get("campaign_type") or ""
+        user["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        users[signup_username] = user
+
+    reconcile_security_campaign_records(store)
     save_security_store(store)
     return True
 
@@ -2383,6 +2525,8 @@ def render_account_admin_workspace(filter_options=None):
     st.caption("Manage Candidate Connect accounts and campaign scopes. Campaign-scoped users cannot see, search, export, or report outside their assigned universe.")
 
     store = load_security_store()
+    if reconcile_security_campaign_records(store):
+        save_security_store(store)
     users = store.setdefault("users", {})
     me = current_user()
     my_campaign = str(me.get("campaign") or "").strip()
@@ -2411,6 +2555,14 @@ def render_account_admin_workspace(filter_options=None):
 
     st.markdown("### Campaigns / Mini Datasets")
     st.caption("Phase 2A: define campaign records now. Once its mini dataset is built/uploaded, campaign users can read the smaller dataset instead of statewide.")
+    if is_super_admin():
+        if st.button("Repair / Sync Campaign Records", key="repair_campaign_records_btn"):
+            if reconcile_security_campaign_records(store):
+                save_security_store(store)
+                st.success("Campaign records synced from users. Download/upload security_store.json, then run Step 9.")
+                st.rerun()
+            else:
+                st.info("Campaign records already look synced.")
 
     campaigns = store.setdefault("campaigns", {})
     camp_rows = []
@@ -2594,13 +2746,39 @@ def render_account_admin_workspace(filter_options=None):
         linked_campaign_record = ((store.get("campaigns") or {}).get(campaign_id, {}) or {}) if campaign_id else {}
         campaign_name_final = str(campaign or linked_campaign_record.get("campaign_name") or "").strip()
 
+        # Auto-create/link a campaign mini-dataset record for campaign-scoped users
+        # so Step 9 always has something buildable.
+        final_campaign_id = str(campaign_id or "").strip()
+        if role != "Super Admin" and not final_campaign_id:
+            final_campaign_id = _campaign_slug(campaign_name_final or username)
+            store.setdefault("campaigns", {}).setdefault(final_campaign_id, {
+                "campaign_id": final_campaign_id,
+                "campaign_name": campaign_name_final or username,
+                "campaign_type": "Custom / Other",
+                "office": "",
+                "contact_name": display_name or username,
+                "email": "",
+                "phone": "",
+                "address": "",
+                "billing_address": {},
+                "scope_filters": scope,
+                "manual_boundary_required": False,
+                "manual_boundary_note": "",
+                "account_status": "active" if not disabled else "disabled",
+                "dataset_status": "pending_build" if not disabled else "disabled",
+                "dataset_base_url": campaign_dataset_base_url(final_campaign_id),
+                "signup_username": username,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            })
+
         prior = users.get(username, {})
         record = dict(prior)
         record.update({
             "display_name": display_name or username,
             "role": role,
             "campaign": campaign_name_final,
-            "campaign_id": str(campaign_id or "").strip(),
+            "campaign_id": final_campaign_id,
             "scope_filters": scope,
             "disabled": bool(disabled),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -2610,8 +2788,9 @@ def render_account_admin_workspace(filter_options=None):
         if "created_at" not in record:
             record["created_at"] = datetime.now().isoformat(timespec="seconds")
         users[username] = record
+        reconcile_security_campaign_records(store)
         save_security_store(store)
-        st.success("Account saved. The scope is now a hard boundary for filters, lookup, exports, reports, and saved universes.")
+        st.success("Account saved. The scope is now a hard boundary and a campaign mini-dataset record exists for Step 9.")
         st.rerun()
 
     st.markdown("### Backup / Restore")
