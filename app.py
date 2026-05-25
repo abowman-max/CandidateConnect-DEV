@@ -7737,3 +7737,186 @@ header[data-testid="stHeader"]{visibility:visible!important;height:auto!importan
 </style>
 """, unsafe_allow_html=True)
 
+
+# Final UI polish patch: login card, readable buttons/icons, compact party/gender bars.
+st.markdown("""
+<style>
+/* Login/setup professional card layout */
+div[data-testid="stForm"] {
+    background: #f8f4ea !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+    padding: 22px 26px !important;
+}
+
+/* Login/setup page content should be centered, not left-floating */
+.cc-login-wrap,
+.cc-login-card,
+.cc-auth-card,
+.cc-setup-card {
+    max-width: 460px !important;
+    margin: 0 auto !important;
+}
+
+/* Streamlit login form fallback: center the first form on auth pages */
+[data-testid="stVerticalBlock"]:has(div[data-testid="stForm"]) {
+    max-width: 520px !important;
+}
+
+/* Active buttons: always readable */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #9f151c) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #6f0d13 !important;
+    font-weight: 900 !important;
+    opacity: 1 !important;
+}
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *,
+button[data-testid="baseButton-secondary"]:not(:disabled) *,
+button[kind="primary"]:not(:disabled) *,
+button[kind="secondary"]:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+/* Login button was dark navy with dark text; force login forms to red/white too */
+div[data-testid="stForm"] .stButton > button:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #9f151c) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    min-width: 88px !important;
+}
+div[data-testid="stForm"] .stButton > button:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Disabled buttons: readable but clearly disabled */
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+    background: #d8cfc0 !important;
+    color: #222222 !important;
+    -webkit-text-fill-color: #222222 !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: .75 !important;
+}
+.stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+    color: #222222 !important;
+    -webkit-text-fill-color: #222222 !important;
+}
+
+/* Password show/hide icon: readable navy on white */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border-left: 1px solid #d0c7b7 !important;
+    opacity: 1 !important;
+}
+button[aria-label*="password"] svg,
+button[title*="password"] svg,
+[data-testid="stTextInputRootElement"] button svg,
+[data-baseweb="input"] button svg {
+    fill: #071d3a !important;
+    color: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Compact party/gender bar charts. Each item stays on one row. */
+.cc-party-bars {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    margin-top: 8px !important;
+    width: 100% !important;
+}
+.cc-party-bar-row {
+    display: grid !important;
+    grid-template-columns: 150px minmax(180px, 1fr) 140px !important;
+    align-items: center !important;
+    gap: 10px !important;
+    min-height: 24px !important;
+    margin: 0 !important;
+}
+.cc-party-bar-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    color: #071d3a !important;
+    white-space: nowrap !important;
+}
+.cc-party-bar-track {
+    height: 12px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+    min-width: 120px !important;
+}
+.cc-party-bar-fill {
+    height: 100% !important;
+    border-radius: 999px !important;
+}
+.cc-party-bar-value {
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    color: #071d3a !important;
+    white-space: nowrap !important;
+    text-align: left !important;
+}
+.cc-swatch {
+    width: 11px !important;
+    height: 11px !important;
+    min-width: 11px !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+}
+
+/* Give chart cards enough room, but not giant vertical waste */
+.cc-chart-card,
+.cc-card {
+    overflow: visible !important;
+}
+.cc-chart-card .cc-party-bars,
+.cc-card .cc-party-bars {
+    padding-bottom: 4px !important;
+}
+
+/* Keep table colors light/zebra even with sortable dataframe fallback */
+[data-testid="stDataFrame"] {
+    background: #ffffff !important;
+    border: 1px solid #9f151c !important;
+    border-radius: 10px !important;
+}
+[data-testid="stDataFrame"] * {
+    color: #071d3a !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 900 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
