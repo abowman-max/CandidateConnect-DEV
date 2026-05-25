@@ -7,7 +7,6 @@ import json
 import base64
 import re
 import hashlib
-import html
 from datetime import datetime
 from pathlib import Path
 
@@ -5698,18 +5697,11 @@ def render_voter_lookup_workspace():
         r = apply_local_correction(pd.DataFrame([detail]).iloc[0])
 
         st.markdown(f"## {smart_title(full_name(r))}")
-        _voter_metrics = [
-            ("Party", cc_text(r.get("Party", "")) or "—"),
-            ("Gender", cc_text(r.get("Gender", "")) or "—"),
-            ("Age", cc_text(r.get("Age", "")) or "—"),
-            ("DOB", cc_text(r.get("DOB", "")) or "—"),
-        ]
-        st.markdown(
-            '<div class="cc-voter-mini-metrics">' +
-            ''.join([f'<div class="cc-voter-mini-card"><div class="cc-voter-mini-label">{html.escape(str(k))}</div><div class="cc-voter-mini-value">{html.escape(str(v))}</div></div>' for k, v in _voter_metrics]) +
-            '</div>',
-            unsafe_allow_html=True,
-        )
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Party", cc_text(r.get("Party", "")) or "—")
+        m2.metric("Gender", cc_text(r.get("Gender", "")) or "—")
+        m3.metric("Age", cc_text(r.get("Age", "")) or "—")
+        m4.metric("DOB", cc_text(r.get("DOB", "")) or "—")
         pdf_key = f"voter_pdf_bytes_{selected_id}"
         pdf_name_key = f"voter_pdf_name_{selected_id}"
         pc1, pc2 = st.columns([0.35, 1.65])
@@ -6489,7 +6481,6 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _count_cube_columns_for_base(base_url: str) -> list[str]:
-    """Return count_cube columns for the active dataset base."""
     try:
         manifest = _load_manifest_from_base(base_url)
         key = ((manifest.get("speed", {}) or {}).get("tables", {}) or {}).get("count_cube", "speed/count_cube.parquet")
@@ -6505,16 +6496,12 @@ def _count_cube_columns_for_base(base_url: str) -> list[str]:
                     pass
             return [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_lit(url)})").fetchall()]
         finally:
-            try:
-                con.close()
-            except Exception:
-                pass
+            con.close()
     except Exception:
         return []
 
 
 def _cube_col_name(requested: str, available_cols: list[str]) -> str:
-    """Map canonical app field names to whatever exists in the current count cube."""
     aliases = {
         "County": ["County", "county"],
         "Municipality": ["Municipality", "municipality", "Municipality_1"],
@@ -6551,12 +6538,6 @@ def _cube_expr(requested: str, available_cols: list[str], default: str = "NULL")
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, limit: int = 250) -> pd.DataFrame:
-    """One-pass geography/jurisdiction profile table from count_cube.
-
-    Robust for campaign mini datasets: older mini count cubes may not have every
-    strategic column, so missing columns are treated as zero/blank instead of
-    returning an empty breakdown.
-    """
     active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
     if not re.fullmatch(r"[A-Za-z0-9_ /-]+", str(breakdown)):
@@ -6631,8 +6612,7 @@ def _area_breakdown_cube(active_json: str, special_json: str, breakdown: str, li
         df["MB Prospect %"] = df.apply(lambda r: _area_pct(r["MBProspects"], r["Total"]), axis=1)
         df["MB Return %"] = df.apply(lambda r: _area_pct(r["MBReturned"], r["MBSent"]), axis=1)
         return df[["Area", "Total", "R", "D", "O", "R %", "D %", "O %", "Female", "Male", "Age65Plus", "65+ %", "StrongGeneral", "Strong Gen %", "MBProspects", "MB Prospect %", "MBApplicants", "MBSent", "MBReturned", "MB Return %"]]
-    except Exception as e:
-        st.caption(f"Breakdown unavailable: {e}")
+    except Exception:
         return pd.DataFrame()
     finally:
         try:
@@ -8448,37 +8428,3 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     unsafe_allow_html=True,
 )
 
-
-st.markdown("""
-<style>
-.cc-voter-mini-metrics {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(110px, 1fr));
-    gap: 10px;
-    margin: 6px 0 14px 0;
-}
-.cc-voter-mini-card {
-    background: #f8f4ea !important;
-    border: 1px solid #b9ad99 !important;
-    border-radius: 12px !important;
-    padding: 10px 12px !important;
-    box-shadow: 0 4px 10px rgba(7,29,58,.08) !important;
-}
-.cc-voter-mini-label {
-    color: #5f6b7a !important;
-    font-size: 9pt !important;
-    font-weight: 900 !important;
-    letter-spacing: .05em !important;
-    text-transform: uppercase !important;
-}
-.cc-voter-mini-value {
-    color: #071d3a !important;
-    font-size: 13pt !important;
-    font-weight: 950 !important;
-    margin-top: 3px !important;
-}
-@media (max-width: 900px) {
-    .cc-voter-mini-metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
-}
-</style>
-""", unsafe_allow_html=True)
