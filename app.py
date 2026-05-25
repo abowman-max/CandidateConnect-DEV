@@ -1104,7 +1104,7 @@ def dataframe_to_excel_bytes(df: pd.DataFrame, area_level: str = "Municipality")
 
 
 def render_group_bar(active: dict, field: str, title: str, order: list[str] | None = None):
-    """Render Party/Gender charts in a fixed-height component so Streamlit cannot clip the bottom row."""
+    """Native Streamlit grouped Party/Gender bars. No iframe/component, so no clipping."""
     special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
     df = duckdb_count_cube_group_filtered(
         json.dumps(count_safe_filters(active or {}), sort_keys=True),
@@ -1155,121 +1155,9 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
         lab = str(r["label"])
         label = _display_label(lab)
         val = int(r["Voters"] or 0)
-        pct = val / total * 100
-        width = max(1, min(100, pct))
         color = _bar_color(lab)
-        rows.append(
-            f'<div class="row">'
-            f'<div class="label"><span class="dot" style="background:{color};"></span>{html_escape(label)}</div>'
-            f'<div class="track"><div class="fill" style="width:{width:.1f}%; background:{color};"></div></div>'
-            f'<div class="value">{val:,} ({pct:.1f}%)</div>'
-            f'</div>'
-        )
-
-    # Use a Streamlit component with an explicit height. st.markdown can be clipped by
-    # Streamlit's HTML height estimation inside columns/cards.
-    height = 210 + max(0, len(rows) - 3) * 30
-    html_doc = f"""
-    <html>
-    <head>
-      <style>
-        html, body {{
-          margin: 0;
-          padding: 0;
-          background: transparent;
-          overflow: hidden;
-          font-family: Arial, Helvetica, sans-serif;
-          color: #071d3a;
-        }}
-        .card {{
-          box-sizing: border-box;
-          width: 100%;
-          min-height: {height - 8}px;
-          background: #f8f4ea;
-          border: 1px solid #b9ad99;
-          border-radius: 12px;
-          box-shadow: 0 8px 18px rgba(7,29,58,.12);
-          padding: 16px 20px 18px 20px;
-          overflow: visible;
-        }}
-        h3 {{
-          margin: 0 0 8px 0;
-          color: #071d3a;
-          font-size: 22px;
-          font-weight: 950;
-          line-height: 1.1;
-        }}
-        .total {{
-          color: #071d3a;
-          font-weight: 950;
-          font-size: 15px;
-          margin: 0 0 10px 0;
-        }}
-        .total span {{
-          color: #5f6b7a;
-          font-size: 12px;
-          margin-left: 4px;
-        }}
-        .bars {{
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          width: 100%;
-        }}
-        .row {{
-          display: grid;
-          grid-template-columns: 150px minmax(140px, 1fr) 135px;
-          gap: 10px;
-          align-items: center;
-          min-height: 22px;
-        }}
-        .label {{
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          color: #071d3a;
-          font-weight: 900;
-          font-size: 13px;
-          line-height: 1.1;
-          white-space: nowrap;
-        }}
-        .dot {{
-          display: inline-block;
-          width: 10px;
-          height: 10px;
-          min-width: 10px;
-          border-radius: 50%;
-        }}
-        .track {{
-          height: 10px;
-          border-radius: 999px;
-          background: #071d3a;
-          overflow: hidden;
-        }}
-        .fill {{
-          height: 100%;
-          border-radius: 999px;
-        }}
-        .value {{
-          color: #071d3a;
-          font-weight: 900;
-          font-size: 13px;
-          line-height: 1.1;
-          white-space: nowrap;
-        }}
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <h3>{html_escape(title)}</h3>
-        <div class="total">{int(total):,}<span>Total</span></div>
-        <div class="bars">{''.join(rows)}</div>
-      </div>
-    </body>
-    </html>
-    """
-    components.html(html_doc, height=height, scrolling=False)
-
+        rows.append((label, val, color))
+    _cc_bar_component(title, rows, int(total))
 
 
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
@@ -2988,38 +2876,36 @@ def render_metrics(summary, label=""):
 
 
 def _cc_bar_component(title: str, rows: list[tuple[str, int, str]], total: int, key: str | None = None):
-    """Render stable colored bars in an isolated component so Streamlit CSS cannot turn it into code."""
+    """Native Streamlit Party/Gender bar card.
+
+    This intentionally avoids components.html/iframes. Streamlit was clipping the
+    bottom of the HTML iframe cards, especially inside columns. Rendering each
+    row as its own Streamlit markdown block lets the page grow naturally.
+    """
     total = int(total or 0)
-    safe_title = html.escape(str(title))
-    row_html = []
-    for label, value, color in rows:
-        value = int(value or 0)
-        pct_val = (value / total * 100) if total else 0
-        row_html.append(f"""
-        <div class=\"ccbar-row\">
-          <div class=\"ccbar-label\"><span class=\"ccbar-swatch\" style=\"background:{color}\"></span>{html.escape(str(label))}</div>
-          <div class=\"ccbar-track\"><div class=\"ccbar-fill\" style=\"width:{pct_val:.1f}%;background:{color};\"></div></div>
-          <div class=\"ccbar-value\">{value:,} ({pct_val:.1f}%)</div>
-        </div>""")
-    doc = f"""
-    <html><head><style>
-      html, body {{ margin:0; padding:0; background:#f8f4ea; color:#071d3a; font-family:Arial, Helvetica, sans-serif; }}
-      .ccbar-card {{ box-sizing:border-box; width:100%; min-height:230px; background:#f8f4ea; border:1px solid #b9ad99; border-radius:12px; padding:16px 18px; }}
-      h3 {{ margin:0 0 10px 0; font-size:21px; line-height:1.15; color:#071d3a; font-weight:900; }}
-      .ccbar-total {{ display:flex; align-items:baseline; gap:5px; margin:3px 0 12px 0; color:#071d3a; }}
-      .ccbar-total b {{ font-size:16px; font-weight:900; }}
-      .ccbar-total span {{ font-size:12px; font-weight:800; color:#5f6b7a; }}
-      .ccbar-row {{ display:grid; grid-template-columns: 220px minmax(160px, 1fr) 145px; gap:12px; align-items:center; margin:10px 0; }}
-      .ccbar-label {{ display:flex; gap:10px; align-items:center; font-size:14px; font-weight:800; color:#071d3a; min-width:0; }}
-      .ccbar-swatch {{ width:14px; height:14px; border-radius:50%; flex:0 0 auto; }}
-      .ccbar-track {{ height:14px; border-radius:999px; background:#071d3a; overflow:hidden; }}
-      .ccbar-fill {{ height:100%; border-radius:999px; }}
-      .ccbar-value {{ text-align:right; font-size:14px; font-weight:900; color:#071d3a; white-space:nowrap; }}
-      @media(max-width:700px){{ .ccbar-row{{grid-template-columns: 1fr; gap:5px;}} .ccbar-value{{text-align:left;}} }}
-    </style></head><body>
-      <div class=\"ccbar-card\"><h3>{safe_title}</h3><div class=\"ccbar-total\"><b>{total:,}</b><span>Total</span></div>{''.join(row_html)}</div>
-    </body></html>"""
-    components.html(doc, height=245, scrolling=False)
+    with st.container(border=True):
+        st.markdown(f"### {html.escape(str(title))}")
+        st.markdown(f"<div class='cc-native-total'><b>{total:,}</b> <span>Total</span></div>", unsafe_allow_html=True)
+
+        for label, value, color in rows:
+            value = int(value or 0)
+            pct_val = (value / total * 100) if total else 0
+            width = max(1, min(100, pct_val))
+            st.markdown(
+                f"""
+                <div class="cc-native-bar-row">
+                    <div class="cc-native-bar-label">
+                        <span class="cc-native-dot" style="background:{color};"></span>
+                        <span>{html.escape(str(label))}</span>
+                    </div>
+                    <div class="cc-native-bar-track">
+                        <div class="cc-native-bar-fill" style="width:{width:.1f}%; background:{color};"></div>
+                    </div>
+                    <div class="cc-native-bar-value">{value:,} ({pct_val:.1f}%)</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_party_chart(summary, title="Party Breakdown"):
@@ -8475,6 +8361,70 @@ iframe[title="streamlit.components.v1.html"] {
   border: 0 !important;
   background: transparent !important;
   margin-bottom: 12px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Native Party/Gender chart rows: no iframe, no clipping.
+st.markdown("""
+<style>
+.cc-native-total {
+    color: #071d3a !important;
+    font-weight: 950 !important;
+    font-size: 15px !important;
+    margin: 0 0 10px 0 !important;
+}
+.cc-native-total span {
+    color: #5f6b7a !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+}
+.cc-native-bar-row {
+    display: grid !important;
+    grid-template-columns: 155px minmax(160px, 1fr) 140px !important;
+    gap: 10px !important;
+    align-items: center !important;
+    margin: 8px 0 10px 0 !important;
+    min-height: 22px !important;
+}
+.cc-native-bar-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    color: #071d3a !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+}
+.cc-native-dot {
+    width: 11px !important;
+    height: 11px !important;
+    min-width: 11px !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+}
+.cc-native-bar-track {
+    height: 11px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+}
+.cc-native-bar-fill {
+    height: 100% !important;
+    border-radius: 999px !important;
+}
+.cc-native-bar-value {
+    color: #071d3a !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+}
+@media (max-width: 850px) {
+    .cc-native-bar-row {
+        grid-template-columns: 1fr !important;
+        gap: 4px !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
