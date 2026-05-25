@@ -1108,7 +1108,7 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
     """Native Streamlit grouped Party/Gender bars. No iframe/component, so no clipping."""
     special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
     df = duckdb_count_cube_group_filtered(
-        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
         json.dumps(special or {}, sort_keys=True),
         field,
         20,
@@ -1765,6 +1765,74 @@ def save_security_store(store: dict) -> bool:
     except Exception:
         pass
     return True
+
+
+def campaign_boundary_filters() -> dict:
+    """Return the logged-in user's fixed campaign boundary.
+
+    This is separate from the active working universe. It should always be applied
+    when building left-pane filter option lists, so campaign users cannot browse
+    option values outside their assigned campaign universe.
+    """
+    try:
+        user = current_user() or {}
+        if is_super_admin():
+            return {}
+        boundary = user.get("scope_filters") or {}
+        if not isinstance(boundary, dict):
+            return {}
+        return {k: v for k, v in boundary.items() if v not in (None, "", [], {})}
+    except Exception:
+        return {}
+
+
+
+def option_filters_for_field(current_filters: dict | None, field: str) -> dict:
+    """Filters to use when populating one dropdown's options.
+
+    The field being populated is removed so users can change that selection,
+    but the campaign boundary is immediately re-applied afterward. This prevents
+    values outside the campaign scope from appearing in the left pane.
+    """
+    f = dict(current_filters or {})
+    f.pop(field, None)
+    return with_campaign_boundary(f)
+
+
+def with_campaign_boundary(filters: dict | None = None) -> dict:
+    """Merge user-selected filters with the immutable campaign boundary."""
+    merged = dict(filters or {})
+    for k, v in (campaign_boundary_filters() or {}).items():
+        merged[k] = v
+    return merged
+
+
+def enforce_campaign_boundary_on_session_filters():
+    """Keep visible Create Universe filters inside the campaign boundary."""
+    try:
+        boundary = campaign_boundary_filters()
+        if not boundary:
+            return
+        for k, v in boundary.items():
+            vals = v if isinstance(v, list) else [v]
+            vals = [x for x in vals if str(x).strip()]
+            if not vals:
+                continue
+
+            # Common session-state containers used by this app over time.
+            for container_key in ("active_filters", "filters", "current_filters", "universe_filters"):
+                obj = st.session_state.get(container_key)
+                if isinstance(obj, dict):
+                    obj[k] = vals
+                    st.session_state[container_key] = obj
+
+            # Direct widget/session keys.
+            for key in (k, f"filter_{k}", f"{k}_filter", f"cu_{k}", f"create_{k}", f"geo_{k}"):
+                if key in st.session_state:
+                    st.session_state[key] = vals
+    except Exception:
+        return
+
 
 def current_user() -> dict:
     return dict(st.session_state.get("auth_user") or {})
@@ -3690,7 +3758,7 @@ def quick_counts(active: dict):
     # filters are selected.
     try:
         summary = duckdb_count_cube_summary(
-            json.dumps(count_safe_filters(active or {}), sort_keys=True),
+            json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
             json.dumps({}, sort_keys=True),
         )
         return summary, None
@@ -5946,7 +6014,7 @@ def _area_group_df(active: dict, field: str, limit: int = 20) -> pd.DataFrame:
     try:
         special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
         df = duckdb_count_cube_group_filtered(
-            json.dumps(count_safe_filters(active or {}), sort_keys=True),
+            json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
             json.dumps(special or {}, sort_keys=True),
             field,
             int(limit),
@@ -6805,7 +6873,7 @@ def render_area_intelligence_workspace():
     )
 
     breakdown_df = _area_breakdown_cube(
-        json.dumps(count_safe_filters(active or {}), sort_keys=True),
+        json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
         json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
         breakdown,
         300,
@@ -6834,7 +6902,7 @@ def render_area_intelligence_workspace():
             cc_table(v4a_df, height=220, key=special_key("area_tbl_v4a"))
             st.markdown("#### Historical Turnout by Party")
             turnout_df = _area_turnout_by_party(
-                json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
                 json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
                 14,
             )
@@ -6851,12 +6919,12 @@ def render_area_intelligence_workspace():
         if prep_clicked:
             with st.spinner("Preparing Area Intelligence report..."):
                 turnout_df = _area_turnout_by_party(
-                    json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                    json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
                     json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
                     14,
                 )
                 mb_turnout_df = _area_mail_ballot_turnout_by_party(
-                    json.dumps(count_safe_filters(active or {}), sort_keys=True),
+                    json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True),
                     json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True),
                     12,
                 )
@@ -7531,7 +7599,7 @@ def render_output_buttons(active):
             with c2:
                 st.markdown("### Counts by Area")
                 area_level_ov = st.selectbox("Area table", ["County", "Municipality", "Precinct", "School District", "School Region"], key=special_key("output_overview_area"))
-                area_df_ov = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(active or {}), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_level_ov, 200)
+                area_df_ov = duckdb_count_cube_group_filtered(json.dumps(count_safe_filters(with_campaign_boundary(active or {})), sort_keys=True), json.dumps({k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}, sort_keys=True), area_level_ov, 200)
                 if not area_df_ov.empty:
                     area_df_ov = area_df_ov.rename(columns={"label": area_level_ov})
                     area_df_ov["Voters"] = area_df_ov["Voters"].fillna(0).astype(int)
