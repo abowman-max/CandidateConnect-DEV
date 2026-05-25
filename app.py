@@ -7210,3 +7210,442 @@ _ = st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
 pass
 
 
+# Final Candidate Connect theme remediation based on the UI design template.
+# This is intentionally loaded last so it fixes color/layout conflicts without changing app logic.
+st.markdown("""
+<style>
+:root {
+  color-scheme: light !important;
+  --cc-red: #9f151c;
+  --cc-red-dark: #6f0d13;
+  --cc-red-hover: #7f1016;
+  --cc-blue: #071d3a;
+  --cc-blue-soft: #0b2545;
+  --cc-green: #246b2f;
+  --cc-beige: #efe8d8;
+  --cc-beige-2: #f8f4ea;
+  --cc-beige-row: #f3eadc;
+  --cc-gray: #5f6b7a;
+  --cc-border: #9f151c;
+}
+
+/* Page, content, and readable text */
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+  background: var(--cc-beige) !important;
+  color: var(--cc-blue) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 10pt !important;
+}
+.main .block-container, [data-testid="stMain"] .block-container, .block-container {
+  max-width: 1320px !important;
+  margin-left: 0 !important;
+  margin-right: auto !important;
+  padding-left: 1.5rem !important;
+  padding-right: 1.25rem !important;
+}
+h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
+  color: var(--cc-blue) !important;
+}
+small, .stCaption, [data-testid="stCaptionContainer"] {
+  color: var(--cc-gray) !important;
+}
+
+/* Header and sidebar */
+.cc-global-header {
+  background: var(--cc-beige) !important;
+  border-bottom: 2px solid var(--cc-red) !important;
+}
+.cc-global-redbar {
+  background: var(--cc-red) !important;
+  border-color: var(--cc-red-dark) !important;
+}
+.cc-global-tagline,
+.cc-global-tagline span {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
+  color: var(--cc-blue) !important;
+}
+[data-testid="stSidebar"], section[data-testid="stSidebar"] {
+  background: #e6ddcc !important;
+  color: var(--cc-blue) !important;
+  border-right: 2px solid var(--cc-red) !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
+[data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
+  color: var(--cc-blue) !important;
+}
+
+/* Action buttons: dark red background, white text. Does not affect tabs. */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled) {
+  background: linear-gradient(180deg, #b01822, var(--cc-red)) !important;
+  background-color: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid var(--cc-red-dark) !important;
+  border-radius: 9px !important;
+  font-weight: 850 !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  min-height: 34px !important;
+  padding: 6px 12px !important;
+  line-height: 1.15 !important;
+}
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *,
+button[data-testid="baseButton-secondary"]:not(:disabled) *,
+button[kind="primary"]:not(:disabled) *,
+button[kind="secondary"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+.stButton > button:not(:disabled):hover,
+div[data-testid="stDownloadButton"] > button:not(:disabled):hover,
+button[data-testid="baseButton-primary"]:not(:disabled):hover,
+button[data-testid="baseButton-secondary"]:not(:disabled):hover {
+  background: linear-gradient(180deg, var(--cc-red), var(--cc-red-dark)) !important;
+  background-color: var(--cc-red-hover) !important;
+}
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled,
+button[data-testid="baseButton-primary"]:disabled,
+button[data-testid="baseButton-secondary"]:disabled,
+button[kind="primary"]:disabled,
+button[kind="secondary"]:disabled {
+  background: #d8cfc0 !important;
+  background-color: #d8cfc0 !important;
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: 1 !important;
+}
+.stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+}
+
+/* Sidebar nav buttons remain compact */
+[data-testid="stSidebar"] .stButton > button {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  width: 100% !important;
+  margin: 0 0 4px 0 !important;
+  padding: 5px 9px !important;
+  border-radius: 8px !important;
+}
+
+/* Download buttons can use same red unless disabled; keep readable */
+div[data-testid="stDownloadButton"] > button:not(:disabled) {
+  background: linear-gradient(180deg, #b01822, var(--cc-red)) !important;
+}
+
+/* Tabs must always look like tabs, not buttons */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  font-weight: 900 !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+  background-color: var(--cc-red) !important;
+  height: 4px !important;
+}
+
+/* Forms and dropdowns */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+textarea,
+input {
+  background: #ffffff !important;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  border-color: #111111 !important;
+  caret-color: #000000 !important;
+}
+input::placeholder,
+textarea::placeholder,
+[data-baseweb="input"] input::placeholder {
+  color: #5f6b7a !important;
+  -webkit-text-fill-color: #5f6b7a !important;
+  opacity: 1 !important;
+}
+[data-baseweb="select"] input,
+[data-baseweb="select"] span,
+[data-baseweb="select"] div {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+}
+[role="option"], [role="option"] * {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[role="option"]:hover,
+[role="option"][aria-selected="true"] {
+  background: #f1e7d6 !important;
+  color: var(--cc-blue) !important;
+}
+[data-baseweb="tag"] {
+  background: #e5e0d8 !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #b9ad99 !important;
+}
+[data-baseweb="tag"] * {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-testid="stCheckbox"] label,
+[data-testid="stCheckbox"] label *,
+[data-testid="stRadio"] label,
+[data-testid="stRadio"] label *,
+[data-testid="stToggle"] label,
+[data-testid="stToggle"] label * {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--cc-blue) !important;
+}
+
+/* Password eye icon and icon wells */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  border: 0 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: var(--cc-blue) !important;
+  fill: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+
+/* Expander headers: beige/light, not black */
+details,
+div[data-testid="stExpander"],
+div[data-testid="stExpander"] > details {
+  background: var(--cc-beige-2) !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid rgba(159,21,28,.35) !important;
+  border-radius: 10px !important;
+}
+details > summary,
+details > summary *,
+div[data-testid="stExpander"] summary,
+div[data-testid="stExpander"] summary * {
+  background: var(--cc-beige-2) !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  font-weight: 850 !important;
+}
+details[open] > summary,
+div[data-testid="stExpander"] details[open] > summary {
+  border-bottom: 1px solid rgba(159,21,28,.25) !important;
+}
+
+/* Cards, alerts, info bubbles */
+.cc-card, .cc-home-card, .cc-metric, .cc-icon-metric,
+div[data-testid="stForm"] {
+  background: var(--cc-beige-2) !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 12px !important;
+}
+.cc-note, .cc-verify, .cc-empty-table, .stAlert {
+  background: #d9e8f8 !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #8aa3bf !important;
+}
+.cc-note *, .cc-verify *, .cc-empty-table *, .stAlert * {
+  color: var(--cc-blue) !important;
+}
+
+/* Donut charts: restore the actual colored segments */
+.cc-donut {
+  width: 150px !important;
+  height: 150px !important;
+  border-radius: 50% !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  background: conic-gradient(
+    #d51f2a 0 calc(var(--r) * 1%),
+    #2454d6 calc(var(--r) * 1%) calc((var(--r) + var(--d)) * 1%),
+    #4c9a2a calc((var(--r) + var(--d)) * 1%) 100%
+  ) !important;
+  box-shadow: 0 12px 22px rgba(7,29,58,.18) !important;
+}
+.cc-donut:after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 40px !important;
+  border-radius: 50% !important;
+  background: var(--cc-blue) !important;
+}
+.cc-donut-center,
+.cc-donut-center *,
+.cc-donut-center div,
+.cc-donut-center span {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+.cc-swatch[style*="#d51f2a"] { background: #d51f2a !important; }
+.cc-swatch[style*="#2454d6"] { background: #2454d6 !important; }
+.cc-swatch[style*="#4c9a2a"] { background: #4c9a2a !important; }
+
+/* Age bars/charts */
+.cc-age-bar-bg {
+  background: var(--cc-blue) !important;
+}
+.cc-age-bar {
+  background: linear-gradient(90deg, #8b0d13, #ef4444) !important;
+}
+.cc-age-row, .cc-age-row *, .cc-legend-row, .cc-legend-row * {
+  color: var(--cc-blue) !important;
+}
+
+/* Tables */
+.cc-table-wrap, .cc-scroll-table, [data-testid="stDataFrame"], [data-testid="stTable"] {
+  background: #ffffff !important;
+  border: 1px solid var(--cc-red) !important;
+  border-radius: 10px !important;
+}
+.cc-html-table th, .cc-home-table th,
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stTable"] th {
+  background: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-align: center !important;
+  font-weight: 900 !important;
+}
+.cc-html-table td, .cc-home-table td,
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stTable"] td {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  text-align: center !important;
+}
+.cc-html-table tbody tr:nth-child(even) td,
+.cc-home-table tbody tr:nth-child(even) td,
+[data-testid="stTable"] tr:nth-child(even) td {
+  background: var(--cc-beige-row) !important;
+}
+
+/* Election history tables keep dark style but readable */
+.cc-history-table {
+  background: #111827 !important;
+  color: #ffffff !important;
+}
+.cc-history-table th,
+.cc-history-table td {
+  background: #111827 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #374151 !important;
+}
+.cc-history-table th {
+  background: #1f2937 !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] section {
+  background: #fbf7ee !important;
+  color: var(--cc-blue) !important;
+  border-color: rgba(159,21,28,.35) !important;
+}
+[data-testid="stFileUploader"] *,
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] small {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-testid="stFileUploader"] button,
+[data-testid="stFileUploader"] button * {
+  background: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Code blocks: keep dark, but readable */
+pre, code, [data-testid="stCodeBlock"] {
+  background: #111827 !important;
+  color: #f8fafc !important;
+}
+pre *, code *, [data-testid="stCodeBlock"] * {
+  color: #f8fafc !important;
+}
+
+/* Login/setup card center and readable controls */
+.cc-login-title {
+  color: var(--cc-blue) !important;
+}
+.cc-login-subtitle {
+  color: var(--cc-gray) !important;
+}
+div[data-testid="stForm"] {
+  background: var(--cc-beige-2) !important;
+}
+
+/* Prevent old broad CSS from hiding useful controls */
+header[data-testid="stHeader"] {
+  visibility: visible !important;
+  height: auto !important;
+  background: transparent !important;
+}
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
+  visibility: hidden !important;
+  height: 0 !important;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  [data-testid="stSidebar"], section[data-testid="stSidebar"] {
+    min-width: 230px !important;
+    width: 230px !important;
+    max-width: 230px !important;
+  }
+  .cc-donut {
+    width: 135px !important;
+    height: 135px !important;
+  }
+  .cc-donut:after {
+    inset: 36px !important;
+  }
+}
+</style>
+""", unsafe_allow_html=True)
+
