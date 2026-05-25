@@ -1922,6 +1922,165 @@ def upsert_campaign_record(store: dict, campaign_id: str, data: dict) -> dict:
     return rec
 
 
+
+
+def _parse_scope_text_lines(raw: str) -> dict:
+    """Parse public signup scope text into Candidate Connect scope_filters.
+
+    Accepted examples:
+      County: Allegheny
+      Municipality: Dormont
+      Precinct: Dormont 00 05, Dormont 00 03
+    """
+    scope = {}
+    aliases = {
+        "county": "County",
+        "counties": "County",
+        "municipality": "Municipality",
+        "municipalities": "Municipality",
+        "precinct": "Precinct",
+        "precincts": "Precinct",
+        "congressional": "USC",
+        "congressional district": "USC",
+        "state senate": "STS",
+        "state senate district": "STS",
+        "state house": "STH",
+        "state house district": "STH",
+        "school district": "School District",
+        "school region": "School Region",
+    }
+    for line in str(raw or "").splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        field = aliases.get(key.strip().lower())
+        if not field:
+            continue
+        vals = [v.strip() for v in re.split(r"[,;]", val) if v.strip()]
+        if vals:
+            scope[field] = vals
+    return scope
+
+
+def render_public_campaign_signup_request(store: dict):
+    """Public request form below login.
+
+    Creates a disabled Campaign Admin user plus a pending campaign record. Super Admin
+    approval enables the username; Step 9 then builds the mini dataset from the same
+    security_store.json record.
+    """
+    with st.expander("Request Campaign Account", expanded=False):
+        st.caption("Submit a campaign account request. A Super Admin must approve it before login is enabled.")
+        with st.form("public_campaign_signup_request"):
+            username = st.text_input("Requested username")
+            pw1 = st.text_input("Password", type="password")
+            pw2 = st.text_input("Confirm password", type="password")
+            campaign_name = st.text_input("Campaign name")
+            office = st.text_input("Office sought")
+            contact_name = st.text_input("Contact name")
+            email = st.text_input("Email")
+            phone = st.text_input("Phone")
+            address = st.text_input("Campaign / billing address")
+            scope_text = st.text_area(
+                "Campaign universe / boundary",
+                value="County: \nMunicipality: ",
+                help="Use one field per line. Example: County: Allegheny    Municipality: Dormont",
+                height=95,
+            )
+            submitted = st.form_submit_button("Submit Campaign Request", type="primary")
+
+        if submitted:
+            username_clean = str(username or "").strip().lower()
+            cid = _campaign_slug(campaign_name or username_clean)
+            scope = _parse_scope_text_lines(scope_text)
+            users = store.setdefault("users", {})
+            campaigns = store.setdefault("campaigns", {})
+
+            if not username_clean:
+                st.error("Enter a requested username.")
+            elif username_clean in users:
+                st.error("That username already exists. Choose another username.")
+            elif not pw1 or pw1 != pw2:
+                st.error("Enter matching passwords.")
+            elif not campaign_name:
+                st.error("Campaign name is required.")
+            elif not scope:
+                st.error("Campaign boundary is required. Add at least County, Municipality, Precinct, or District.")
+            else:
+                campaigns[cid] = {
+                    **(campaigns.get(cid, {}) or {}),
+                    "campaign_id": cid,
+                    "campaign_name": campaign_name,
+                    "office": office,
+                    "contact_name": contact_name,
+                    "email": email,
+                    "phone": phone,
+                    "address": address,
+                    "scope_filters": scope,
+                    "account_status": "pending_approval",
+                    "dataset_status": "not_built",
+                    "dataset_base_url": campaign_dataset_base_url(cid),
+                    "signup_username": username_clean,
+                    "created_at": (campaigns.get(cid, {}) or {}).get("created_at") or datetime.now().isoformat(timespec="seconds"),
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                }
+                users[username_clean] = {
+                    "display_name": contact_name or username_clean,
+                    "password_hash": _password_hash(username_clean, pw1),
+                    "role": "Campaign Admin",
+                    "campaign": campaign_name,
+                    "campaign_id": cid,
+                    "scope_filters": scope,
+                    "disabled": True,
+                    "pending_approval": True,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }
+                save_security_store(store)
+                st.success("Request submitted. A Super Admin must approve this campaign before login is enabled.")
+
+
+def approve_campaign_request(store: dict, campaign_id: str):
+    campaigns = store.setdefault("campaigns", {})
+    users = store.setdefault("users", {})
+    campaign = campaigns.get(campaign_id) or {}
+    if not campaign:
+        return False
+    campaign["account_status"] = "active"
+    campaign["dataset_status"] = campaign.get("dataset_status") if campaign.get("dataset_status") in ("uploaded", "active") else "pending_build"
+    campaign["approved_at"] = datetime.now().isoformat(timespec="seconds")
+    campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    campaigns[campaign_id] = campaign
+    for uname, user in users.items():
+        if str(user.get("campaign_id") or "") == str(campaign_id):
+            user["disabled"] = False
+            user["pending_approval"] = False
+            user["scope_filters"] = campaign.get("scope_filters") or user.get("scope_filters") or {}
+            user["campaign"] = campaign.get("campaign_name") or user.get("campaign") or ""
+            user["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            users[uname] = user
+    save_security_store(store)
+    return True
+
+
+def disable_campaign_request(store: dict, campaign_id: str):
+    campaigns = store.setdefault("campaigns", {})
+    users = store.setdefault("users", {})
+    campaign = campaigns.get(campaign_id) or {}
+    if not campaign:
+        return False
+    campaign["account_status"] = "disabled"
+    campaign["dataset_status"] = "disabled"
+    campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    campaigns[campaign_id] = campaign
+    for uname, user in users.items():
+        if str(user.get("campaign_id") or "") == str(campaign_id):
+            user["disabled"] = True
+            user["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            users[uname] = user
+    save_security_store(store)
+    return True
+
+
 def render_security_gate():
     """Block the app until a user is logged in, or create the first Super Admin."""
     store = load_security_store()
@@ -1979,8 +2138,10 @@ def render_security_gate():
     if submitted:
         username_clean = str(username or "").strip().lower()
         user = (users or {}).get(username_clean)
-        if not user or user.get("disabled"):
-            st.error("Invalid username or disabled account.")
+        if not user:
+            st.error("Invalid username or password.")
+        elif user.get("disabled") or user.get("pending_approval"):
+            st.error("This account is not active yet. Contact your Candidate Connect administrator.")
         elif user.get("campaign_id") and ((store.get("campaigns") or {}).get(user.get("campaign_id"), {}) or {}).get("account_status") not in ("active", "", None):
             st.error("This campaign account is not active yet.")
         elif user.get("password_hash") != _password_hash(username_clean, password):
@@ -1990,6 +2151,10 @@ def render_security_gate():
             st.session_state["auth_user"] = user
             st.success("Logged in.")
             st.rerun()
+
+    _left2, _center2, _right2 = st.columns([1, 1.15, 1])
+    with _center2:
+        render_public_campaign_signup_request(store)
     st.stop()
 
 
@@ -2113,12 +2278,52 @@ def render_account_admin_workspace(filter_options=None):
     else:
         st.info("No campaign records yet.")
 
+    if is_super_admin():
+        pending_campaigns = {cid: c for cid, c in campaigns.items() if str(c.get("account_status") or "") in ("pending_approval", "pending_payment", "payment_failed")}
+        if pending_campaigns:
+            st.markdown("### Pending Campaign Requests")
+            pending_rows = []
+            for cid, c in sorted(pending_campaigns.items()):
+                pending_rows.append({
+                    "Campaign ID": cid,
+                    "Campaign": c.get("campaign_name", ""),
+                    "Contact": c.get("contact_name", ""),
+                    "Email": c.get("email", ""),
+                    "Scope": scope_summary(c.get("scope_filters") or {}),
+                    "Status": c.get("account_status", ""),
+                })
+            cc_table(pd.DataFrame(pending_rows), height=220, key="pending_campaign_requests_table")
+            selected_pending = st.selectbox("Select pending campaign", [""] + sorted(pending_campaigns.keys()), key="pending_campaign_select")
+            c1, c2, c3 = st.columns([1, 1, 4])
+            with c1:
+                if st.button("Approve Campaign", key="approve_pending_campaign", type="primary", disabled=not bool(selected_pending)):
+                    if approve_campaign_request(store, selected_pending):
+                        st.success("Campaign approved and linked user enabled. Run Step 9, upload campaign datasets, then mark Dataset Status active.")
+                        st.rerun()
+            with c2:
+                if st.button("Disable Campaign", key="disable_pending_campaign", disabled=not bool(selected_pending)):
+                    if disable_campaign_request(store, selected_pending):
+                        st.success("Campaign disabled.")
+                        st.rerun()
+
+        active_campaigns = {cid: c for cid, c in campaigns.items() if str(c.get("account_status") or "") == "active" and str(c.get("dataset_status") or "") != "active"}
+        if active_campaigns:
+            st.markdown("### Dataset Activation")
+            st.caption("After Step 9 finishes and the campaign dataset is uploaded to R2, mark the dataset active here.")
+            selected_active = st.selectbox("Campaign dataset to activate", [""] + sorted(active_campaigns.keys()), key="dataset_activation_select")
+            if st.button("Mark Dataset Active", key="mark_dataset_active", type="primary", disabled=not bool(selected_active)):
+                store.setdefault("campaigns", {})[selected_active]["dataset_status"] = "active"
+                store["campaigns"][selected_active]["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                save_security_store(store)
+                st.success("Dataset marked active. Download/upload security_store.json so the setting survives reboot.")
+                st.rerun()
+
     st.markdown("#### Dataset Routing Rules")
     st.markdown("""
 - **Super Admin** uses the statewide dataset.
 - **Campaign users** use their assigned campaign mini dataset only when that campaign's `Dataset Status` is `active`.
 - Until the mini dataset is active, campaign users remain protected by the hard campaign boundary but still read from statewide data.
-- After changing accounts/campaigns, download `security_store.json` below and upload it to R2 `app_state/security_store.json`.
+- Account requests are stored in `security_store.json`; after approvals/status changes, download/upload it to R2 `app_state/security_store.json` so changes survive app rebuilds.
 """)
 
     if is_super_admin():
