@@ -7,6 +7,7 @@ import json
 import base64
 import re
 import hashlib
+import html
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import pandas as pd
 import duckdb
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 try:
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.pdfgen import canvas
@@ -2809,45 +2811,51 @@ def render_metrics(summary, label=""):
 
 
 
-def _cc_party_bar_html(label: str, value: int, total: int, color: str) -> str:
-    pct_val = (value / total * 100) if total else 0
-    return f"""
-      <div class="cc-party-bar-row">
-        <div class="cc-party-bar-label"><span class="cc-swatch" style="background:{color}"></span>{label}</div>
-        <div class="cc-party-bar-track"><div class="cc-party-bar-fill" style="width:{pct_val:.1f}%;background:{color};"></div></div>
-        <div class="cc-party-bar-value">{value:,} ({pct_val:.1f}%)</div>
-      </div>
-    """
+def _cc_bar_component(title: str, rows: list[tuple[str, int, str]], total: int, key: str | None = None):
+    """Render stable colored bars in an isolated component so Streamlit CSS cannot turn it into code."""
+    total = int(total or 0)
+    safe_title = html.escape(str(title))
+    row_html = []
+    for label, value, color in rows:
+        value = int(value or 0)
+        pct_val = (value / total * 100) if total else 0
+        row_html.append(f"""
+        <div class=\"ccbar-row\">
+          <div class=\"ccbar-label\"><span class=\"ccbar-swatch\" style=\"background:{color}\"></span>{html.escape(str(label))}</div>
+          <div class=\"ccbar-track\"><div class=\"ccbar-fill\" style=\"width:{pct_val:.1f}%;background:{color};\"></div></div>
+          <div class=\"ccbar-value\">{value:,} ({pct_val:.1f}%)</div>
+        </div>""")
+    doc = f"""
+    <html><head><style>
+      html, body {{ margin:0; padding:0; background:#f8f4ea; color:#071d3a; font-family:Arial, Helvetica, sans-serif; }}
+      .ccbar-card {{ box-sizing:border-box; width:100%; min-height:230px; background:#f8f4ea; border:1px solid #b9ad99; border-radius:12px; padding:16px 18px; }}
+      h3 {{ margin:0 0 10px 0; font-size:21px; line-height:1.15; color:#071d3a; font-weight:900; }}
+      .ccbar-total {{ display:flex; align-items:baseline; gap:5px; margin:3px 0 12px 0; color:#071d3a; }}
+      .ccbar-total b {{ font-size:16px; font-weight:900; }}
+      .ccbar-total span {{ font-size:12px; font-weight:800; color:#5f6b7a; }}
+      .ccbar-row {{ display:grid; grid-template-columns: 220px minmax(160px, 1fr) 145px; gap:12px; align-items:center; margin:10px 0; }}
+      .ccbar-label {{ display:flex; gap:10px; align-items:center; font-size:14px; font-weight:800; color:#071d3a; min-width:0; }}
+      .ccbar-swatch {{ width:14px; height:14px; border-radius:50%; flex:0 0 auto; }}
+      .ccbar-track {{ height:14px; border-radius:999px; background:#071d3a; overflow:hidden; }}
+      .ccbar-fill {{ height:100%; border-radius:999px; }}
+      .ccbar-value {{ text-align:right; font-size:14px; font-weight:900; color:#071d3a; white-space:nowrap; }}
+      @media(max-width:700px){{ .ccbar-row{{grid-template-columns: 1fr; gap:5px;}} .ccbar-value{{text-align:left;}} }}
+    </style></head><body>
+      <div class=\"ccbar-card\"><h3>{safe_title}</h3><div class=\"ccbar-total\"><b>{total:,}</b><span>Total</span></div>{''.join(row_html)}</div>
+    </body></html>"""
+    components.html(doc, height=245, scrolling=False)
 
 
 def render_party_chart(summary, title="Party Breakdown"):
-    """Stable horizontal bars. Avoids Streamlit/browser conic-gradient donut issues."""
     total = int(summary.get("total", 0) or 0)
-    r = int(summary.get("r", 0) or 0)
-    d = int(summary.get("d", 0) or 0)
-    o = int(summary.get("o", 0) or 0)
-    html = f"""<div class="cc-home-card cc-party-bar-card"><h3>{title}</h3>
-      <div class="cc-party-bar-total"><b>{total:,}</b><span>Total</span></div>
-      {_cc_party_bar_html("Republican", r, total, "#d51f2a")}
-      {_cc_party_bar_html("Democrat", d, total, "#2454d6")}
-      {_cc_party_bar_html("Other / Unaffiliated", o, total, "#4c9a2a")}
-    </div>"""
-    st.markdown(html, unsafe_allow_html=True)
+    rows = [("Republican", int(summary.get("r", 0) or 0), "#d51f2a"), ("Democrat", int(summary.get("d", 0) or 0), "#2454d6"), ("Other / Unaffiliated", int(summary.get("o", 0) or 0), "#4c9a2a")]
+    _cc_bar_component(title, rows, total)
 
 
 def render_gender_chart(summary, title="Voters by Gender"):
-    """Stable horizontal bars for gender. Uses same colors as existing dashboard convention."""
     total = int(summary.get("total", 0) or 0)
-    f = int(summary.get("f", 0) or 0)
-    m = int(summary.get("m", 0) or 0)
-    u = int(summary.get("u", 0) or 0)
-    html = f"""<div class="cc-home-card cc-party-bar-card"><h3>{title}</h3>
-      <div class="cc-party-bar-total"><b>{total:,}</b><span>Total</span></div>
-      {_cc_party_bar_html("Female", f, total, "#d51f2a")}
-      {_cc_party_bar_html("Male", m, total, "#2454d6")}
-      {_cc_party_bar_html("Unknown / Other", u, total, "#4c9a2a")}
-    </div>"""
-    st.markdown(html, unsafe_allow_html=True)
+    rows = [("Female", int(summary.get("f", 0) or 0), "#d51f2a"), ("Male", int(summary.get("m", 0) or 0), "#2454d6"), ("Unknown / Other", int(summary.get("u", 0) or 0), "#4c9a2a")]
+    _cc_bar_component(title, rows, total)
 
 
 def render_quick_exact_comparison():
@@ -5009,47 +5017,56 @@ def _drop_unusable_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
-    """Sortable global table.
-
-    Uses Streamlit's native dataframe so column headers are sortable. When
-    sticky_first_col=True, the first data column is moved to the index; Streamlit
-    keeps the index visible while horizontally scrolling, giving us the row-header
-    behavior needed for app tables.
-    """
+    """Sortable, zebra-striped, sticky-header table in an isolated component."""
     if df is None:
         df = pd.DataFrame()
     show = _drop_unusable_rows(df.copy())
     if show.empty:
         st.markdown('<div class="cc-empty-table">No rows to display.</div>', unsafe_allow_html=True)
         return None
-
     for col in show.columns:
         if col in {"Voters", "Total", "Count", "Rows", "Households", "Republican", "Democrat", "Other", "R", "D", "O", "Female", "Male", "Age65Plus", "StrongGeneral", "StrongAll", "MBProspects", "MBApplicants", "MBSent", "MBReturned"} or str(col).lower().endswith(" voters"):
             raw = show[col].astype(str).str.replace(",", "", regex=False).str.strip()
             nums = pd.to_numeric(raw, errors="coerce")
             show[col] = nums.map(lambda x: "" if pd.isna(x) else f"{int(x):,}")
-
-    display_df = show
-    hide_index = True
-    if sticky_first_col and len(show.columns) > 0:
-        first = show.columns[0]
-        display_df = show.set_index(first, drop=True)
-        display_df.index.name = str(first)
-        hide_index = False
-
-    max_h = height or 360
+    max_h = int(height or 360)
     if len(show) <= 12:
-        max_h = min(max_h, max(120, 42 + 36 * (len(show) + 1)))
-
-    st.dataframe(
-        display_df,
-        height=int(max_h),
-        width="stretch",
-        hide_index=hide_index,
-        key=key,
-    )
+        max_h = min(max_h, max(120, 48 + 38 * (len(show) + 1)))
+    table_html = show.to_html(index=False, escape=True, classes="cc-sort-table", border=0)
+    sticky_cls = " sticky-first" if sticky_first_col else ""
+    html_doc = f"""
+<html><head><style>
+html, body {{ margin:0; padding:0; background:#efe8d8; color:#071d3a; font-family:Arial, Helvetica, sans-serif; font-size:13px; }}
+.table-shell {{ max-height:{max_h}px; overflow:auto; border:1px solid #9f151c; border-radius:10px; background:#ffffff; }}
+table {{ border-collapse:separate; border-spacing:0; width:100%; table-layout:auto; }}
+th, td {{ padding:9px 11px; border-right:1px solid #eadfce; border-bottom:1px solid #eadfce; text-align:center; color:#071d3a; white-space:nowrap; }}
+th {{ position:sticky; top:0; z-index:3; background:#9f151c; color:#fff; font-weight:900; cursor:pointer; user-select:none; }}
+th:hover {{ background:#7f1016; }}
+tbody tr:nth-child(even) td {{ background:#f3eadc; }}
+tbody tr:nth-child(odd) td {{ background:#ffffff; }}
+.sticky-first th:first-child {{ left:0; z-index:5; min-width:max-content; }}
+.sticky-first td:first-child {{ position:sticky; left:0; z-index:2; font-weight:800; text-align:left; min-width:max-content; }}
+.sticky-first tbody tr:nth-child(even) td:first-child {{ background:#f3eadc; }}
+.sticky-first tbody tr:nth-child(odd) td:first-child {{ background:#ffffff; }}
+th.sort-asc::after {{ content:' ▲'; font-size:10px; }}
+th.sort-desc::after {{ content:' ▼'; font-size:10px; }}
+</style></head><body>
+<div class="table-shell{sticky_cls}">{table_html}</div>
+<script>
+function cellVal(row, idx) {{ return row.children[idx].innerText.trim(); }}
+function asNum(v) {{ var n = Number(v.replace(/[%,$,]/g,'')); return isNaN(n) ? null : n; }}
+document.querySelectorAll('th').forEach(function(th, idx) {{
+  th.addEventListener('click', function() {{
+    var table = th.closest('table'); var tbody = table.querySelector('tbody'); var rows = Array.from(tbody.querySelectorAll('tr'));
+    var desc = !th.classList.contains('sort-desc'); table.querySelectorAll('th').forEach(h => h.classList.remove('sort-asc','sort-desc')); th.classList.add(desc ? 'sort-desc' : 'sort-asc');
+    rows.sort(function(a,b) {{ var av = cellVal(a, idx), bv = cellVal(b, idx); var an = asNum(av), bn = asNum(bv); var cmp = (an !== null && bn !== null) ? (an - bn) : av.localeCompare(bv, undefined, {{numeric:true, sensitivity:'base'}}); return desc ? -cmp : cmp; }});
+    rows.forEach(r => tbody.appendChild(r));
+  }});
+}});
+</script>
+</body></html>"""
+    components.html(html_doc, height=max_h + 8, scrolling=False)
     return None
-
 
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
     st.markdown(
@@ -5602,43 +5619,67 @@ def _area_voted_sql_for_cols(cols: list[str]) -> str:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 12) -> pd.DataFrame:
-    """Historical turnout by current party for Primary + General elections only.
+def _turnout_cube_columns_for_base(base_url: str) -> list[str]:
+    try:
+        manifest = _load_manifest_from_base(base_url)
+        key = ((manifest.get("speed", {}) or {}).get("tables", {}) or {}).get("turnout_cube", "speed/turnout_cube.parquet")
+        url = f"{base_url.rstrip('/')}/{str(key).lstrip('/')}"
+        con = duckdb.connect(database=":memory:")
+        try:
+            try:
+                con.execute("INSTALL httpfs; LOAD httpfs;")
+            except Exception:
+                try: con.execute("LOAD httpfs;")
+                except Exception: pass
+            return [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_lit(url)})").fetchall()]
+        finally:
+            con.close()
+    except Exception:
+        return []
 
-    Uses index shards and ORs duplicate raw columns into one displayed election code,
-    so the report does not repeat G25/P25 if the source has date-specific variants.
-    """
+
+def turnout_cube_url() -> str:
+    manifest = load_manifest()
+    key = ((manifest.get("speed", {}) or {}).get("tables", {}) or {}).get("turnout_cube", "speed/turnout_cube.parquet")
+    return r2_url(key)
+
+
+def _turnout_where_sql(active: dict, special: dict | None = None, available_cols: list[str] | None = None) -> str:
+    available = set(available_cols or [])
+    clauses = []
+    merged = {}
+    merged.update(active or {})
+    merged.update(special or {})
+    for field, vals in merged.items():
+        if str(field).startswith("__"):
+            continue
+        if field not in available:
+            continue
+        vals = [str(v).strip() for v in (vals if isinstance(vals, list) else [vals]) if str(v).strip()]
+        if not vals:
+            continue
+        clauses.append(f"UPPER(TRIM(CAST({sql_ident(field)} AS VARCHAR))) IN (" + ",".join(sql_lit(v.upper()) for v in vals) + ")")
+    return "WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 12) -> pd.DataFrame:
     active = enforce_security_scope(json.loads(active_json or "{}"))
     special = json.loads(special_json or "{}")
-    cols = selected_election_columns(types=["General", "Primary"])
-    groups = {}
-    for c in cols:
-        if not str(c).lower().endswith("_method"):
-            continue
-        code = _area_election_code(c)
-        if not re.match(r"^[GP]\d{2}$", code):
-            continue
-        groups.setdefault(code, []).append(c)
-    codes = sorted(groups.keys(), key=_area_election_sort_key, reverse=True)[:int(limit)]
-    if not codes:
+    url = turnout_cube_url()
+    cols = _turnout_cube_columns_for_base(current_data_base_url())
+    if not cols:
         return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
-
-    urls = index_urls_from_manifest()
-    url_list = "[" + ",".join(sql_lit(u) for u in urls) + "]"
-    where = index_where_sql(active, special)
-    selects = []
-    for code in codes:
-        voted = _area_voted_sql_for_cols(groups[code])
-        selects.append(f"""
-        SELECT {sql_lit(_area_election_label_from_code(code))} AS Election,
-               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) = 'R' THEN 1 ELSE 0 END) AS R,
-               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) = 'D' THEN 1 ELSE 0 END) AS D,
-               SUM(CASE WHEN {voted} AND CAST(Party AS VARCHAR) NOT IN ('R','D') THEN 1 ELSE 0 END) AS O,
-               SUM(CASE WHEN {voted} THEN 1 ELSE 0 END) AS Total
-        FROM read_parquet({url_list}, union_by_name=true)
+    where = _turnout_where_sql(active, special, cols)
+    q = f"""
+        SELECT Election, SUM(R) AS R, SUM(D) AS D, SUM(O) AS O, SUM(Total) AS Total
+        FROM read_parquet({sql_lit(url)})
         {where}
-        """)
-    q = " UNION ALL ".join(selects)
+        GROUP BY Election, SortOrder
+        HAVING SUM(Total) > 0
+        ORDER BY SortOrder DESC
+        LIMIT {int(limit)}
+    """
     con = duckdb.connect(database=":memory:")
     try:
         try:
@@ -5651,13 +5692,12 @@ def _area_turnout_by_party(active_json: str, special_json: str, limit: int = 12)
             return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
         for c in ["R","D","O","Total"]:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-        return df[df["Total"] > 0].reset_index(drop=True)
+        return df[["Election", "R", "D", "O", "Total"]].reset_index(drop=True)
     except Exception:
         return pd.DataFrame(columns=["Election", "R", "D", "O", "Total"])
     finally:
         try: con.close()
         except Exception: pass
-
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -7661,97 +7701,39 @@ header[data-testid="stHeader"] {
 </style>
 """, unsafe_allow_html=True)
 
-
-# Final chart/table policy: bar charts + native sortable tables.
+# Final production CSS lock: fixes login readability and removes broad dark-on-dark conflicts.
 st.markdown("""
 <style>
-/* Replace donut visuals with stable bar-card layout */
-.cc-party-bar-card {
-  padding: 18px 20px !important;
-}
-.cc-party-bar-total {
-  display: flex !important;
-  align-items: baseline !important;
-  gap: 10px !important;
-  color: #071d3a !important;
-  margin: 4px 0 12px 0 !important;
-}
-.cc-party-bar-total b {
-  font-size: 18pt !important;
-  color: #071d3a !important;
-}
-.cc-party-bar-total span {
-  font-size: 10pt !important;
-  color: #5f6b7a !important;
-  font-weight: 800 !important;
-}
-.cc-party-bar-row {
-  display: grid !important;
-  grid-template-columns: 210px minmax(160px, 1fr) 150px !important;
-  align-items: center !important;
-  gap: 14px !important;
-  margin: 11px 0 !important;
-  color: #071d3a !important;
-}
-.cc-party-bar-label {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  font-weight: 850 !important;
-  color: #071d3a !important;
-}
-.cc-party-bar-track {
-  height: 14px !important;
-  border-radius: 999px !important;
-  background: #071d3a !important;
-  overflow: hidden !important;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,.12) !important;
-}
-.cc-party-bar-fill {
-  height: 100% !important;
-  border-radius: 999px !important;
-}
-.cc-party-bar-value {
-  text-align: right !important;
-  color: #071d3a !important;
-  font-weight: 900 !important;
-}
-
-/* Hide old donut if any old cached markup remains */
-.cc-donut { display:none !important; }
-
-/* Native Streamlit dataframe: sortable, readable, sticky header. */
-[data-testid="stDataFrame"] {
-  border: 1px solid #9f151c !important;
-  border-radius: 10px !important;
-  overflow: hidden !important;
-  background: #ffffff !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataFrame"] [role="columnheader"] * {
-  background: #9f151c !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  font-weight: 900 !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataFrame"] [role="gridcell"] * {
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-}
-[data-testid="stDataFrame"] canvas {
-  background: #ffffff !important;
-}
-
-@media (max-width: 900px) {
-  .cc-party-bar-row {
-    grid-template-columns: 1fr !important;
-    gap: 5px !important;
-  }
-  .cc-party-bar-value {
-    text-align: left !important;
-  }
-}
+:root{--cc-red:#9f151c;--cc-red-dark:#6f0d13;--cc-blue:#071d3a;--cc-beige:#efe8d8;--cc-card:#f8f4ea;--cc-row:#f3eadc;--cc-gray:#5f6b7a;color-scheme:light!important;}
+html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!important;color:var(--cc-blue)!important;}
+.block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
+h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
+small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
+.stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
+.stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
+[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 9px!important;border-radius:8px!important;}
+.stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
+div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
+input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
+[data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;border:0!important;}
+button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *{color:var(--cc-blue)!important;fill:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+details,div[data-testid="stExpander"],div[data-testid="stExpander"]>details{background:var(--cc-card)!important;color:var(--cc-blue)!important;border:1px solid rgba(159,21,28,.35)!important;border-radius:10px!important;}
+details>summary,details>summary *,div[data-testid="stExpander"] summary,div[data-testid="stExpander"] summary *{background:var(--cc-card)!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:850!important;}
+.cc-card,.cc-home-card,.cc-metric,.cc-icon-metric,div[data-testid="stForm"]{background:var(--cc-card)!important;color:var(--cc-blue)!important;border:1px solid #b9ad99!important;border-radius:12px!important;}
+.cc-note,.cc-verify,.cc-empty-table,.stAlert{background:#d9e8f8!important;color:var(--cc-blue)!important;border:1px solid #8aa3bf!important;border-radius:10px!important;padding:14px 16px!important;}
+.cc-note *,.cc-verify *,.cc-empty-table *,.stAlert *{color:var(--cc-blue)!important;}
+[data-testid="stFileUploader"],[data-testid="stFileUploader"] section{background:#fbf7ee!important;color:var(--cc-blue)!important;border-color:rgba(159,21,28,.35)!important;}
+[data-testid="stFileUploader"] *{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+[data-testid="stFileUploader"] button,[data-testid="stFileUploader"] button *{background:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;}
+pre,code,[data-testid="stCodeBlock"]{background:#111827!important;color:#f8fafc!important;}
+pre *,code *,[data-testid="stCodeBlock"] *{color:#f8fafc!important;}
+header[data-testid="stHeader"]{visibility:visible!important;height:auto!important;background:transparent!important;}
+#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{visibility:hidden!important;height:0!important;}
 </style>
 """, unsafe_allow_html=True)
 
