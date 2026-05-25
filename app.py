@@ -28,6 +28,26 @@ DETAIL_SHARDS = 36
 EXPORT_ROW_LIMIT = 250_000
 
 st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sidebar_state="expanded")
+
+
+# Early hard CSS fixes: loaded before any st.stop() branches.
+st.markdown("""
+<style>
+/* login/setup card */
+div[data-testid="stForm"]{background:#f8f4ea!important;border:1px solid #b9ad99!important;border-radius:16px!important;box-shadow:0 12px 28px rgba(7,29,58,.12)!important;padding:22px 26px!important;}
+/* all normal action buttons */
+.stButton button:not(:disabled),.stFormSubmitButton button:not(:disabled),div[data-testid="stFormSubmitButton"] button:not(:disabled),div[data-testid="stDownloadButton"] button:not(:disabled),button[data-testid*="baseButton"]:not(:disabled){background:linear-gradient(180deg,#b01822,#9f151c)!important;background-color:#9f151c!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid #6f0d13!important;font-weight:900!important;opacity:1!important;text-shadow:none!important;}
+.stButton button:not(:disabled) *,.stFormSubmitButton button:not(:disabled) *,div[data-testid="stFormSubmitButton"] button:not(:disabled) *,div[data-testid="stDownloadButton"] button:not(:disabled) *,button[data-testid*="baseButton"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;fill:#fff!important;opacity:1!important;}
+/* disabled buttons */
+.stButton button:disabled,.stFormSubmitButton button:disabled,div[data-testid="stFormSubmitButton"] button:disabled,div[data-testid="stDownloadButton"] button:disabled{background:#d8cfc0!important;background-color:#d8cfc0!important;color:#222!important;-webkit-text-fill-color:#222!important;border:1px solid #b9ad99!important;opacity:.8!important;}
+.stButton button:disabled *,.stFormSubmitButton button:disabled *,div[data-testid="stFormSubmitButton"] button:disabled *,div[data-testid="stDownloadButton"] button:disabled *{color:#222!important;-webkit-text-fill-color:#222!important;}
+/* password eye: readable, not red */
+button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;background-color:#fff!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;border:0!important;border-left:1px solid #d0c7b7!important;opacity:1!important;}
+button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *,[data-baseweb="input"] button *{color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;fill:#071d3a!important;opacity:1!important;}
+/* leave tab buttons alone */
+div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;font-weight:900!important;}
+</style>
+""", unsafe_allow_html=True)
 try:
     st.set_option("runner.magicEnabled", False)
 except Exception:
@@ -1138,19 +1158,21 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
         width = max(1, min(100, pct))
         color = _bar_color(lab)
         rows.append(
-            f'<div class="cc-one-line-bar-row">'
-            f'<div class="cc-one-line-bar-label"><span class="cc-swatch" style="background:{color};"></span>{html_escape(label)}</div>'
-            f'<div class="cc-one-line-bar-track"><div class="cc-one-line-bar-fill" style="width:{width:.1f}%; background:{color};"></div></div>'
-            f'<div class="cc-one-line-bar-value">{val:,} ({pct:.1f}%)</div>'
+            f'<div style="display:grid;grid-template-columns:150px minmax(150px,1fr) 135px;gap:10px;align-items:center;margin:7px 0;min-height:18px;">'
+            f'<div style="display:flex;align-items:center;gap:7px;color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};"></span>{html_escape(label)}</div>'
+            f'<div style="height:10px;border-radius:999px;background:#071d3a;overflow:hidden;"><div style="height:100%;border-radius:999px;width:{width:.1f}%;background:{color};"></div></div>'
+            f'<div style="color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;">{val:,} ({pct:.1f}%)</div>'
             f'</div>'
         )
 
-    st.markdown(
-        '<div class="cc-home-card cc-group-bar-card"><h3>' + html_escape(title) + '</h3>'
-        + f'<div class="cc-total-line">{int(total):,} <span>Total</span></div>'
-        + '<div class="cc-one-line-bars">' + ''.join(rows) + '</div></div>',
-        unsafe_allow_html=True,
+    html = (
+        '<div style="background:#f8f4ea;color:#071d3a;border:1px solid #b9ad99;border-radius:12px;box-shadow:0 8px 18px rgba(7,29,58,.12);padding:16px 20px 22px 20px;margin-bottom:16px;min-height:245px;height:auto;overflow:visible;">'
+        + '<h3 style="margin:0 0 10px 0;color:#071d3a;font-weight:950;">' + html_escape(title) + '</h3>'
+        + f'<div style="color:#071d3a;font-weight:950;font-size:15px;margin:0 0 10px 0;">{int(total):,}<span style="color:#5f6b7a;font-size:12px;margin-left:4px;">Total</span></div>'
+        + ''.join(rows)
+        + '</div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
@@ -4733,6 +4755,20 @@ def render_voter_lookup_workspace():
             if not all_corr.empty:
                 st.download_button("Download All Saved Corrections CSV", all_corr.to_csv(index=False).encode(), file_name="candidate_connect_voter_corrections.csv", mime="text/csv", width="stretch")
 
+        st.markdown("### Election History")
+        vh_key = f"vote_history_row_{selected_id}"
+        if vh_key not in st.session_state:
+            st.session_state[vh_key] = pd.DataFrame([r]).iloc[0].to_dict()
+        if st.button("Refresh Vote History", key=f"load_vote_history_{selected_id}"):
+            with st.spinner("Loading vote history..."):
+                full_r = remote_voter_lookup_detail(selected_id) if selected_id else r
+                if full_r is None or len(full_r) == 0:
+                    full_r = r
+                st.session_state[vh_key] = pd.DataFrame([full_r]).iloc[0].to_dict()
+                st.session_state[detail_key] = st.session_state[vh_key]
+                st.rerun()
+        render_election_history_table(pd.Series(st.session_state[vh_key]))
+
         st.markdown("### Household Members")
         hh_key = f"hh_df_{selected_id}"
         if hh_key not in st.session_state:
@@ -4802,19 +4838,6 @@ def render_voter_lookup_workspace():
         else:
             st.caption("No household members found from the selected address.")
 
-        st.markdown("### Election History")
-        vh_key = f"vote_history_row_{selected_id}"
-        if vh_key not in st.session_state:
-            st.session_state[vh_key] = pd.DataFrame([r]).iloc[0].to_dict()
-        if st.button("Refresh Vote History", key=f"load_vote_history_{selected_id}"):
-            with st.spinner("Loading vote history..."):
-                full_r = remote_voter_lookup_detail(selected_id) if selected_id else r
-                if full_r is None or len(full_r) == 0:
-                    full_r = r
-                st.session_state[vh_key] = pd.DataFrame([full_r]).iloc[0].to_dict()
-                st.session_state[detail_key] = st.session_state[vh_key]
-                st.rerun()
-        render_election_history_table(pd.Series(st.session_state[vh_key]))
 
 
 def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
@@ -6296,7 +6319,7 @@ def render_area_intelligence_workspace():
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
         pdf_col1, pdf_col2, pdf_spacer = st.columns([0.9, 1.05, 4.0])
         with pdf_col1:
-            prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn", type="primary"), type="primary")
+            prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary")
         if prep_clicked:
             with st.spinner("Preparing Area Intelligence report..."):
                 turnout_df = _area_turnout_by_party(
