@@ -2137,7 +2137,7 @@ def render_account_admin_workspace(filter_options=None):
                 st.caption("Build/upload target:")
                 st.code(f"app_state/campaigns/{campaign_id_preview}/dataset/", language="text")
                 campaign_scope = build_scope_from_admin_widgets("campaign", filter_options if filter_options is not None else pd.DataFrame(), base_scope=existing_campaign.get("scope_filters", {}), disabled=False)
-                campaign_submitted = st.form_submit_button("Save Campaign")
+                campaign_submitted = st.form_submit_button("Save Campaign", type="primary")
 
             if campaign_submitted:
                 if not campaign_name:
@@ -2198,7 +2198,7 @@ def render_account_admin_workspace(filter_options=None):
             st.info("Users you create inherit your campaign boundary automatically.")
             scope = security_scope_filters()
         st.markdown("**Campaign boundary:** " + scope_summary(scope if "scope" in locals() else {}))
-        submitted = st.form_submit_button("Save Account")
+        submitted = st.form_submit_button("Save Account", type="primary")
 
     if submitted:
         if not username:
@@ -4736,10 +4736,10 @@ def render_voter_lookup_workspace():
         st.markdown("### Household Members")
         hh_key = f"hh_df_{selected_id}"
         if hh_key not in st.session_state:
-            with st.spinner("Loading household members..."):
+            with st.spinner("Household members are loading below..."):
                 st.session_state[hh_key] = remote_household_members(r).to_dict("records")
         if st.button("Refresh Household Members", key=f"load_hh_{selected_id}"):
-            with st.spinner("Loading household members..."):
+            with st.spinner("Household members are loading below..."):
                 st.session_state[hh_key] = remote_household_members(r).to_dict("records")
         if st.session_state.get(hh_key):
             hh = pd.DataFrame(st.session_state.get(hh_key) or [])
@@ -8195,6 +8195,153 @@ div[data-testid="stDownloadButton"] > button:disabled * {
   border-radius: 10px !important;
   padding: 10px 12px !important;
   margin: 8px 0 12px 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Final polish v10: buttons, password icon, unclipped charts.
+st.markdown("""
+<style>
+/* NEVER dark text on dark buttons, including account admin/save form buttons */
+.stButton button:not(:disabled),
+.stFormSubmitButton button:not(:disabled),
+div[data-testid="stFormSubmitButton"] button:not(:disabled),
+div[data-testid="stDownloadButton"] button:not(:disabled),
+button[data-testid*="baseButton"]:not(:disabled) {
+  background: linear-gradient(180deg,#b01822,#9f151c) !important;
+  background-color: #9f151c !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #6f0d13 !important;
+  font-weight: 900 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+.stButton button:not(:disabled) *,
+.stFormSubmitButton button:not(:disabled) *,
+div[data-testid="stFormSubmitButton"] button:not(:disabled) *,
+div[data-testid="stDownloadButton"] button:not(:disabled) *,
+button[data-testid*="baseButton"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Disabled buttons remain readable */
+.stButton button:disabled,
+.stFormSubmitButton button:disabled,
+div[data-testid="stFormSubmitButton"] button:disabled,
+div[data-testid="stDownloadButton"] button:disabled {
+  background: #d8cfc0 !important;
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: .8 !important;
+}
+
+/* Password icon stays readable and is NOT styled like a red button */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 0 !important;
+  border-left: 1px solid #d0c7b7 !important;
+  opacity: 1 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* Party/Gender chart cards: stop Streamlit/parent containers from clipping */
+.cc-group-bar-card,
+.cc-home-card:has(.cc-one-line-bars),
+.cc-card:has(.cc-one-line-bars) {
+  height: auto !important;
+  min-height: 285px !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 18px 22px 28px 22px !important;
+  margin-bottom: 16px !important;
+}
+.cc-one-line-bars {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  width: 100% !important;
+  overflow: visible !important;
+  padding-bottom: 18px !important;
+}
+.cc-one-line-bar-row {
+  display: grid !important;
+  grid-template-columns: 145px minmax(160px, 1fr) 132px !important;
+  gap: 8px !important;
+  align-items: center !important;
+  min-height: 20px !important;
+  margin-bottom: 2px !important;
+}
+.cc-one-line-bar-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 9.5pt !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.cc-one-line-bar-track {
+  height: 10px !important;
+  border-radius: 999px !important;
+  background: #071d3a !important;
+  overflow: hidden !important;
+}
+.cc-one-line-bar-fill {
+  height: 100% !important;
+  border-radius: 999px !important;
+}
+.cc-one-line-bar-value {
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 9.5pt !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.cc-total-line {
+  color: #071d3a !important;
+  font-weight: 950 !important;
+  font-size: 10.5pt !important;
+  margin: 2px 0 8px 0 !important;
+}
+.cc-total-line span {
+  color: #5f6b7a !important;
+  font-size: 8.5pt !important;
+}
+.cc-swatch {
+  width: 10px !important;
+  height: 10px !important;
+  min-width: 10px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+}
+
+/* Login form card */
+div[data-testid="stForm"] {
+  background: #f8f4ea !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
 }
 </style>
 """, unsafe_allow_html=True)
