@@ -2876,11 +2876,7 @@ def render_metrics(summary, label=""):
 
 
 def _cc_bar_component(title: str, rows: list[tuple[str, int, str]], total: int, key: str | None = None):
-    """Party/Gender bars with inline styles only.
-
-    No iframe/component. No dependent CSS class. This prevents both clipping and
-    the "bars disappear because CSS loaded after st.stop" problem.
-    """
+    """Party/Gender bars with no iframe and no markdown-code indentation."""
     total = int(total or 0)
 
     rendered_rows = []
@@ -2888,30 +2884,27 @@ def _cc_bar_component(title: str, rows: list[tuple[str, int, str]], total: int, 
         value = int(value or 0)
         pct_val = (value / total * 100) if total else 0
         width = max(1, min(100, pct_val))
-        rendered_rows.append(f"""
-          <div style="display:grid; grid-template-columns:155px minmax(170px,1fr) 145px; gap:10px; align-items:center; min-height:24px; margin:8px 0;">
-            <div style="display:flex; align-items:center; gap:8px; color:#071d3a; font-weight:900; font-size:13px; line-height:1.1; white-space:nowrap;">
-              <span style="display:inline-block; width:11px; height:11px; min-width:11px; border-radius:50%; background:{color};"></span>
-              <span>{html.escape(str(label))}</span>
-            </div>
-            <div style="height:12px; border-radius:999px; background:#071d3a; overflow:hidden;">
-              <div style="height:100%; width:{width:.1f}%; border-radius:999px; background:{color};"></div>
-            </div>
-            <div style="color:#071d3a; font-weight:900; font-size:13px; line-height:1.1; white-space:nowrap;">
-              {value:,} ({pct_val:.1f}%)
-            </div>
-          </div>
-        """)
+        rendered_rows.append(
+            f'<div style="display:grid;grid-template-columns:155px minmax(170px,1fr) 145px;gap:10px;align-items:center;min-height:24px;margin:8px 0;">'
+            f'<div style="display:flex;align-items:center;gap:8px;color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;">'
+            f'<span style="display:inline-block;width:11px;height:11px;min-width:11px;border-radius:50%;background:{color};"></span>'
+            f'<span>{html.escape(str(label))}</span></div>'
+            f'<div style="height:12px;border-radius:999px;background:#071d3a;overflow:hidden;">'
+            f'<div style="height:100%;width:{width:.1f}%;border-radius:999px;background:{color};"></div></div>'
+            f'<div style="color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;">{value:,} ({pct_val:.1f}%)</div>'
+            f'</div>'
+        )
 
-    st.markdown(f"""
-      <div style="box-sizing:border-box; width:100%; background:#f8f4ea; border:1px solid #b9ad99; border-radius:12px; box-shadow:0 8px 18px rgba(7,29,58,.12); padding:16px 20px 22px 20px; margin:0 0 16px 0; overflow:visible;">
-        <h3 style="margin:0 0 8px 0; color:#071d3a; font-size:22px; font-weight:950; line-height:1.1;">{html.escape(str(title))}</h3>
-        <div style="color:#071d3a; font-weight:950; font-size:15px; margin:0 0 10px 0;">
-          {total:,}<span style="color:#5f6b7a; font-size:12px; font-weight:800; margin-left:4px;">Total</span>
-        </div>
-        {''.join(rendered_rows)}
-      </div>
-    """, unsafe_allow_html=True)
+    chart_html = (
+        f'<div style="box-sizing:border-box;width:100%;background:#f8f4ea;border:1px solid #b9ad99;border-radius:12px;'
+        f'box-shadow:0 8px 18px rgba(7,29,58,.12);padding:16px 20px 22px 20px;margin:0 0 16px 0;overflow:visible;">'
+        f'<h3 style="margin:0 0 8px 0;color:#071d3a;font-size:22px;font-weight:950;line-height:1.1;">{html.escape(str(title))}</h3>'
+        f'<div style="color:#071d3a;font-weight:950;font-size:15px;margin:0 0 10px 0;">'
+        f'{total:,}<span style="color:#5f6b7a;font-size:12px;font-weight:800;margin-left:4px;">Total</span></div>'
+        f'{"".join(rendered_rows)}'
+        f'</div>'
+    )
+    st.markdown(chart_html, unsafe_allow_html=True)
 
 
 
