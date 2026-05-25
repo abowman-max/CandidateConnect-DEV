@@ -31,6 +31,493 @@ try:
 except Exception:
     pass
 
+
+def inject_clean_theme_css():
+    """Single Candidate Connect theme. Avoid broad global selectors that resize unrelated widgets."""
+    st.markdown("""
+<style>
+:root { color-scheme: light !important; }
+
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    background: #efe8d8 !important;
+    color: #071d3a !important;
+    font-size: 10pt !important;
+}
+
+.block-container {
+    max-width: 1280px !important;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+    padding: 9.0rem 1.25rem 1.25rem 1.5rem !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #071d3a !important;
+    font-weight: 900 !important;
+}
+
+p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
+
+/* fixed brand header */
+.cc-header { display: none !important; }
+
+.cc-global-header {
+    position: fixed !important;
+    inset: 0 0 auto 0 !important;
+    height: 142px !important;
+    z-index: 999999 !important;
+    background: #efe8d8 !important;
+    border-bottom: 2px solid #9f151c !important;
+    box-shadow: 0 6px 18px rgba(7,29,58,.16) !important;
+}
+
+.cc-global-sidebar-fill { display: none !important; }
+
+.cc-global-header-inner {
+    width: 100vw !important;
+    box-sizing: border-box !important;
+    padding: 10px 28px 12px 28px !important;
+}
+
+.cc-global-redbar {
+    height: 14px !important;
+    border-radius: 999px !important;
+    background: #940d14 !important;
+    border: 1px solid #5d0b10 !important;
+    margin-bottom: 6px !important;
+    box-shadow: 0 6px 14px rgba(7,29,58,.22) !important;
+}
+
+.cc-global-brand-row {
+    min-height: 108px !important;
+    display: grid !important;
+    grid-template-columns: 240px minmax(320px,1fr) 230px !important;
+    align-items: center !important;
+    gap: 18px !important;
+}
+
+.cc-global-tagline {
+    justify-self: start !important;
+    display: flex !important;
+    flex-direction: column !important;
+    color: #071d3a !important;
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+    font-size: 27px !important;
+    line-height: .92 !important;
+    letter-spacing: .02em !important;
+    text-transform: uppercase !important;
+    padding-left: 18px !important;
+}
+
+.cc-global-tagline span {
+    color: #071d3a !important;
+    text-shadow: 2px 2px 0 #f8f4ea, 3px 3px 5px rgba(7,29,58,.35) !important;
+}
+
+.cc-global-logo-center-wrap {
+    justify-self: center !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.cc-global-logo-center {
+    height: 96px !important;
+    max-width: 380px !important;
+    object-fit: contain !important;
+}
+
+.cc-global-logo-right {
+    justify-self: end !important;
+    height: 76px !important;
+    max-width: 230px !important;
+    object-fit: contain !important;
+}
+
+/* sidebar */
+[data-testid="stSidebar"] {
+    background: #e6ddcc !important;
+    border-right: 2px solid #9f151c !important;
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
+}
+
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 8.6rem !important;
+}
+
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
+
+[data-testid="stSidebar"] .stButton > button {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    width: 100% !important;
+    padding: 5px 9px !important;
+    margin: 0 0 4px 0 !important;
+    border-radius: 8px !important;
+    font-size: 10pt !important;
+    line-height: 1.1 !important;
+}
+
+/* real action buttons */
+.stButton > button,
+div[data-testid="stDownloadButton"] > button,
+[data-testid="stFileUploader"] button {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 9px !important;
+    font-weight: 850 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    min-height: 34px !important;
+    padding: 6px 12px !important;
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+}
+
+.stButton > button *,
+div[data-testid="stDownloadButton"] > button *,
+[data-testid="stFileUploader"] button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+    background: #d8cfc0 !important;
+    color: #7a0d14 !important;
+    -webkit-text-fill-color: #7a0d14 !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: 1 !important;
+}
+
+/* controls */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+textarea,
+input {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    border-color: #8b8171 !important;
+    font-size: 10pt !important;
+}
+
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+
+[role="option"],
+[role="option"] * {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+
+[role="option"]:hover,
+[role="option"][aria-selected="true"] {
+    background: #f1e7d6 !important;
+    color: #071d3a !important;
+}
+
+[data-baseweb="tag"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+}
+
+[data-baseweb="tag"] * {
+    color: #ffffff !important;
+}
+
+/* tabs: never style them like action buttons */
+div[data-testid="stTabs"] button,
+button[data-baseweb="tab"],
+[role="tab"] {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    font-weight: 900 !important;
+}
+
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"] *,
+[role="tab"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 4px !important;
+}
+
+/* cards and dashboard elements */
+.cc-card,
+.cc-home-card,
+.cc-metric,
+.cc-icon-metric {
+    background: #f8f4ea !important;
+    color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 18px rgba(7,29,58,.12) !important;
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+}
+
+.cc-home-title {
+    font-size: 21pt !important;
+    font-weight: 950 !important;
+    letter-spacing: .05em !important;
+    text-transform: uppercase !important;
+    color: #071d3a !important;
+    margin: 6px 0 12px 0 !important;
+}
+
+.cc-icon-metric {
+    min-height: 70px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+.cc-icon-dot {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 999px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%) !important;
+    color: #ffffff !important;
+}
+
+.cc-icon-dot.blue { background: radial-gradient(circle at 35% 20%, #60a5fa, #1d4ed8 72%) !important; }
+.cc-icon-dot.green { background: radial-gradient(circle at 35% 20%, #86efac, #3f8f27 72%) !important; }
+.cc-icon-dot.gold { background: radial-gradient(circle at 35% 20%, #fde68a, #b7791f 72%) !important; }
+
+.cc-icon-label,
+.cc-metric .label {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+    font-weight: 900 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .06em !important;
+}
+
+.cc-icon-value,
+.cc-metric .value {
+    color: #071d3a !important;
+    font-size: 19pt !important;
+    font-weight: 950 !important;
+    line-height: 1.05 !important;
+}
+
+.cc-icon-sub,
+.cc-metric .sub {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+}
+
+/* donut / charts */
+.cc-donut-wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 18px !important;
+    flex-wrap: wrap !important;
+    min-height: 190px !important;
+}
+
+.cc-donut {
+    width: 150px !important;
+    height: 150px !important;
+    border-radius: 50% !important;
+    position: relative !important;
+    flex: 0 0 auto !important;
+}
+
+.cc-donut:after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 40px !important;
+    border-radius: 50% !important;
+    background: #071d3a !important;
+}
+
+.cc-donut-center,
+.cc-donut-center * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+    position: relative !important;
+    z-index: 2 !important;
+}
+
+.cc-legend-row {
+    display: grid !important;
+    grid-template-columns: 14px minmax(120px, 1fr) auto !important;
+    gap: 8px !important;
+    align-items: center !important;
+    margin: 8px 0 !important;
+    color: #071d3a !important;
+    font-size: 10pt !important;
+}
+
+.cc-swatch {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 999px !important;
+}
+
+.cc-age-row {
+    display: grid !important;
+    grid-template-columns: 64px 1fr 72px !important;
+    gap: 10px !important;
+    align-items: center !important;
+    margin: 7px 0 !important;
+    font-size: 10pt !important;
+}
+
+.cc-age-bar-bg {
+    height: 14px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+}
+
+.cc-age-bar {
+    height: 100% !important;
+    border-radius: 999px !important;
+    background: linear-gradient(90deg, #8b0d13, #ef4444) !important;
+}
+
+/* tables */
+.cc-table-wrap,
+.cc-scroll-table {
+    overflow: auto !important;
+    border: 1px solid #9f151c !important;
+    border-radius: 10px !important;
+    background: #ffffff !important;
+    margin: 8px 0 16px 0 !important;
+}
+
+.cc-html-table,
+.cc-home-table {
+    width: 100% !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+}
+
+.cc-html-table th,
+.cc-home-table th {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    text-align: center !important;
+    font-weight: 900 !important;
+    padding: 8px 10px !important;
+}
+
+.cc-html-table td,
+.cc-home-table td {
+    color: #000000 !important;
+    text-align: center !important;
+    padding: 7px 10px !important;
+    border-bottom: 1px solid #e7dfd2 !important;
+    vertical-align: middle !important;
+}
+
+.cc-html-table tbody tr:nth-child(even) td,
+.cc-home-table tbody tr:nth-child(even) td {
+    background: #f3eadc !important;
+}
+
+.cc-empty-table,
+.cc-note,
+.cc-verify {
+    border: 1px solid #8aa3bf !important;
+    background: #d9e8f8 !important;
+    color: #071d3a !important;
+    border-radius: 10px !important;
+    padding: 11px 13px !important;
+    margin: 10px 0 14px 0 !important;
+}
+
+/* login/setup */
+.cc-login-spacer { height: 2rem !important; }
+
+.cc-login-title {
+    text-align: center !important;
+    color: #071d3a !important;
+    font-size: 18pt !important;
+    font-weight: 950 !important;
+    margin-bottom: .25rem !important;
+}
+
+.cc-login-subtitle {
+    text-align: center !important;
+    color: #5f6b7a !important;
+    font-size: 10pt !important;
+    margin-bottom: 1rem !important;
+}
+
+div[data-testid="stForm"] {
+    max-width: 430px;
+}
+
+[data-testid="stFileUploader"] section {
+    background: #fbf7ee !important;
+    border: 1px solid rgba(170,20,30,.35) !important;
+    border-radius: 12px !important;
+}
+
+/* keep Streamlit menu hidden, but keep header recovery/collapse controls available */
+#MainMenu,
+footer,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+    visibility: hidden !important;
+    height: 0 !important;
+}
+
+header[data-testid="stHeader"] {
+    visibility: visible !important;
+    height: auto !important;
+    background: transparent !important;
+}
+
+/* Responsive header */
+@media (max-width: 900px) {
+    .cc-global-header { height: 118px !important; }
+    .block-container { padding-top: 7.8rem !important; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 7.8rem !important; }
+    .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
+    .cc-global-tagline { font-size: 17px !important; padding-left: 4px !important; }
+    .cc-global-logo-center { height: 70px !important; max-width: 230px !important; }
+    .cc-global-logo-right { height: 50px !important; max-width: 140px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+inject_clean_theme_css()
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
 VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
@@ -98,1597 +585,50 @@ DEFAULT_EXPORT_COLUMNS = [
     "Tags",
 ]
 
-st.markdown(
-    """
-<style>
-html, body, [data-testid="stAppViewContainer"], .stApp {
-    background: #000000 !important;
-    color: #f8fafc !important;
-}
-[data-testid="stSidebar"] {
-    background: #05080d !important;
-    border-right: 1px solid rgba(201,31,39,.45);
-}
-.block-container { padding-top: 1.1rem; max-width: 1550px; }
-.cc-header {
-    border: 1px solid rgba(201,31,39,.85);
-    border-radius: 18px;
-    padding: 18px 22px;
-    background: radial-gradient(circle at 80% 0%, rgba(201,31,39,.23), transparent 35%),
-                linear-gradient(90deg, #03070c, #0b111a 55%, #190407);
-    box-shadow: 0 14px 35px rgba(0,0,0,.45);
-    margin-bottom: 16px;
-}
-.cc-title { font-size: 30px; font-weight: 950; color: #fff; }
-.cc-sub { color: #cbd5e1; margin-top: 4px; font-size: 13px; }
-.cc-card {
-    border: 1px solid rgba(148,163,184,.24);
-    border-radius: 16px;
-    background: linear-gradient(180deg, #07101a, #03070c);
-    padding: 16px;
-    margin-bottom: 16px;
-}
-.cc-metric {
-    border: 1px solid rgba(148,163,184,.22);
-    border-left: 4px solid #c91f27;
-    border-radius: 14px;
-    background: linear-gradient(180deg, #0d1724, #07101a);
-    padding: 16px;
-    min-height: 96px;
-}
-.cc-metric.blue { border-left-color:#1d4ed8; }
-.cc-metric.green { border-left-color:#4c9a2a; }
-.cc-metric.gold { border-left-color:#f2b84b; }
-.cc-metric .label {
-    color: #94a3b8;
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: .05em;
-    text-transform: uppercase;
-}
-.cc-metric .value {
-    color: #fff;
-    font-size: 28px;
-    font-weight: 950;
-    margin-top: 8px;
-}
-.cc-metric .sub {
-    color: #cbd5e1;
-    font-size: 11px;
-    margin-top: 4px;
-}
-.cc-note {
-    border: 1px solid rgba(59,130,246,.35);
-    background: rgba(15,23,42,.95);
-    color: #dbeafe;
-    border-radius: 12px;
-    padding: 12px 14px;
-    margin: 12px 0 16px 0;
-    font-size: 13px;
-}
-.cc-verify {
-    border: 1px solid rgba(242,184,75,.35);
-    background: rgba(48, 31, 6, .75);
-    color: #fef3c7;
-    border-radius: 12px;
-    padding: 12px 14px;
-    margin: 12px 0 16px 0;
-    font-size: 13px;
-}
-.stButton > button, div[data-testid="stDownloadButton"] > button {
-    border-radius: 10px !important;
-    font-weight: 850 !important;
-    background: linear-gradient(180deg, #9f151c, #6e0f14) !important;
-    color: white !important;
-    border: 1px solid rgba(242,184,75,.45) !important;
-}
-[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input {
-    background-color: #0f172a !important;
-    color: #f8fafc !important;
-    border-color: #334155 !important;
-}
-[data-baseweb="tag"] { background: rgba(201,31,39,.30) !important; color: white !important; }
-.stAlert { background: rgba(15,23,42,.95) !important; color: #f8fafc !important; }
+pass
 
-.cc-powered {
-    border: 1px solid rgba(242,184,75,.35);
-    border-radius: 14px;
-    padding: 10px 16px;
-    background: rgba(0,0,0,.25);
-    text-align: center;
-}
-
-
-div[data-testid="stHorizontalBlock"] .stButton > button {
-    min-height: 34px !important;
-    padding: 0.25rem 0.75rem !important;
-    font-size: 12px !important;
-}
-
-
-/* v12 fixes selected-option chip clipping */
-[data-baseweb="tag"] {
-    padding-left: 8px !important;
-    margin-left: 2px !important;
-}
-[data-baseweb="tag"] span {
-    padding-left: 2px !important;
-}
-[data-baseweb="select"] input {
-    padding-left: 6px !important;
-}
-
-
-/* v13 stronger selected-chip clipping fix */
-[data-baseweb="tag"] {
-    padding-left: 12px !important;
-    margin-left: 6px !important;
-    max-width: none !important;
-}
-[data-baseweb="tag"] span {
-    padding-left: 4px !important;
-}
-[data-baseweb="select"] > div {
-    padding-left: 8px !important;
-}
-[data-baseweb="select"] input {
-    padding-left: 10px !important;
-}
-
-
-/* v15 stronger chip visibility */
-[data-baseweb="tag"] {
-    padding-left: 18px !important;
-    margin-left: 8px !important;
-    max-width: none !important;
-}
-[data-baseweb="tag"] span,
-[data-baseweb="tag"] div {
-    padding-left: 4px !important;
-}
-
-
-/* v17 top nav polish */
-div[data-testid="stHorizontalBlock"] .stButton > button {
-    min-height: 34px !important;
-    padding: 0.25rem 0.75rem !important;
-    font-size: 12px !important;
-}
-
-
-/* v19 sidebar roll-up section polish */
-[data-testid="stSidebar"] details {
-    border: 1px solid rgba(148,163,184,.22);
-    border-radius: 10px;
-    padding: 2px 6px;
-    margin-bottom: 8px;
-    background: rgba(15,23,42,.35);
-}
-[data-testid="stSidebar"] summary {
-    font-weight: 850 !important;
-    color: #f8fafc !important;
-}
-
-
-/* v20 sidebar readability fixes */
-[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details[open] {
-    background: rgba(15,23,42,.55) !important;
-    border: 1px solid rgba(148,163,184,.30) !important;
-    border-radius: 10px !important;
-    margin-bottom: 9px !important;
-}
-[data-testid="stSidebar"] summary,
-[data-testid="stSidebar"] summary * {
-    color: #f8fafc !important;
-    font-weight: 900 !important;
-}
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] label *,
-[data-testid="stSidebar"] .stMarkdown,
-[data-testid="stSidebar"] p {
-    color: #f8fafc !important;
-    opacity: 1 !important;
-}
-[data-testid="stSidebar"] [data-baseweb="tag"] {
-    padding-left: 18px !important;
-    margin-left: 8px !important;
-    max-width: none !important;
-}
-[data-testid="stSidebar"] [data-baseweb="tag"] span,
-[data-testid="stSidebar"] [data-baseweb="tag"] div {
-    padding-left: 4px !important;
-}
-
-
-/* v20f force dark sidebar expander headers */
-[data-testid="stSidebar"] details > summary,
-[data-testid="stSidebar"] details > summary:hover,
-[data-testid="stSidebar"] details > summary:focus,
-[data-testid="stSidebar"] details > summary:active {
-    background-color: #0f172a !important;
-    background: #0f172a !important;
-    color: #f8fafc !important;
-    border-radius: 8px !important;
-    min-height: 34px !important;
-    padding: 8px 10px !important;
-}
-[data-testid="stSidebar"] details > summary *,
-[data-testid="stSidebar"] details > summary svg {
-    color: #f8fafc !important;
-    fill: #f8fafc !important;
-}
-[data-testid="stSidebar"] details[open] > summary {
-    background-color: #111827 !important;
-    background: #111827 !important;
-    border: 1px solid rgba(201,31,39,.65) !important;
-}
-
-
-/* v21s restored local-style dashboard cards */
-.cc-home-title { font-size: 28px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; margin: 10px 0 18px 0; color: #f8fafc; }
-.cc-home-card { border: 1px solid rgba(148,163,184,.28); border-radius: 16px; background: linear-gradient(180deg, #07101a, #02060b); padding: 18px; box-shadow: 0 14px 28px rgba(0,0,0,.35); margin-bottom: 16px; }
-.cc-icon-metric { display:flex; align-items:center; gap:14px; border:1px solid rgba(148,163,184,.25); border-left:4px solid #c91f27; border-radius:16px; background:linear-gradient(180deg,#0c1624,#050b12); padding:18px 16px; min-height:94px; }
-.cc-icon-metric.blue { border-left-color:#2454d6; } .cc-icon-metric.green { border-left-color:#4c9a2a; } .cc-icon-metric.gold { border-left-color:#f2b84b; }
-.cc-icon-dot { width:46px; height:46px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.18), 0 8px 18px rgba(201,31,39,.25); font-size:21px; }
-.cc-icon-dot.blue { background:radial-gradient(circle at 35% 20%, #60a5fa, #1d4ed8 72%); } .cc-icon-dot.green { background:radial-gradient(circle at 35% 20%, #86efac, #3f8f27 72%); } .cc-icon-dot.gold { background:radial-gradient(circle at 35% 20%, #fde68a, #b7791f 72%); }
-.cc-icon-label { color:#94a3b8; font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; } .cc-icon-value { color:#fff; font-size:29px; line-height:1.15; font-weight:950; margin-top:4px; } .cc-icon-sub { color:#cbd5e1; font-size:11px; margin-top:2px; }
-.cc-donut-wrap { display:flex; align-items:center; justify-content:center; gap:28px; min-height:275px; }
-.cc-donut { --r:40; --d:43; --o:17; width:220px; height:220px; border-radius:50%; background:conic-gradient(#d51f2a 0 calc(var(--r)*1%), #2454d6 calc(var(--r)*1%) calc((var(--r) + var(--d))*1%), #4c9a2a calc((var(--r) + var(--d))*1%) 100%); position:relative; box-shadow:0 18px 35px rgba(0,0,0,.38), inset 0 0 0 1px rgba(255,255,255,.12); }
-.cc-donut:after { content:''; position:absolute; inset:58px; border-radius:50%; background:#050b12; box-shadow:inset 0 0 0 1px rgba(148,163,184,.24); }
-.cc-donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:2; font-weight:950; color:#fff; }
-.cc-legend-row { display:grid; grid-template-columns:16px 1fr auto; gap:10px; align-items:center; margin:12px 0; color:#f8fafc; } .cc-swatch { width:12px; height:12px; border-radius:999px; }
-.cc-age-row { display:grid; grid-template-columns:80px 1fr 70px; gap:12px; align-items:center; margin:13px 0; } .cc-age-bar-bg { height:18px; border-radius:999px; background:#111827; border:1px solid rgba(148,163,184,.2); overflow:hidden; } .cc-age-bar { height:100%; border-radius:999px; background:linear-gradient(90deg,#8b0d13,#ef4444); }
-.cc-home-table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; } .cc-home-table th { color:#f8fafc; background:#111827; padding:11px; font-size:12px; text-align:left; } .cc-home-table td { color:#e5e7eb; background:#0b1220; padding:10px 11px; border-top:1px solid rgba(148,163,184,.15); font-size:12px; }
-
-
-/* v21u compact dashboard/output polish */
-.cc-header { padding: 10px 16px !important; margin-bottom: 10px !important; }
-.cc-title { font-size: 24px !important; }
-.cc-sub { font-size: 11px !important; }
-.cc-home-title { font-size: 24px !important; margin: 8px 0 12px 0 !important; }
-.cc-icon-metric { min-height: 72px !important; padding: 12px !important; }
-.cc-icon-dot { width: 42px !important; height: 42px !important; font-size: 20px !important; }
-.cc-icon-value { font-size: 24px !important; }
-.cc-icon-label, .cc-icon-sub { font-size: 10px !important; }
-.cc-home-card { padding: 14px !important; margin-bottom: 12px !important; border-radius: 12px !important; }
-.cc-home-card h3 { font-size: 20px !important; margin: 0 0 10px 0 !important; }
-.cc-donut-wrap { gap: 18px !important; min-height: 190px !important; justify-content:flex-start !important; }
-.cc-donut { width: 150px !important; height: 150px !important; }
-.cc-donut:after { inset: 40px !important; }
-.cc-donut-center { font-size: 12px !important; }
-.cc-legend-row { font-size: 12px !important; grid-template-columns: 14px 130px 120px !important; gap: 8px !important; }
-.cc-age-row { grid-template-columns: 64px 1fr 72px !important; gap: 10px !important; font-size: 12px !important; margin: 8px 0 !important; }
-.cc-age-bar-bg { height: 14px !important; }
-.cc-home-table { font-size: 11px !important; }
-.cc-scroll-table { max-height: 245px; overflow-y: auto; border:1px solid rgba(148,163,184,.20); border-radius:10px; }
-.cc-section-tabs { display:flex; gap:8px; margin: 12px 0 10px 0; }
-
-
-
-/* v21zr table readability polish */
-[data-testid="stDataFrame"] div[role="gridcell"],
-[data-testid="stDataFrame"] div[role="columnheader"] {
-    text-align: center !important;
-}
-[data-testid="stDataFrame"] div[role="columnheader"] {
-    font-weight: 900 !important;
-}
-
-
-/* v22p readability lock: stable light workspace independent of browser/system theme */
-:root { color-scheme: light !important; }
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .main {
-    background: #f3efe6 !important;
-    color: #0b1f3a !important;
-}
-[data-testid="stSidebar"] {
-    background: #e7e0d2 !important;
-    color: #0b1f3a !important;
-    border-right: 2px solid #9f151c !important;
-}
-[data-testid="stSidebar"] *, .stMarkdown, .stMarkdown *, p, label, span, div {
-    color: #0b1f3a;
-}
-/* Keep form controls readable */
-[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input {
-    background-color: #ffffff !important;
-    color: #0b1f3a !important;
-    border-color: #9ca3af !important;
-}
-[data-baseweb="popover"], [role="listbox"] { background:#ffffff !important; color:#0b1f3a !important; }
-[role="option"], [role="option"] * { color:#0b1f3a !important; background:#ffffff !important; }
-[data-baseweb="tag"] { background:#9f151c !important; color:#ffffff !important; }
-[data-baseweb="tag"] * { color:#ffffff !important; }
-.stButton > button, div[data-testid="stDownloadButton"] > button {
-    background: linear-gradient(180deg, #a5161d, #7f1016) !important;
-    color: #ffffff !important;
-    border: 1px solid #5f0b10 !important;
-    border-radius: 9px !important;
-    font-weight: 850 !important;
-}
-.stButton > button *, div[data-testid="stDownloadButton"] > button * { color:#ffffff !important; }
-/* Tables: readable, centered, striped, sticky-looking headers where Streamlit allows */
-[data-testid="stDataFrame"] div[role="gridcell"], [data-testid="stDataFrame"] div[role="columnheader"], [data-testid="stDataFrame"] div[role="rowheader"] {
-    color: #000000 !important;
-    text-align: center !important;
-    justify-content: center !important;
-    align-items: center !important;
-}
-[data-testid="stDataFrame"] div[role="columnheader"], [data-testid="stDataFrame"] div[role="rowheader"] {
-    background: #9f151c !important;
-    color: #ffffff !important;
-    font-weight: 900 !important;
-}
-[data-testid="stDataFrame"] div[role="columnheader"] *, [data-testid="stDataFrame"] div[role="rowheader"] * {
-    color: #ffffff !important;
-}
-[data-testid="stDataFrame"] div[role="gridcell"] { background:#fffaf0 !important; }
-[data-testid="stDataFrame"] div[role="row"]:nth-child(even) div[role="gridcell"] { background:#eee7d8 !important; }
-/* Hide Streamlit chrome as much as possible for testers */
-#MainMenu, footer, header, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { visibility:hidden !important; height:0 !important; }
-.block-container { padding-top: .7rem !important; }
-
-
-
-/* v22q hard readability override: stable light app regardless of system dark mode */
-:root { color-scheme: light !important; }
-html, body, .stApp, [data-testid="stAppViewContainer"] {
-    background: #efe8d8 !important;
-    color: #071d3a !important;
-}
-[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
-    background: #e2dac8 !important;
-    color: #071d3a !important;
-    border-right: 2px solid #9f151c !important;
-}
-.block-container {
-    background: #efe8d8 !important;
-    color: #071d3a !important;
-}
-/* hide Streamlit chrome as much as Streamlit allows */
-#MainMenu, footer, header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] {
-    visibility: hidden !important;
-    height: 0px !important;
-}
-
-h1,h2,h3,h4,h5,h6, p, span, label, div, .stMarkdown, .stCaption, [data-testid="stMarkdownContainer"] {
-    color: #071d3a !important;
-}
-.cc-header, .cc-card, .cc-home-card, .cc-metric, .cc-icon-metric {
-    background: #f8f4ea !important;
-    color: #071d3a !important;
-    border: 1px solid #b9ad99 !important;
-    box-shadow: 0 8px 18px rgba(7,29,58,.16) !important;
-}
-.cc-header { border-top: 10px solid #9f151c !important; border-radius: 14px !important; }
-.cc-title, .cc-sub, .cc-home-title, .cc-home-card h3, .cc-card h3,
-.cc-metric .label, .cc-metric .value, .cc-metric .sub,
-.cc-icon-label, .cc-icon-value, .cc-icon-sub {
-    color: #071d3a !important;
-}
-.cc-note, .cc-verify, .stAlert {
-    background: #d9e8f8 !important;
-    color: #071d3a !important;
-    border: 1px solid #8aa3bf !important;
-}
-/* inputs/select dropdowns */
-[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input {
-    background: #ffffff !important;
-    color: #071d3a !important;
-    border-color: #8b8171 !important;
-}
-[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
-    background: #ffffff !important;
-    color: #071d3a !important;
-}
-[data-baseweb="popover"] *, [data-baseweb="menu"] *, [role="option"], [role="option"] * {
-    background: #ffffff !important;
-    color: #071d3a !important;
-}
-[role="option"]:hover, [role="option"][aria-selected="true"] {
-    background: #f1e7d6 !important;
-    color: #071d3a !important;
-}
-[data-baseweb="tag"] {
-    background: #7f1218 !important;
-    color: #ffffff !important;
-}
-[data-baseweb="tag"] * { color: #ffffff !important; }
-/* buttons */
-.stButton > button, div[data-testid="stDownloadButton"] > button {
-    background: linear-gradient(180deg, #a71820, #7f1016) !important;
-    color: #ffffff !important;
-    border: 1px solid #5d0b10 !important;
-}
-.stButton > button *, div[data-testid="stDownloadButton"] > button * { color:#ffffff !important; }
-/* tables/dataframes: readable, centered, zebra where supported */
-[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame {
-    background: #ffffff !important;
-    color: #000000 !important;
-    border: 1px solid #9f151c !important;
-}
-[data-testid="stDataFrame"] * { color: #000000 !important; }
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] [role="columnheader"] {
-    background: #9f151c !important;
-    color: #ffffff !important;
-    text-align: center !important;
-    font-weight: 900 !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"] * { color:#ffffff !important; }
-[data-testid="stDataFrame"] [role="gridcell"] {
-    text-align: center !important;
-    justify-content: center !important;
-    color: #000000 !important;
-}
-/* Plotly/chart menu hover readability */
-.modebar, .modebar-container, .modebar-group {
-    background: #ffffff !important;
-    border: 1px solid #9f151c !important;
-    border-radius: 8px !important;
-}
-.modebar-btn svg path { fill: #071d3a !important; }
-.modebar-btn:hover { background: #f1e7d6 !important; }
-.svg-container, .main-svg { background: transparent !important; }
-/* Sidebar expander/readability */
-[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details[open],
-[data-testid="stSidebar"] details > summary,
-[data-testid="stSidebar"] details[open] > summary {
-    background: #f8f4ea !important;
-    color: #071d3a !important;
-    border-color: #8b8171 !important;
-}
-[data-testid="stSidebar"] details > summary *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
-    color: #071d3a !important;
-}
-
-
-
-/* v22s final readability lock: light UI, dark text, red controls, no dark-mode bleed-through */
-:root { color-scheme: light !important; }
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
-    background: #efe8d8 !important;
-    color: #071d3a !important;
-}
-[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
-    background: #e6ddcc !important;
-    color: #071d3a !important;
-    border-right: 2px solid #9f151c !important;
-}
-.block-container { padding-top: 8.8rem !important; }
-[data-testid="stSidebar"] > div:first-child { padding-top: 8.25rem !important; }
-.cc-header { display: none !important; }
-.cc-global-header {
-    position: fixed; top: 0; left: 0; right: 0; height: 140px; z-index: 999999;
-    background: #efe8d8; border-bottom: 2px solid #9f151c;
-    box-shadow: 0 6px 18px rgba(7,29,58,.20);
-    display: grid; grid-template-columns: 260px minmax(0,1fr); align-items: stretch;
-}
-.cc-global-sidebar-fill { border-right: 2px solid #9f151c; background:#e6ddcc; }
-.cc-global-header-inner {
-    margin: 0 auto; max-width: 1280px; width: min(1280px, calc(100vw - 290px));
-    padding: 10px 24px 8px 24px;
-}
-.cc-global-redbar { height: 14px; border-radius: 999px; background:#940d14; border:1px solid #5d0b10; margin-bottom:8px; box-shadow:0 6px 14px rgba(7,29,58,.25); }
-.cc-global-brand-row { display:flex; align-items:center; justify-content:space-between; gap:24px; }
-.cc-global-logo-left { height:78px; object-fit:contain; }
-.cc-global-logo-right { height:78px; max-width:300px; object-fit:contain; }
-.cc-global-title { text-align:center; flex:1; color:#071d3a !important; font-weight:950; font-size:22px; line-height:1.15; }
-.cc-global-sub { color:#071d3a !important; font-size:10px; font-weight:700; opacity:.95; margin-top:4px; }
-@media (max-width: 900px) {
-  .cc-global-header { grid-template-columns: 0 minmax(0,1fr); height: 112px; }
-  .cc-global-sidebar-fill { display:none; }
-  .cc-global-header-inner { width:100%; padding-left:12px; padding-right:12px; }
-  .cc-global-logo-left { height:58px; } .cc-global-logo-right { height:58px; max-width:180px; }
-  .cc-global-title { font-size:16px; }
-}
-
-.cc-card, .cc-home-card, .cc-metric, .cc-icon-metric, .cc-note, .cc-verify, .stAlert,
-div[data-testid="stMetric"], div[data-testid="stExpander"], div[data-testid="stForm"], .element-container {
-    color:#071d3a !important;
-}
-.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric, div[data-testid="stMetric"] {
-    background:#f8f4ea !important; border-color:#b9ad99 !important;
-}
-.cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric *, .cc-note *, .cc-verify *, div[data-testid="stMetric"] * {
-    color:#071d3a !important; opacity:1 !important; text-shadow:none !important;
-}
-.cc-icon-dot, .cc-swatch { color:#ffffff !important; }
-.cc-donut-center, .cc-donut-center * { color:#ffffff !important; }
-.cc-legend-row, .cc-age-row, .cc-age-row *, .cc-home-table, .cc-home-table * { color:#071d3a !important; opacity:1 !important; }
-.cc-home-table th { background:#9f151c !important; color:#ffffff !important; text-align:center !important; }
-.cc-home-table th * { color:#ffffff !important; }
-.cc-home-table td { background:#ffffff !important; color:#000000 !important; text-align:center !important; }
-.cc-home-table tr:nth-child(even) td { background:#f3eadc !important; }
-
-[data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea, input,
-[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"],
-[data-baseweb="popover"] div, [data-baseweb="menu"] div, [role="option"], [role="option"] * {
-    background:#ffffff !important; color:#071d3a !important; opacity:1 !important; text-shadow:none !important;
-}
-[role="option"]:hover, [role="option"][aria-selected="true"], [data-baseweb="menu"] li:hover {
-    background:#f1e7d6 !important; color:#071d3a !important;
-}
-
-[data-testid="stDataFrame"], [data-testid="stTable"], .stDataFrame, .stTable {
-    background:#ffffff !important; color:#000000 !important; border:1px solid #9f151c !important;
-}
-[data-testid="stDataFrame"] *, [data-testid="stTable"] * { color:#000000 !important; opacity:1 !important; text-shadow:none !important; }
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stTable"] th, [data-testid="stTable"] th * {
-    background:#9f151c !important; color:#ffffff !important; text-align:center !important; font-weight:900 !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"], [data-testid="stTable"] td {
-    background:#ffffff !important; color:#000000 !important; text-align:center !important; justify-content:center !important;
-}
-[data-testid="stDataFrame"] [role="row"]:nth-child(even) [role="gridcell"], [data-testid="stTable"] tr:nth-child(even) td {
-    background:#f3eadc !important;
-}
-
-.modebar, .modebar-container, .modebar-group { background:#ffffff !important; border:1px solid #9f151c !important; }
-.modebar-btn svg path { fill:#071d3a !important; }
-.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
-.hoverlayer .hovertext text { fill:#071d3a !important; }
-
-
-/* v22s professional readability cleanup */
-.cc-global-header { grid-template-columns: minmax(0,1fr) !important; left:0 !important; right:0 !important; width:100vw !important; }
-.cc-global-sidebar-fill { display:none !important; }
-.cc-global-header-inner { max-width:none !important; width:100vw !important; margin:0 !important; padding-left:64px !important; padding-right:64px !important; box-sizing:border-box !important; }
-.cc-global-redbar { width:100% !important; }
-.cc-global-title { font-size:30px !important; letter-spacing:.03em !important; text-transform:none !important; }
-.cc-global-title span { display:inline-block; padding:5px 18px; border-top:2px solid #9f151c; border-bottom:2px solid #9f151c; color:#071d3a !important; }
-.cc-global-title-rule { width:120px; height:4px; background:#9f151c; border-radius:999px; margin:7px auto 0 auto; }
-[data-testid="stSidebar"] > div:first-child { padding-top: 7.4rem !important; }
-.stButton > button, div[data-testid="stDownloadButton"] > button, button { color:#ffffff !important; }
-.stButton > button *, div[data-testid="stDownloadButton"] > button *, button * { color:#ffffff !important; }
-/* Voter top metrics should blend with the page instead of looking like mismatched cards. */
-div[data-testid="stMetric"] { background:#efe8d8 !important; border:0 !important; box-shadow:none !important; padding:4px 0 !important; }
-div[data-testid="stMetric"] * { color:#071d3a !important; }
-/* Strong table readability across app, including Streamlit's canvas/grid wrappers. */
-[data-testid="stDataFrame"] { background:#ffffff !important; border:1px solid #9f151c !important; border-radius:8px !important; overflow:hidden !important; }
-[data-testid="stDataFrame"] [role="grid"], [data-testid="stDataFrame"] div[class*="stDataFrame"], [data-testid="stDataFrame"] canvas { background:#ffffff !important; }
-[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"] { color:#000000 !important; text-align:center !important; justify-content:center !important; }
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] * { background:#9f151c !important; color:#ffffff !important; text-align:center !important; font-weight:900 !important; }
-/* Plotly modebar/hover menu readability. */
-.modebar, .modebar-container, .modebar-group { background:#ffffff !important; border:1px solid #9f151c !important; box-shadow:0 4px 12px rgba(7,29,58,.2) !important; }
-.modebar-btn, .modebar-btn * { color:#071d3a !important; fill:#071d3a !important; }
-.modebar-btn svg path { fill:#071d3a !important; }
-.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
-.hoverlayer .hovertext text { fill:#071d3a !important; }
-/* Election history table: light, centered, readable. */
-.cc-history-scroll { max-width:100%; overflow-x:auto; padding-bottom:4px; }
-.cc-history-table { border-collapse:collapse !important; min-width:760px !important; background:#ffffff !important; color:#071d3a !important; font-size:13px !important; border:1px solid #9f151c !important; }
-.cc-history-table th, .cc-history-table td { border:1px solid #c8bca8 !important; text-align:center !important; vertical-align:middle !important; padding:8px 10px !important; line-height:1.35 !important; height:34px !important; color:#071d3a !important; background:#ffffff !important; }
-.cc-history-table th { background:#9f151c !important; color:#ffffff !important; font-weight:900 !important; }
-.cc-history-table th:first-child, .cc-history-table td:first-child { position:sticky; left:0; z-index:2; min-width:64px; font-weight:900; }
-.cc-history-table td:first-child { background:#f3eadc !important; color:#071d3a !important; }
-.cc-history-table tr:nth-child(even) td:not(:first-child) { background:#f3eadc !important; }
-.cc-history-table tr:nth-child(odd) td:not(:first-child) { background:#ffffff !important; }
-.cc-history-table th:first-child { background:#9f151c !important; color:#ffffff !important; }
-/* Remove dark chart/card bleed-through. */
-.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric { background:#f8f4ea !important; color:#071d3a !important; }
-.cc-home-card *, .cc-card *, .cc-metric *, .cc-icon-metric * { color:#071d3a !important; opacity:1 !important; }
-
-
-
-/* v22t surgical readability fix: do not allow blue-on-dark chart text or invisible tables. */
-.cc-global-header { height: 140px !important; }
-.cc-global-header-inner { width:100vw !important; max-width:none !important; padding-left:28px !important; padding-right:28px !important; }
-.cc-global-brand-row { display:grid !important; grid-template-columns: 260px minmax(280px,1fr) 260px !important; align-items:center !important; }
-.cc-global-title span {
-    display:inline-block !important;
-    padding:8px 28px !important;
-    border:2px solid #9f151c !important;
-    border-radius:999px !important;
-    background:linear-gradient(180deg,#ffffff,#f3eadc) !important;
-    box-shadow:0 6px 14px rgba(7,29,58,.18) !important;
-    font-size:28px !important;
-    letter-spacing:.04em !important;
-    color:#071d3a !important;
-}
-.cc-global-title-rule { width:220px !important; height:3px !important; margin-top:8px !important; }
-
-.cc-home-card, .cc-card, .cc-metric, .cc-icon-metric { background:#f8f4ea !important; }
-.cc-home-card h3, .cc-card h3, .cc-age-row, .cc-age-row *, .cc-legend-row, .cc-legend-row *,
-.cc-icon-label, .cc-icon-value, .cc-icon-sub, .cc-metric .label, .cc-metric .value, .cc-metric .sub {
-    color:#071d3a !important; opacity:1 !important;
-}
-.cc-donut-center, .cc-donut-center *, .cc-donut-center .value, .cc-donut-center .label {
-    color:#ffffff !important; fill:#ffffff !important; opacity:1 !important; text-shadow:0 1px 2px #000 !important;
-}
-.cc-donut:after { background:#071d3a !important; }
-
-/* Sidebar expanders: hover and selected states stay readable. */
-[data-testid="stSidebar"] details > summary:hover,
-[data-testid="stSidebar"] details > summary:hover *,
-[data-testid="stSidebar"] details[open] > summary,
-[data-testid="stSidebar"] details[open] > summary * {
-    background:#f8f4ea !important; color:#071d3a !important;
-}
-[data-testid="stSidebar"] details[open] > summary { border:2px solid #9f151c !important; }
-
-/* White button text everywhere. */
-.stButton > button, .stButton > button *, div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button * {
-    color:#ffffff !important; opacity:1 !important;
-}
-
-/* Native dataframe fallback: use dark red header, white body, black text, no black dead zones. */
-[data-testid="stDataFrame"] { background:#ffffff !important; border:1px solid #9f151c !important; border-radius:10px !important; }
-[data-testid="stDataFrame"] [role="grid"], [data-testid="stDataFrame"] canvas, [data-testid="stDataFrame"] div { background-color:transparent !important; }
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] * { background:#9f151c !important; color:#ffffff !important; text-align:center !important; }
-[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="rowheader"], [data-testid="stDataFrame"] [role="gridcell"] * { color:#000000 !important; text-align:center !important; justify-content:center !important; }
-
-/* Reliable HTML tables used by analysis sections. */
-.cc-table-wrap {
-    overflow:auto; border:1px solid #9f151c; border-radius:10px; background:#ffffff; margin:8px 0 18px 0;
-}
-.cc-html-table { border-collapse:separate; border-spacing:0; width:100%; font-size:14px; color:#000000; background:#ffffff; }
-.cc-html-table th { position:sticky; top:0; z-index:5; background:#9f151c; color:#ffffff; text-align:center; font-weight:900; padding:10px 12px; border-right:1px solid rgba(255,255,255,.35); white-space:nowrap; }
-.cc-html-table td { color:#000000; text-align:center; padding:9px 12px; border-right:1px solid #dfd7c8; border-bottom:1px solid #e7dfd2; vertical-align:middle; }
-.cc-html-table tbody tr:nth-child(odd) td { background:#ffffff; }
-.cc-html-table tbody tr:nth-child(even) td { background:#f3eadc; }
-.cc-table-wrap.sticky-first .cc-html-table th:first-child,
-.cc-table-wrap.sticky-first .cc-html-table td:first-child { position:sticky; left:0; z-index:6; font-weight:900; min-width:150px; }
-.cc-table-wrap.sticky-first .cc-html-table td:first-child { background:#fff7ea; }
-.cc-table-wrap.sticky-first .cc-html-table th:first-child { background:#9f151c; color:#ffffff; z-index:7; }
-.cc-empty-table { border:1px solid #b9ad99; border-radius:10px; background:#ffffff; color:#071d3a; padding:14px; text-align:center; font-weight:800; margin:8px 0 18px 0; }
-
-/* Plotly hover/modebar: no black tooltip with black/blue text. */
-.modebar, .modebar-container, .modebar-group, .modebar-btn { background:#ffffff !important; color:#071d3a !important; }
-.modebar-btn svg path, .modebar-btn svg, .modebar-btn * { fill:#071d3a !important; color:#071d3a !important; }
-.hoverlayer .hovertext path { fill:#ffffff !important; stroke:#9f151c !important; }
-.hoverlayer .hovertext text { fill:#071d3a !important; }
-
-/* Select menus: remove internal code-looking options visually where Streamlit leaves old items cached. */
-[role="option"] { color:#071d3a !important; background:#ffffff !important; }
-[role="option"]:hover { background:#f1e7d6 !important; color:#071d3a !important; }
-
-
-/* v22u final polish: home table numbers + branded tagline/header balance */
-.cc-global-brand-row { grid-template-columns: 260px minmax(320px,1fr) 260px !important; }
-.cc-global-tagline {
-    justify-self:start !important;
-    display:flex !important;
-    flex-direction:column !important;
-    gap:1px !important;
-    padding-left:18px !important;
-    color:#071d3a !important;
-    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
-    font-weight:900 !important;
-    font-size:26px !important;
-    line-height:.93 !important;
-    letter-spacing:.02em !important;
-    text-transform:uppercase !important;
-}
-.cc-global-tagline span { color:#071d3a !important; text-shadow:2px 2px 0 rgba(255,255,255,.72), 3px 3px 5px rgba(7,29,58,.35) !important; }
-.cc-global-logo-center-wrap { justify-self:center !important; display:flex !important; align-items:center !important; justify-content:center !important; padding-top:0 !important; padding-bottom:8px !important; }
-.cc-global-logo-center { height:96px !important; max-width:380px !important; object-fit:contain !important; object-position:center center !important; }
-.cc-global-logo-right { justify-self:end !important; height:78px !important; max-width:250px !important; object-fit:contain !important; }
-.cc-global-title, .cc-global-title-rule { display:none !important; }
-.cc-html-table td, .cc-html-table th { text-align:center !important; vertical-align:middle !important; }
-.cc-table-wrap { background:#ffffff !important; }
-@media (max-width: 900px) {
-  .cc-global-tagline { font-size:16px !important; padding-left:4px !important; }
-  .cc-global-logo-center { height:64px !important; max-width:220px !important; }
-  .cc-global-logo-right { height:50px !important; max-width:140px !important; }
-  .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
-}
-
-
-
-/* v22v header-only final polish: taller header + Impact-style tagline */
-.cc-global-header { height: 142px !important; }
-.block-container { padding-top: 9.1rem !important; }
-[data-testid="stSidebar"] > div:first-child { padding-top: 9.0rem !important; }
-.cc-global-header-inner { padding-top: 12px !important; padding-bottom: 12px !important; }
-.cc-global-redbar { height: 14px !important; margin-bottom: 8px !important; }
-.cc-global-brand-row { min-height: 104px !important; align-items:center !important; }
-.cc-global-logo-center { height: 108px !important; max-width: 390px !important; object-fit: contain !important; }
-.cc-global-logo-right { height: 76px !important; max-width: 250px !important; object-fit: contain !important; }
-.cc-global-tagline {
-    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
-    font-size: 27px !important;
-    line-height: .95 !important;
-    letter-spacing: .04em !important;
-    color: #071d3a !important;
-    text-transform: uppercase !important;
-    text-shadow: 1px 2px 2px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.85) !important;
-}
-.cc-global-tagline span { color:#071d3a !important; text-shadow: 1px 2px 2px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.85) !important; }
-@media (max-width: 900px) {
-  .cc-global-header { height: 118px !important; }
-  .block-container { padding-top: 7.8rem !important; }
-  [data-testid="stSidebar"] > div:first-child { padding-top: 7.8rem !important; }
-  .cc-global-logo-center { height: 76px !important; max-width: 240px !important; }
-  .cc-global-tagline { font-size: 18px !important; }
-}
-
-
-
-/* v22w header final nudge: taller header, centered logo fully visible, cleaner sidebar top */
-.cc-global-header { height: 142px !important; overflow:visible !important; }
-.cc-global-header-inner { padding-top:10px !important; padding-bottom:12px !important; }
-.cc-global-redbar { margin-bottom:6px !important; }
-.cc-global-brand-row { min-height:110px !important; align-items:center !important; }
-.cc-global-logo-center { height:96px !important; max-height:96px !important; transform:translateY(-3px) !important; }
-.cc-global-tagline { font-family:Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important; font-size:27px !important; line-height:.92 !important; letter-spacing:.01em !important; }
-.cc-global-tagline span { color:#071d3a !important; text-shadow:2px 2px 0 #f8f4ea, 3px 3px 5px rgba(7,29,58,.38) !important; }
-.block-container { padding-top: 9.0rem !important; }
-[data-testid="stSidebar"] > div:first-child { padding-top: 8.25rem !important; }
-.cc-sidebar-build-note { color:#071d3a !important; opacity:.78; font-size:10px; margin:-6px 0 8px 0; text-align:center; letter-spacing:.12em; font-weight:900; }
-
-
-/* === v22x tab/toggle readability fix: dark blue tab text on beige theme === */
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] *,
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button * {
-    color: #071d3a !important;
-    font-weight: 850 !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-button[data-baseweb="tab"][aria-selected="true"],
-button[data-baseweb="tab"][aria-selected="true"] *,
-[role="tab"][aria-selected="true"],
-[role="tab"][aria-selected="true"] * {
-    color: #071d3a !important;
-    font-weight: 950 !important;
-}
-button[data-baseweb="tab"]:hover,
-button[data-baseweb="tab"]:hover *,
-[role="tab"]:hover,
-[role="tab"]:hover * {
-    color: #071d3a !important;
-    background: rgba(255,255,255,.28) !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: #b0121b !important;
-    height: 3px !important;
-}
-
-
-/* === v22y final export/report readability + upload box fixes === */
-.stButton > button, .stButton > button *,
-div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button *,
-button[kind="primary"], button[kind="secondary"], button[kind="primary"] *, button[kind="secondary"] * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    text-shadow: none !important;
-}
-.stButton > button:disabled, .stButton > button:disabled *,
-div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownloadButton"] > button:disabled * {
-    color: #f8fafc !important;
-    -webkit-text-fill-color: #f8fafc !important;
-    opacity: .85 !important;
-}
-/* Streamlit uploaders/contact tracking boxes */
-[data-testid="stFileUploader"], [data-testid="stFileUploader"] section,
-[data-testid="stFileUploader"] div, [data-testid="stFileUploader"] span,
-[data-testid="stFileUploader"] p, [data-testid="stFileUploader"] small,
-[data-testid="stFileUploader"] label {
-    color: #001f3f !important;
-    -webkit-text-fill-color: #001f3f !important;
-}
-[data-testid="stFileUploader"] section {
-    background: #fbf7ee !important;
-    border: 1px solid rgba(170, 20, 30, .35) !important;
-    border-radius: 12px !important;
-}
-[data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    background: #a40f19 !important;
-}
-/* Radio labels on export/report pages */
-[role="radiogroup"] label, [role="radiogroup"] label *,
-[data-testid="stRadio"] label, [data-testid="stRadio"] label * {
-    color: #001f3f !important;
-    -webkit-text-fill-color: #001f3f !important;
-}
-
-</style>
-<style>
-/* Final production button lock */
-.stButton > button, div[data-testid="stDownloadButton"] > button {
-    background: linear-gradient(180deg, #b01822, #8f1119) !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    border: 1px solid #7a0d14 !important;
-}
-.stButton > button *, div[data-testid="stDownloadButton"] > button * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-.stButton > button:disabled, div[data-testid="stDownloadButton"] > button:disabled {
-    background: linear-gradient(180deg, #b01822, #8f1119) !important;
-    opacity: .55 !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-button[data-baseweb="tab"], button[data-baseweb="tab"] *, [role="tab"], [role="tab"] * {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-</style>
-
-""",
-    unsafe_allow_html=True,
-)
 
 
 
 # v23b: home dashboard gender labels + responsive chart/table readability.
-st.markdown(
-    """
-<style>
-/* Keep dashboard donuts circular and readable on iPad / smaller MacBook widths. */
-.cc-donut {
-    aspect-ratio: 1 / 1 !important;
-    flex: 0 0 auto !important;
-}
-.cc-donut-wrap {
-    flex-wrap: wrap !important;
-    align-items: center !important;
-}
-.cc-home-card {
-    overflow-x: auto !important;
-}
-.cc-legend-row {
-    min-width: 260px !important;
-}
-@media (max-width: 1100px) {
-    .cc-donut-wrap {
-        justify-content: center !important;
-        gap: 14px !important;
-    }
-    .cc-donut {
-        width: 190px !important;
-        height: 190px !important;
-        min-width: 190px !important;
-        max-width: 190px !important;
-    }
-    .cc-donut:after { inset: 52px !important; }
-    .cc-legend-row {
-        grid-template-columns: 18px 1fr auto !important;
-        width: 100% !important;
-        max-width: 440px !important;
-        min-width: 280px !important;
-    }
-}
-@media (max-width: 760px) {
-    .cc-donut {
-        width: 170px !important;
-        height: 170px !important;
-        min-width: 170px !important;
-        max-width: 170px !important;
-    }
-    .cc-donut:after { inset: 46px !important; }
-    .cc-donut-wrap {
-        flex-direction: column !important;
-        align-items: flex-start !important;
-    }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+pass
+
 
 
 # Cross-browser LIVE readability lock for Safari/Mac dark-mode quirks.
-st.markdown(
-    """
-<style>
-button, button *,
-.stButton > button, .stButton > button *,
-div[data-testid="stDownloadButton"] > button, div[data-testid="stDownloadButton"] > button *,
-[data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    text-shadow: none !important;
-}
-button:disabled, button:disabled *,
-.stButton > button:disabled, .stButton > button:disabled *,
-div[data-testid="stDownloadButton"] > button:disabled, div[data-testid="stDownloadButton"] > button:disabled * {
-    color: #f8fafc !important;
-    -webkit-text-fill-color: #f8fafc !important;
-}
-.cc-history-table td:first-child,
-.cc-history-table td:first-child *,
-.cc-history-table th:first-child,
-.cc-history-table th:first-child * {
-    background: #111827 !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+pass
+
 
 
 # Final production readability lock for tabs/toggles/buttons after all earlier CSS blocks.
-st.markdown(
-    """
-<style>
-/* Keep Streamlit tabs readable. Generic button rules above should NOT make tab labels white. */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    background: transparent !important;
-    font-weight: 900 !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-div[data-testid="stTabs"] button[aria-selected="true"],
-div[data-testid="stTabs"] button[aria-selected="true"] *,
-button[data-baseweb="tab"][aria-selected="true"],
-button[data-baseweb="tab"][aria-selected="true"] *,
-[role="tab"][aria-selected="true"],
-[role="tab"][aria-selected="true"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: #b0121b !important;
-    height: 4px !important;
-}
-/* Keep checkbox/toggle/radio labels readable on Safari and dark-mode Macs. */
-[data-testid="stCheckbox"] label,
-[data-testid="stCheckbox"] label *,
-[data-testid="stToggle"] label,
-[data-testid="stToggle"] label *,
-[data-testid="stRadio"] label,
-[data-testid="stRadio"] label *,
-label[data-baseweb="checkbox"],
-label[data-baseweb="checkbox"] *,
-label[data-baseweb="radio"],
-label[data-baseweb="radio"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-/* Keep actual action/download buttons white text across Chrome/Safari. */
-.stButton > button,
-.stButton > button *,
-div[data-testid="stDownloadButton"] > button,
-div[data-testid="stDownloadButton"] > button * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    text-shadow: none !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+pass
+
 
 
 # Final sidebar recovery lock: keep the left navigation from collapsing into an unrecoverable state.
 # This is intentionally placed after the main CSS stack so it wins over earlier Streamlit chrome-hiding rules.
-st.markdown(
-    """
-<style>
-/* Keep Streamlit's header/toggle recoverable. Earlier CSS hides most Streamlit chrome; do not hide this. */
-header[data-testid="stHeader"] {
-    visibility: visible !important;
-    height: auto !important;
-    min-height: 0 !important;
-    background: transparent !important;
-}
+pass
 
-/* Prevent the sidebar from disappearing when a user clicks the collapse control. */
-[data-testid="stSidebar"][aria-expanded="false"],
-section[data-testid="stSidebar"][aria-expanded="false"] {
-    display: block !important;
-    visibility: visible !important;
-    transform: none !important;
-    left: 0 !important;
-    margin-left: 0 !important;
-    min-width: 260px !important;
-    width: 260px !important;
-}
-
-/* Keep the sidebar contents visible/recoverable even after collapse attempts. */
-[data-testid="stSidebar"][aria-expanded="false"] > div,
-section[data-testid="stSidebar"][aria-expanded="false"] > div {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-}
-
-/* Make sure the main content does not slide under the locked-open sidebar. */
-[data-testid="stAppViewContainer"] > .main,
-[data-testid="stMain"] {
-    margin-left: 0 !important;
-}
-
-/* If Streamlit renders the collapse/expand button, keep it clickable and visible. */
-button[kind="header"],
-[data-testid="stHeader"] button,
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapseButton"] {
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
 
 # Safe design system patch added after legacy CSS stack.
-st.markdown("""
-<style>
+pass
 
-/* === SAFE DESIGN PATCH v1: 10pt base, left-aligned content, sidebar recoverable, Impact tagline === */
-
-/* Normal text sizing only. Do not target icons or all div/span globally. */
-html, body, .stApp, [data-testid="stAppViewContainer"] {
-    font-size: 10pt !important;
-}
-
-/* Keep the main working area close to the left pane instead of centered on wide screens. */
-.main .block-container,
-[data-testid="stMain"] .block-container,
-section.main .block-container {
-    max-width: 1280px !important;
-    margin-left: 0 !important;
-    margin-right: auto !important;
-    padding-left: 2rem !important;
-    padding-right: 1.25rem !important;
-}
-
-/* Keep sidebar expanded/recoverable without hiding Streamlit internals. */
-[data-testid="stSidebar"],
-section[data-testid="stSidebar"] {
-    min-width: 270px !important;
-    width: 270px !important;
-}
-
-/* Do not hide the Streamlit header completely, because it contains recovery controls. */
-header[data-testid="stHeader"] {
-    visibility: visible !important;
-    height: auto !important;
-    background: transparent !important;
-}
-
-/* Prevent tooltip artifacts from showing as text. */
-div[role="tooltip"],
-[data-baseweb="tooltip"],
-[data-testid="stTooltipContent"] {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-}
-
-/* Important: preserve icon fonts so Streamlit icons do not appear as text like keyboard_double_arrow_right. */
-[class*="material"],
-span[class*="material"],
-i[class*="material"],
-[data-testid="stIconMaterial"],
-[data-testid="stIconMaterial"] * {
-    font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons", sans-serif !important;
-    font-size: 20px !important;
-    line-height: 1 !important;
-}
-
-/* Left brand/tagline must stay Impact. */
-.cc-global-tagline,
-.cc-global-tagline span,
-.left-header-text,
-.left-header-text span {
-    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
-}
-
-/* Keep action buttons readable but do not affect dropdown internals. */
-.stButton > button,
-div[data-testid="stDownloadButton"] > button {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    font-size: 10pt !important;
-}
-.stButton > button *,
-div[data-testid="stDownloadButton"] > button * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-
-/* Tabs stay dark text on the light background. */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    background: transparent !important;
-    font-size: 10pt !important;
-}
-
-/* Donut center readability. */
-.cc-donut:after {
-    background: #071d3a !important;
-}
-.cc-donut-center,
-.cc-donut-center *,
-.cc-donut-center div,
-.cc-donut-center span {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    fill: #ffffff !important;
-    opacity: 1 !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
-}
-
-/* Keep form controls readable without changing their internal layout. */
-[data-baseweb="select"] > div,
-[data-baseweb="input"] > div,
-textarea,
-input {
-    font-size: 10pt !important;
-}
-[data-baseweb="popover"],
-[data-baseweb="menu"],
-[role="listbox"],
-[role="option"] {
-    font-size: 10pt !important;
-}
-
-/* Table text sizing and readability. */
-.cc-html-table,
-.cc-home-table,
-[data-testid="stDataFrame"],
-[data-testid="stTable"] {
-    font-size: 10pt !important;
-}
-.cc-html-table th,
-.cc-home-table th {
-    font-size: 10pt !important;
-    font-weight: 900 !important;
-}
-.cc-html-table td,
-.cc-home-table td {
-    font-size: 10pt !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # Final safe button consistency patch.
-st.markdown("""
-<style>
+pass
 
-/* === SAFE BUTTON PATCH v3: force all active buttons to Candidate Connect red === */
-/* This is placed last so it wins over Streamlit secondary-button styling. */
-.stButton > button:not(:disabled),
-div[data-testid="stDownloadButton"] > button:not(:disabled),
-button[kind="primary"]:not(:disabled),
-button[kind="secondary"]:not(:disabled),
-button[data-testid="baseButton-primary"]:not(:disabled),
-button[data-testid="baseButton-secondary"]:not(:disabled) {
-    background: linear-gradient(180deg, #b01822, #8f1119) !important;
-    background-color: #9f151c !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    border: 1px solid #7a0d14 !important;
-    border-radius: 10px !important;
-    font-weight: 850 !important;
-    text-shadow: none !important;
-    box-shadow: none !important;
-}
-
-.stButton > button:not(:disabled) *,
-div[data-testid="stDownloadButton"] > button:not(:disabled) *,
-button[kind="primary"]:not(:disabled) *,
-button[kind="secondary"]:not(:disabled) *,
-button[data-testid="baseButton-primary"]:not(:disabled) *,
-button[data-testid="baseButton-secondary"]:not(:disabled) * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    text-shadow: none !important;
-}
-
-/* Disabled buttons can stay muted, but should still be readable. */
-.stButton > button:disabled,
-div[data-testid="stDownloadButton"] > button:disabled,
-button[kind="primary"]:disabled,
-button[kind="secondary"]:disabled,
-button[data-testid="baseButton-primary"]:disabled,
-button[data-testid="baseButton-secondary"]:disabled {
-    background: #d8cfc0 !important;
-    background-color: #d8cfc0 !important;
-    color: #7a0d14 !important;
-    -webkit-text-fill-color: #7a0d14 !important;
-    border: 1px solid #b9ad99 !important;
-    opacity: 1 !important;
-}
-
-/* Keep tabs from being treated like red action buttons. */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] * {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: #b0121b !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # Compact UX patch: tabs restored and page length reduced.
-st.markdown("""
-<style>
+pass
 
-/* === COMPACT UX PATCH v3: less vertical scrolling, tabs restored, tighter cards/sidebar === */
-
-/* Tighten global text/spacing while preserving readability. */
-html, body, .stApp, [data-testid="stAppViewContainer"] {
-    font-size: 10pt !important;
-}
-
-/* Bring sidebar content closer to the fixed header. */
-[data-testid="stSidebar"] > div:first-child {
-    padding-top: 6.35rem !important;
-}
-.cc-sidebar-build-note {
-    margin-top: -10px !important;
-    margin-bottom: 4px !important;
-}
-
-/* Keep main content left aligned and a bit tighter. */
-.main .block-container,
-[data-testid="stMain"] .block-container,
-section.main .block-container {
-    max-width: 1280px !important;
-    margin-left: 0 !important;
-    margin-right: auto !important;
-    padding-left: 1.3rem !important;
-    padding-right: 1rem !important;
-}
-
-/* Tighter headings and captions. */
-h1 { font-size: 22pt !important; margin-bottom: .35rem !important; }
-h2 { font-size: 18pt !important; margin-top: .8rem !important; margin-bottom: .35rem !important; }
-h3 { font-size: 14pt !important; margin-top: .55rem !important; margin-bottom: .25rem !important; }
-p, .stCaption, [data-testid="stCaptionContainer"] {
-    font-size: 10pt !important;
-}
-
-/* Reduce default vertical gaps between Streamlit elements. */
-div[data-testid="stVerticalBlock"] {
-    gap: .45rem !important;
-}
-.element-container {
-    margin-bottom: .25rem !important;
-}
-
-/* Restore tab look and make it compact. */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] * {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: none !important;
-    box-shadow: none !important;
-    font-size: 10pt !important;
-    font-weight: 900 !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: #b0121b !important;
-    height: 3px !important;
-}
-
-/* Compact summary/metric cards. */
-.cc-icon-metric,
-.cc-metric,
-div[data-testid="stMetric"] {
-    min-height: 58px !important;
-    padding: 8px 10px !important;
-}
-.cc-icon-value,
-.cc-metric .value,
-div[data-testid="stMetricValue"] {
-    font-size: 18pt !important;
-    line-height: 1.05 !important;
-}
-.cc-icon-label,
-.cc-metric .label,
-div[data-testid="stMetricLabel"] {
-    font-size: 8.5pt !important;
-    line-height: 1.05 !important;
-}
-.cc-icon-sub,
-.cc-metric .sub,
-div[data-testid="stMetricDelta"] {
-    font-size: 8.5pt !important;
-    line-height: 1.05 !important;
-}
-
-/* Compact home/report cards and tables. */
-.cc-home-card,
-.cc-card {
-    padding: 10px !important;
-    margin-bottom: 9px !important;
-    border-radius: 10px !important;
-}
-.cc-home-card h3,
-.cc-card h3 {
-    font-size: 13pt !important;
-    margin: 0 0 6px 0 !important;
-}
-.cc-html-table th,
-.cc-html-table td,
-.cc-home-table th,
-.cc-home-table td {
-    padding: 6px 8px !important;
-    font-size: 10pt !important;
-}
-
-/* Donuts slightly smaller and center text readable. */
-.cc-donut {
-    width: 130px !important;
-    height: 130px !important;
-}
-.cc-donut:after {
-    inset: 35px !important;
-    background: #071d3a !important;
-}
-.cc-donut-center,
-.cc-donut-center *,
-.cc-donut-center div,
-.cc-donut-center span {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    fill: #ffffff !important;
-    font-size: 9pt !important;
-    line-height: 1.05 !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
-}
-.cc-donut-wrap {
-    min-height: 145px !important;
-    gap: 12px !important;
-}
-
-/* Executive Strategy Readout should be compact bullet text, not big blue boxes. */
-.cc-note {
-    padding: 6px 8px !important;
-    margin: 5px 0 !important;
-    border-radius: 8px !important;
-}
-
-/* Force active action buttons consistently red/white, without affecting tabs. */
-.stButton > button:not(:disabled),
-div[data-testid="stDownloadButton"] > button:not(:disabled),
-button[kind="primary"]:not(:disabled),
-button[kind="secondary"]:not(:disabled),
-button[data-testid="baseButton-primary"]:not(:disabled),
-button[data-testid="baseButton-secondary"]:not(:disabled) {
-    background: linear-gradient(180deg, #b01822, #8f1119) !important;
-    background-color: #9f151c !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    border: 1px solid #7a0d14 !important;
-    border-radius: 9px !important;
-    font-weight: 850 !important;
-}
-.stButton > button:not(:disabled) *,
-div[data-testid="stDownloadButton"] > button:not(:disabled) * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # UI cleanup patch: card spacing and compact strategy readout.
-st.markdown("""
-<style>
+pass
 
-/* === UI CLEANUP PATCH v4: spacing, compact cards, one insight bubble === */
-
-/* Fix top card overlap: Streamlit column children need real breathing room. */
-div[data-testid="stHorizontalBlock"] {
-    gap: 1rem !important;
-}
-div[data-testid="stHorizontalBlock"] > div {
-    box-sizing: border-box !important;
-    min-width: 0 !important;
-    padding-left: .35rem !important;
-    padding-right: .35rem !important;
-}
-
-/* Metric cards: compact, but not crushed/overlapping. */
-.cc-icon-metric,
-.cc-metric,
-div[data-testid="stMetric"] {
-    min-height: 76px !important;
-    padding: 10px 14px !important;
-    margin-bottom: 8px !important;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-}
-.cc-icon-value,
-.cc-metric .value,
-div[data-testid="stMetricValue"] {
-    font-size: 18pt !important;
-    line-height: 1.05 !important;
-}
-.cc-icon-sub,
-.cc-metric .sub,
-div[data-testid="stMetricDelta"] {
-    font-size: 8.5pt !important;
-    line-height: 1.05 !important;
-    margin-top: 2px !important;
-}
-
-/* Text-only header cards should not be tall. */
-.cc-home-card {
-    padding-top: 10px !important;
-    padding-bottom: 10px !important;
-}
-.cc-home-card h3 {
-    margin-top: 0 !important;
-    margin-bottom: 4px !important;
-}
-
-/* More compact tables/cards without crushing controls. */
-.cc-html-table th,
-.cc-html-table td,
-.cc-home-table th,
-.cc-home-table td {
-    padding: 6px 8px !important;
-    font-size: 10pt !important;
-}
-.cc-card {
-    padding: 10px !important;
-    margin-bottom: 9px !important;
-}
-
-/* Compact the blue strategy readout into one box with normal bullet spacing. */
-.cc-note-compact {
-    padding: 10px 16px !important;
-    margin: 8px 0 12px 0 !important;
-    border-radius: 10px !important;
-    background: #d9e8f8 !important;
-    border: 1px solid #8aa3bf !important;
-    color: #071d3a !important;
-}
-.cc-note-compact ul {
-    margin: 0 !important;
-    padding-left: 18px !important;
-}
-.cc-note-compact li {
-    margin: 3px 0 !important;
-    line-height: 1.25 !important;
-    color: #071d3a !important;
-    font-size: 10pt !important;
-}
-
-/* Keep donut center readable. */
-.cc-donut:after {
-    background: #071d3a !important;
-}
-.cc-donut-center,
-.cc-donut-center *,
-.cc-donut-center div,
-.cc-donut-center span {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    fill: #ffffff !important;
-    opacity: 1 !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
-}
-
-/* Slightly tighten the page without breaking dropdowns/buttons. */
-.element-container {
-    margin-bottom: .2rem !important;
-}
-div[data-testid="stVerticalBlock"] {
-    gap: .4rem !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # Theme readability fix for code chips, alerts, and password icons.
-st.markdown("""
-<style>
+pass
 
-/* === THEME FIX: readable inline code/help chips across the app === */
-code,
-pre code,
-span[data-testid="stCodeBlock"],
-div[data-testid="stCodeBlock"],
-.stMarkdown code {
-    background-color: #e8e2d3 !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: 1px solid #c8bca8 !important;
-    border-radius: 5px !important;
-    padding: 2px 6px !important;
-    font-size: 9pt !important;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
-    text-shadow: none !important;
-}
-
-/* Full code blocks should be readable too, but not visually heavy. */
-pre,
-div[data-testid="stCodeBlock"] pre {
-    background-color: #f8f4ea !important;
-    color: #071d3a !important;
-    border: 1px solid #c8bca8 !important;
-    border-radius: 8px !important;
-}
-
-/* Info/help boxes stay theme-readable. */
-.stAlert,
-.stAlert *,
-div[data-testid="stAlert"],
-div[data-testid="stAlert"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    text-shadow: none !important;
-}
-
-/* Password reveal button / icon must remain visible. */
-button[aria-label*="password"],
-button[title*="password"],
-[data-testid="stPasswordInput"] button,
-[data-testid="stPasswordInput"] button * {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    fill: #071d3a !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-
-/* Form text should never become white on light inputs. */
-input,
-textarea,
-[data-baseweb="input"] input,
-[data-baseweb="textarea"] textarea {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-
-/* Keep action buttons white text after input/code fixes. */
-.stButton > button:not(:disabled),
-.stButton > button:not(:disabled) *,
-div[data-testid="stDownloadButton"] > button:not(:disabled),
-div[data-testid="stDownloadButton"] > button:not(:disabled) * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 def r2_url(key: str) -> str:
     base = current_data_base_url()
@@ -2925,78 +1865,8 @@ def render_security_gate():
     users = store.get("users") or {}
 
     # Login/setup screens use a compact centered card instead of full-width inputs.
-    st.markdown("""
-<style>
-/* Login/setup screen only. This is only rendered before authentication, so it will not affect the main app. */
-.cc-login-spacer { height: 2.1rem; }
-.cc-login-title {
-    text-align: center;
-    color: #071d3a !important;
-    font-size: 18pt !important;
-    font-weight: 950 !important;
-    margin-bottom: .25rem !important;
-}
-.cc-login-subtitle {
-    text-align: center;
-    color: #5f6b7a !important;
-    font-size: 10pt !important;
-    margin-bottom: 1rem !important;
-}
-div[data-testid="stForm"] {
-    max-width: 430px !important;
-    margin: 0 auto !important;
-    padding: 22px 24px 18px 24px !important;
-    background: #f8f4ea !important;
-    border: 1px solid #c8bca8 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 12px 28px rgba(7,29,58,.16) !important;
-}
-div[data-testid="stForm"] label,
-div[data-testid="stForm"] label * {
-    color: #071d3a !important;
-    font-weight: 800 !important;
-    font-size: 10pt !important;
-}
-div[data-testid="stForm"] input {
-    font-size: 10pt !important;
-}
-div[data-testid="stForm"] .stButton > button {
-    width: 100% !important;
-    margin-top: .35rem !important;
-    background: linear-gradient(180deg, #b01822, #8f1119) !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    border: 1px solid #7a0d14 !important;
-    border-radius: 10px !important;
-    font-weight: 900 !important;
-}
+    pass
 
-/* Login/setup password reveal control readability */
-div[data-testid="stForm"] button[aria-label*="password"],
-div[data-testid="stForm"] button[title*="password"],
-div[data-testid="stForm"] [data-testid="stPasswordInput"] button,
-div[data-testid="stForm"] button[kind="icon"] {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-div[data-testid="stForm"] button[aria-label*="password"] *,
-div[data-testid="stForm"] button[title*="password"] *,
-div[data-testid="stForm"] [data-testid="stPasswordInput"] button *,
-div[data-testid="stForm"] button[kind="icon"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    fill: #071d3a !important;
-}
-div[data-testid="stForm"] input {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
     if not users:
         st.markdown('<div class="cc-login-spacer"></div>', unsafe_allow_html=True)
@@ -5628,25 +4498,8 @@ def render_voter_lookup_workspace():
     left, right = st.columns([0.85, 1.8])
     with left:
         st.markdown("### Search Results")
-        st.markdown("""
-        <style>
-        div[data-testid="stButton"] > button[kind="primary"],
-        div[data-testid="stButton"] > button[kind="secondary"] {
-            white-space: pre-line !important;
-            height: auto !important;
-            min-height: 58px !important;
-            text-align: left !important;
-            justify-content: flex-start !important;
-            line-height: 1.15 !important;
-            padding: 8px 10px !important;
-        }
-        div[data-testid="stButton"] button p {
-            white-space: pre-line !important;
-            text-align: left !important;
-            line-height: 1.2 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        pass
+
         for i, r0 in df.iterrows():
             vid = cc_text(r0.get("voter_id", ""))
             nm = smart_title(full_name(r0))
@@ -5857,12 +4710,8 @@ def render_voter_lookup_workspace():
                 missing_names = view["DisplayName"].astype(str).str.strip().eq("") | view["DisplayName"].astype(str).str.lower().isin(["unnamed voter", "unnamed", "nan", "none", "null"])
                 view.loc[missing_names, "DisplayName"] = view.loc[missing_names].apply(lambda rr: f"Voter {cc_text(rr.get('voter_id',''))}" if cc_text(rr.get('voter_id','')) else "Household Voter", axis=1)
 
-                st.markdown("""
-                <style>
-                div[data-testid="stButton"] button p { white-space: pre-line !important; line-height: 1.2 !important; text-align: center !important; }
-                div[data-testid="stButton"] > button { white-space: pre-line !important; height: auto !important; min-height: 46px !important; text-align: center !important; justify-content: center !important; padding: 8px 12px !important; }
-                </style>
-                """, unsafe_allow_html=True)
+                pass
+
 
                 st.caption("Household members — click a card to open that voter.")
                 for j, hhrow in view.iterrows():
@@ -8358,175 +7207,6 @@ _ = st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
 
 # Absolute final UI safety lock: keep real action/download buttons red with white text,
 # while keeping tabs/toggles/read-only labels navy and readable across Chrome/Safari.
-st.markdown(
-    """
-<style>
-/* Real Streamlit action buttons */
-.stButton > button:not([disabled]),
-div[data-testid="stDownloadButton"] > button:not([disabled]),
-[data-testid="stFileUploader"] button:not([disabled]) {
-    background: linear-gradient(180deg, #b01822, #8f1018) !important;
-    background-color: #a7121b !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    border: 1px solid #7a0d14 !important;
-    border-radius: 12px !important;
-    font-weight: 950 !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-    box-shadow: none !important;
-}
-.stButton > button:not([disabled]) *,
-div[data-testid="stDownloadButton"] > button:not([disabled]) *,
-[data-testid="stFileUploader"] button:not([disabled]) * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    opacity: 1 !important;
-    text-shadow: none !important;
-}
-/* Disabled placeholders should not look like broken transparent red buttons. */
-.stButton > button[disabled],
-div[data-testid="stDownloadButton"] > button[disabled] {
-    background: #e5dccb !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: 1px solid #b9ad99 !important;
-    opacity: .75 !important;
-}
-.stButton > button[disabled] *,
-div[data-testid="stDownloadButton"] > button[disabled] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-/* Tabs are not action buttons. */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-button[data-baseweb="tab"],
-button[data-baseweb="tab"] *,
-[role="tab"],
-[role="tab"] * {
-    background: transparent !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: 0 !important;
-    box-shadow: none !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-    background-color: #b0121b !important;
-    height: 4px !important;
-}
-/* Toggle/checkbox/radio labels */
-[data-testid="stCheckbox"] label, [data-testid="stCheckbox"] label *,
-[data-testid="stToggle"] label, [data-testid="stToggle"] label *,
-[data-testid="stRadio"] label, [data-testid="stRadio"] label * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    opacity: 1 !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+pass
 
-
-# Final Voter Lookup/sidebar layout lock.
-st.markdown("""
-<style>
-/* === FINAL LAYOUT LOCK v1 ===
-   This is intentionally last. It prevents Voter Lookup and sidebar controls
-   from being stretched by broad global CSS rules.
-*/
-
-/* Sidebar navigation buttons: consistent height/width, not oversized. */
-[data-testid="stSidebar"] .stButton > button {
-    min-height: 42px !important;
-    height: 42px !important;
-    max-height: 42px !important;
-    padding: 6px 10px !important;
-    margin: 0 0 4px 0 !important;
-    width: 100% !important;
-    font-size: 10pt !important;
-    line-height: 1.15 !important;
-    border-radius: 9px !important;
-}
-[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button p {
-    font-size: 10pt !important;
-    line-height: 1.15 !important;
-    margin: 0 !important;
-}
-
-/* Keep sidebar from becoming too wide and pushing the page around. */
-[data-testid="stSidebar"],
-section[data-testid="stSidebar"] {
-    min-width: 250px !important;
-    width: 250px !important;
-    max-width: 250px !important;
-}
-
-/* Voter Lookup search result column/card: keep compact and readable. */
-.cc-search-results,
-.cc-search-card,
-.voter-search-results,
-.voter-result-card {
-    max-width: 430px !important;
-}
-
-/* Red Streamlit button cards used for search results should not stretch too tall/wide. */
-div[data-testid="column"] .stButton > button {
-    min-height: 34px !important;
-    padding: 6px 10px !important;
-    font-size: 10pt !important;
-    line-height: 1.2 !important;
-}
-
-/* Voter profile quick fields under the voter name: restore readable size and spacing. */
-.cc-voter-summary,
-.cc-voter-summary *,
-.voter-summary,
-.voter-summary * {
-    font-size: 11pt !important;
-    line-height: 1.25 !important;
-    color: #071d3a !important;
-}
-
-/* If those fields are rendered by Streamlit columns/markdown, prevent tiny inherited text. */
-[data-testid="stMarkdownContainer"] p,
-[data-testid="stMarkdownContainer"] li {
-    font-size: 10.5pt !important;
-    line-height: 1.35 !important;
-}
-
-/* But keep table cells compact. */
-.cc-html-table td,
-.cc-html-table th,
-.cc-home-table td,
-.cc-home-table th {
-    font-size: 10pt !important;
-    line-height: 1.2 !important;
-}
-
-/* Voter lookup detail area should not start too far right or create giant gaps. */
-section.main .block-container,
-[data-testid="stMain"] .block-container {
-    max-width: 1280px !important;
-    margin-left: 0 !important;
-    margin-right: auto !important;
-}
-
-/* Fix default st.metric-like field labels/values if any remain in lookup. */
-[data-testid="stMetric"] {
-    min-height: 54px !important;
-    padding: 4px 0 !important;
-}
-[data-testid="stMetric"] label,
-[data-testid="stMetric"] label *,
-[data-testid="stMetric"] [data-testid="stMetricValue"],
-[data-testid="stMetric"] [data-testid="stMetricValue"] * {
-    font-size: 11pt !important;
-    line-height: 1.2 !important;
-    color: #071d3a !important;
-}
-</style>
-""", unsafe_allow_html=True)
 
