@@ -1084,19 +1084,59 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
     if df.empty:
         return
     if order:
-        sortmap = {v:i for i,v in enumerate(order)}
+        sortmap = {str(v): i for i, v in enumerate(order)}
         df["_sort"] = df["label"].map(lambda x: sortmap.get(str(x), 999))
         df = df.sort_values(["_sort", "label"])
     total = float(df["Voters"].sum() or 1)
     maxv = float(df["Voters"].max() or 1)
-    rows=[]
-    table_rows=[]
-    for _,r in df.iterrows():
-        lab=str(r["label"]); val=int(r["Voters"] or 0); p=val/total*100; w=max(2,val/maxv*100)
-        rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{val:,} ({p:.1f}%)</span></div>')
-        table_rows.append({"Category": lab, "Voters": val, "%": f"{p:.1f}%"})
-    st.markdown('<div class="cc-home-card"><h3>'+title+'</h3>'+''.join(rows)+'</div>', unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch", height=min(210, 42 + 32*len(table_rows)))
+
+    def _bar_color(label: str) -> str:
+        l = str(label).strip().upper()
+        if field == "Party" or "Party" in title:
+            if l in ("R", "REPUBLICAN"):
+                return "#d51f2a"
+            if l in ("D", "DEMOCRAT"):
+                return "#2454d6"
+            return "#4c9a2a"
+        if field == "Gender" or "Gender" in title:
+            if l in ("F", "FEMALE"):
+                return "#d51f2a"
+            if l in ("M", "MALE"):
+                return "#2454d6"
+            return "#4c9a2a"
+        return "#d51f2a"
+
+    def _display_label(label: str) -> str:
+        l = str(label).strip()
+        u = l.upper()
+        if field == "Party":
+            return {"R": "Republican", "D": "Democrat", "O": "Other / Unaffiliated"}.get(u, l)
+        if field == "Gender":
+            return {"F": "Female", "M": "Male", "U": "Unknown / Other", "UNKNOWN": "Unknown / Other"}.get(u, l)
+        return l
+
+    rows = []
+    for _, r in df.iterrows():
+        lab = str(r["label"])
+        label = _display_label(lab)
+        val = int(r["Voters"] or 0)
+        pct = val / total * 100
+        width = max(2, val / maxv * 100)
+        color = _bar_color(lab)
+        rows.append(
+            f'<div class="cc-one-line-bar-row">'
+            f'<div class="cc-one-line-bar-label"><span class="cc-swatch" style="background:{color};"></span>{html_escape(label)}</div>'
+            f'<div class="cc-one-line-bar-track"><div class="cc-one-line-bar-fill" style="width:{width:.1f}%; background:{color};"></div></div>'
+            f'<div class="cc-one-line-bar-value">{val:,} ({pct:.1f}%)</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        '<div class="cc-home-card cc-group-bar-card"><h3>' + html_escape(title) + '</h3>'
+        + f'<div class="cc-total-line">{int(total):,} <span>Total</span></div>'
+        + '<div class="cc-one-line-bars">' + ''.join(rows) + '</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
@@ -1874,11 +1914,13 @@ def render_security_gate():
         st.markdown('<div class="cc-login-spacer"></div>', unsafe_allow_html=True)
         st.markdown('<div class="cc-login-title">Candidate Connect Setup</div>', unsafe_allow_html=True)
         st.markdown('<div class="cc-login-subtitle">Create the first Super Admin account. After this, the app will require login.</div>', unsafe_allow_html=True)
-        with st.form("first_admin_setup"):
-            username = st.text_input("Super Admin username")
-            pw1 = st.text_input("Password", type="password")
-            pw2 = st.text_input("Confirm password", type="password")
-            submitted = st.form_submit_button("Create Super Admin")
+        _left, _center, _right = st.columns([1, 1.15, 1])
+        with _center:
+            with st.form("first_admin_setup"):
+                username = st.text_input("Super Admin username")
+                pw1 = st.text_input("Password", type="password")
+                pw2 = st.text_input("Confirm password", type="password")
+                submitted = st.form_submit_button("Create Super Admin")
         if submitted:
             username_clean = str(username or "").strip().lower()
             if not username_clean or not pw1:
@@ -1907,10 +1949,12 @@ def render_security_gate():
     st.markdown('<div class="cc-login-spacer"></div>', unsafe_allow_html=True)
     st.markdown('<div class="cc-login-title">Candidate Connect Login</div>', unsafe_allow_html=True)
     st.markdown('<div class="cc-login-subtitle">Sign in to access your campaign universe, reports, and tools.</div>', unsafe_allow_html=True)
-    with st.form("candidate_connect_login"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Log In")
+    _left, _center, _right = st.columns([1, 1.15, 1])
+    with _center:
+        with st.form("candidate_connect_login"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log In")
     if submitted:
         username_clean = str(username or "").strip().lower()
         user = (users or {}).get(username_clean)
@@ -3034,7 +3078,7 @@ def render_home_geo_table(summary: dict):
 
 
 def render_statewide_snapshot():
-    st.markdown('<div class="cc-home-title">Voters Statewide</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cc-home-title">Voter Snapshot</div>', unsafe_allow_html=True)
 
     summary = None
     err = None
@@ -7917,6 +7961,69 @@ button[title*="password"] svg,
     -webkit-text-fill-color: #ffffff !important;
     font-weight: 900 !important;
 }
+</style>
+""", unsafe_allow_html=True)
+
+
+# Final focused patch v8: auth layout, readable controls, compact group bars.
+st.markdown("""
+<style>
+div[data-testid="stForm"] {
+    background: #f8f4ea !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+    padding: 22px 26px !important;
+    max-width: 460px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+.cc-login-title { text-align:center !important; color:#071d3a !important; font-size:18pt !important; font-weight:950 !important; }
+.cc-login-subtitle { text-align:center !important; color:#5f6b7a !important; font-size:10pt !important; }
+div[data-testid="stForm"] label, div[data-testid="stForm"] label *, div[data-testid="stForm"] p, div[data-testid="stForm"] span {
+    color:#071d3a !important; -webkit-text-fill-color:#071d3a !important; opacity:1 !important;
+}
+input, textarea, [data-baseweb="input"] input {
+    background:#ffffff !important; color:#000000 !important; -webkit-text-fill-color:#000000 !important; caret-color:#000000 !important;
+}
+.stButton > button:not(:disabled), div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled), button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled), button[kind="secondary"]:not(:disabled) {
+    background:linear-gradient(180deg,#b01822,#9f151c) !important; background-color:#9f151c !important;
+    color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; border:1px solid #6f0d13 !important;
+    font-weight:900 !important; opacity:1 !important;
+}
+.stButton > button:not(:disabled) *, div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *, button[data-testid="baseButton-secondary"]:not(:disabled) * {
+    color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; opacity:1 !important;
+}
+.stButton > button:disabled, div[data-testid="stDownloadButton"] > button:disabled {
+    background:#d8cfc0 !important; color:#222222 !important; -webkit-text-fill-color:#222222 !important;
+    border:1px solid #b9ad99 !important; opacity:.75 !important;
+}
+button[aria-label*="password"], button[title*="password"], [data-testid="stTextInputRootElement"] button, [data-baseweb="input"] button {
+    background:#ffffff !important; color:#071d3a !important; -webkit-text-fill-color:#071d3a !important;
+    border-left:1px solid #d0c7b7 !important; opacity:1 !important;
+}
+button[aria-label*="password"] svg, button[title*="password"] svg, [data-testid="stTextInputRootElement"] button svg, [data-baseweb="input"] button svg {
+    color:#071d3a !important; fill:#071d3a !important; opacity:1 !important;
+}
+.cc-group-bar-card { overflow:visible !important; padding-bottom:14px !important; }
+.cc-total-line { color:#071d3a !important; font-weight:950 !important; font-size:11pt !important; margin:2px 0 8px 0 !important; }
+.cc-total-line span { color:#5f6b7a !important; font-size:9pt !important; margin-left:3px !important; }
+.cc-one-line-bars { display:flex !important; flex-direction:column !important; gap:8px !important; width:100% !important; padding-bottom:8px !important; }
+.cc-one-line-bar-row {
+    display:grid !important; grid-template-columns:150px minmax(170px,1fr) 140px !important;
+    gap:10px !important; align-items:center !important; min-height:22px !important;
+}
+.cc-one-line-bar-label {
+    display:flex !important; align-items:center !important; gap:7px !important; color:#071d3a !important;
+    font-weight:900 !important; font-size:10pt !important; line-height:1.1 !important; white-space:nowrap !important;
+}
+.cc-one-line-bar-track { height:12px !important; border-radius:999px !important; background:#071d3a !important; overflow:hidden !important; }
+.cc-one-line-bar-fill { height:100% !important; border-radius:999px !important; }
+.cc-one-line-bar-value { color:#071d3a !important; font-weight:900 !important; font-size:10pt !important; line-height:1.1 !important; white-space:nowrap !important; }
+.cc-swatch { width:11px !important; height:11px !important; min-width:11px !important; border-radius:50% !important; display:inline-block !important; }
 </style>
 """, unsafe_allow_html=True)
 
