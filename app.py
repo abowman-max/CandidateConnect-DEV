@@ -548,6 +548,21 @@ DISPLAY_LABELS = {
     "Tags": "Tags",
 }
 
+
+def scope_summary(scope: dict | None) -> str:
+    try:
+        scope = scope or {}
+        parts = []
+        for k, v in scope.items():
+            vals = v if isinstance(v, list) else [v]
+            vals = [str(x).strip() for x in vals if str(x).strip()]
+            if vals:
+                parts.append(f"{DISPLAY_LABELS.get(k, k)}: {', '.join(vals)}")
+        return " | ".join(parts) if parts else "Statewide / unrestricted"
+    except Exception:
+        return "Statewide / unrestricted"
+
+
 LOGO_CANDIDATE_CONNECT = "candidate_connect_logo.png"
 LOGO_TPTC = "TSS_Logo_Transparent.png"
 
@@ -1088,7 +1103,6 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
         df["_sort"] = df["label"].map(lambda x: sortmap.get(str(x), 999))
         df = df.sort_values(["_sort", "label"])
     total = float(df["Voters"].sum() or 1)
-    maxv = float(df["Voters"].max() or 1)
 
     def _bar_color(label: str) -> str:
         l = str(label).strip().upper()
@@ -1121,7 +1135,7 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
         label = _display_label(lab)
         val = int(r["Voters"] or 0)
         pct = val / total * 100
-        width = max(2, val / maxv * 100)
+        width = max(1, min(100, pct))
         color = _bar_color(lab)
         rows.append(
             f'<div class="cc-one-line-bar-row">'
@@ -1920,7 +1934,7 @@ def render_security_gate():
                 username = st.text_input("Super Admin username")
                 pw1 = st.text_input("Password", type="password")
                 pw2 = st.text_input("Confirm password", type="password")
-                submitted = st.form_submit_button("Create Super Admin")
+                submitted = st.form_submit_button("Create Super Admin", type="primary")
         if submitted:
             username_clean = str(username or "").strip().lower()
             if not username_clean or not pw1:
@@ -1954,7 +1968,7 @@ def render_security_gate():
         with st.form("candidate_connect_login"):
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log In")
+            submitted = st.form_submit_button("Log In", type="primary")
     if submitted:
         username_clean = str(username or "").strip().lower()
         user = (users or {}).get(username_clean)
@@ -2183,8 +2197,7 @@ def render_account_admin_workspace(filter_options=None):
         else:
             st.info("Users you create inherit your campaign boundary automatically.")
             scope = security_scope_filters()
-            st.code(json.dumps(scope, ensure_ascii=False, indent=2), language="json")
-
+        st.markdown("**Campaign boundary:** " + scope_summary(scope if "scope" in locals() else {}))
         submitted = st.form_submit_button("Save Account")
 
     if submitted:
@@ -6283,7 +6296,7 @@ def render_area_intelligence_workspace():
         st.caption("This is built as a report, not a screenshot: cover/summary, strategy notes, profile tables, and the selected geography breakdown.")
         pdf_col1, pdf_col2, pdf_spacer = st.columns([0.9, 1.05, 4.0])
         with pdf_col1:
-            prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn"), type="primary")
+            prep_clicked = st.button("Prepare Area Intelligence PDF", key=special_key("area_pdf_btn", type="primary"), type="primary")
         if prep_clicked:
             with st.spinner("Preparing Area Intelligence report..."):
                 turnout_df = _area_turnout_by_party(
@@ -8024,6 +8037,165 @@ button[aria-label*="password"] svg, button[title*="password"] svg, [data-testid=
 .cc-one-line-bar-fill { height:100% !important; border-radius:999px !important; }
 .cc-one-line-bar-value { color:#071d3a !important; font-weight:900 !important; font-size:10pt !important; line-height:1.1 !important; white-space:nowrap !important; }
 .cc-swatch { width:11px !important; height:11px !important; min-width:11px !important; border-radius:50% !important; display:inline-block !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# Final source-level UI fixes v9.
+st.markdown("""
+<style>
+/* Login card: true centered professional card */
+div[data-testid="stForm"] {
+  background: #f8f4ea !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+  padding: 22px 26px !important;
+}
+
+/* ALL buttons, including form submit and BaseWeb buttons */
+button:not(:disabled),
+.stButton > button:not(:disabled),
+.stFormSubmitButton > button:not(:disabled),
+div[data-testid="stFormSubmitButton"] button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid*="baseButton"]:not(:disabled) {
+  background: linear-gradient(180deg,#b01822,#9f151c) !important;
+  background-color: #9f151c !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #6f0d13 !important;
+  font-weight: 900 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+button:not(:disabled) *,
+.stButton > button:not(:disabled) *,
+.stFormSubmitButton > button:not(:disabled) *,
+div[data-testid="stFormSubmitButton"] button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid*="baseButton"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Do NOT turn password eye into red button */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 0 !important;
+  border-left: 1px solid #d0c7b7 !important;
+  opacity: 1 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* Disabled buttons readable */
+button:disabled,
+.stButton > button:disabled,
+.stFormSubmitButton > button:disabled,
+div[data-testid="stFormSubmitButton"] button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+  background: #d8cfc0 !important;
+  background-color: #d8cfc0 !important;
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: .75 !important;
+}
+button:disabled *,
+.stButton > button:disabled *,
+.stFormSubmitButton > button:disabled *,
+div[data-testid="stFormSubmitButton"] button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+}
+
+/* Compact, non-clipped party/gender bars */
+.cc-group-bar-card {
+  min-height: 230px !important;
+  height: auto !important;
+  overflow: visible !important;
+  padding: 18px 22px 22px 22px !important;
+}
+.cc-one-line-bars {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  width: 100% !important;
+  padding-bottom: 14px !important;
+}
+.cc-one-line-bar-row {
+  display: grid !important;
+  grid-template-columns: 150px minmax(180px, 1fr) 145px !important;
+  gap: 10px !important;
+  align-items: center !important;
+  min-height: 24px !important;
+}
+.cc-one-line-bar-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 10pt !important;
+  white-space: nowrap !important;
+}
+.cc-one-line-bar-track {
+  height: 12px !important;
+  border-radius: 999px !important;
+  background: #071d3a !important;
+  overflow: hidden !important;
+}
+.cc-one-line-bar-fill { height: 100% !important; border-radius: 999px !important; }
+.cc-one-line-bar-value {
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 10pt !important;
+  white-space: nowrap !important;
+}
+.cc-total-line {
+  color: #071d3a !important;
+  font-weight: 950 !important;
+  font-size: 11pt !important;
+  margin: 2px 0 12px 0 !important;
+}
+.cc-total-line span {
+  color: #5f6b7a !important;
+  font-size: 9pt !important;
+}
+.cc-swatch {
+  width: 11px !important;
+  height: 11px !important;
+  min-width: 11px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+}
+
+/* Account admin: no raw black JSON-looking blocks unless real code requested */
+.cc-boundary-summary {
+  background: #d9e8f8 !important;
+  color: #071d3a !important;
+  border: 1px solid #8aa3bf !important;
+  border-radius: 10px !important;
+  padding: 10px 12px !important;
+  margin: 8px 0 12px 0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
