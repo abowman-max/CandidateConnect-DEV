@@ -2808,50 +2808,47 @@ def render_metrics(summary, label=""):
 
 
 
+
+def _cc_party_bar_html(label: str, value: int, total: int, color: str) -> str:
+    pct_val = (value / total * 100) if total else 0
+    return f"""
+      <div class="cc-party-bar-row">
+        <div class="cc-party-bar-label"><span class="cc-swatch" style="background:{color}"></span>{label}</div>
+        <div class="cc-party-bar-track"><div class="cc-party-bar-fill" style="width:{pct_val:.1f}%;background:{color};"></div></div>
+        <div class="cc-party-bar-value">{value:,} ({pct_val:.1f}%)</div>
+      </div>
+    """
+
+
 def render_party_chart(summary, title="Party Breakdown"):
-    """Local-style party donut. Replaces the plain Streamlit bar chart."""
+    """Stable horizontal bars. Avoids Streamlit/browser conic-gradient donut issues."""
     total = int(summary.get("total", 0) or 0)
     r = int(summary.get("r", 0) or 0)
     d = int(summary.get("d", 0) or 0)
     o = int(summary.get("o", 0) or 0)
-    rp = round((r / total * 100), 1) if total else 0
-    dp = round((d / total * 100), 1) if total else 0
-    op = round((o / total * 100), 1) if total else 0
-    html = f"""<div class=\"cc-home-card\"><h3>{title}</h3>
-    <div class=\"cc-donut-wrap\">
-      <div class=\"cc-donut\" style=\"--r:{rp};--d:{dp};--o:{op};\">
-        <div class=\"cc-donut-center\"><div>{total:,}</div><div style=\"font-size:11px;color:#cbd5e1;\">Total</div></div>
-      </div>
-      <div style=\"min-width:260px;\">
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#d51f2a\"></span><span>Republican</span><b>{r:,} ({rp:.1f}%)</b></div>
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#2454d6\"></span><span>Democrat</span><b>{d:,} ({dp:.1f}%)</b></div>
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#4c9a2a\"></span><span>Other / Unaffiliated</span><b>{o:,} ({op:.1f}%)</b></div>
-      </div>
-    </div></div>"""
+    html = f"""<div class="cc-home-card cc-party-bar-card"><h3>{title}</h3>
+      <div class="cc-party-bar-total"><b>{total:,}</b><span>Total</span></div>
+      {_cc_party_bar_html("Republican", r, total, "#d51f2a")}
+      {_cc_party_bar_html("Democrat", d, total, "#2454d6")}
+      {_cc_party_bar_html("Other / Unaffiliated", o, total, "#4c9a2a")}
+    </div>"""
     st.markdown(html, unsafe_allow_html=True)
 
 
 def render_gender_chart(summary, title="Voters by Gender"):
-    """Dashboard donut for gender. Uses the same layout as party, but labels correctly as Female/Male/Unknown."""
+    """Stable horizontal bars for gender. Uses same colors as existing dashboard convention."""
     total = int(summary.get("total", 0) or 0)
     f = int(summary.get("f", 0) or 0)
     m = int(summary.get("m", 0) or 0)
     u = int(summary.get("u", 0) or 0)
-    fp = round((f / total * 100), 1) if total else 0
-    mp = round((m / total * 100), 1) if total else 0
-    up = round((u / total * 100), 1) if total else 0
-    html = f"""<div class=\"cc-home-card\"><h3>{title}</h3>
-    <div class=\"cc-donut-wrap\">
-      <div class=\"cc-donut\" style=\"--r:{fp};--d:{mp};--o:{up};\">
-        <div class=\"cc-donut-center\"><div>{total:,}</div><div style=\"font-size:11px;color:#ffffff !important;\">Total</div></div>
-      </div>
-      <div style=\"min-width:260px;\">
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#d51f2a\"></span><span>Female</span><b>{f:,} ({fp:.1f}%)</b></div>
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#2454d6\"></span><span>Male</span><b>{m:,} ({mp:.1f}%)</b></div>
-        <div class=\"cc-legend-row\"><span class=\"cc-swatch\" style=\"background:#4c9a2a\"></span><span>Unknown / Other</span><b>{u:,} ({up:.1f}%)</b></div>
-      </div>
-    </div></div>"""
+    html = f"""<div class="cc-home-card cc-party-bar-card"><h3>{title}</h3>
+      <div class="cc-party-bar-total"><b>{total:,}</b><span>Total</span></div>
+      {_cc_party_bar_html("Female", f, total, "#d51f2a")}
+      {_cc_party_bar_html("Male", m, total, "#2454d6")}
+      {_cc_party_bar_html("Unknown / Other", u, total, "#4c9a2a")}
+    </div>"""
     st.markdown(html, unsafe_allow_html=True)
+
 
 def render_quick_exact_comparison():
     q = st.session_state.get("quick_summary")
@@ -5010,13 +5007,14 @@ def _drop_unusable_rows(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
-    """Stable readable table: centered cells, zebra rows, sticky header/first column.
 
-    Streamlit's canvas dataframe ignores some CSS depending on browser/system mode.
-    This HTML table is used for app-facing analysis tables so users always see
-    readable dark text on light rows.  Sorting remains available on the few native
-    Streamlit dataframes that are left in the app, but readability wins here.
+def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
+    """Sortable global table.
+
+    Uses Streamlit's native dataframe so column headers are sortable. When
+    sticky_first_col=True, the first data column is moved to the index; Streamlit
+    keeps the index visible while horizontally scrolling, giving us the row-header
+    behavior needed for app tables.
     """
     if df is None:
         df = pd.DataFrame()
@@ -5024,20 +5022,34 @@ def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None
     if show.empty:
         st.markdown('<div class="cc-empty-table">No rows to display.</div>', unsafe_allow_html=True)
         return None
+
     for col in show.columns:
         if col in {"Voters", "Total", "Count", "Rows", "Households", "Republican", "Democrat", "Other", "R", "D", "O", "Female", "Male", "Age65Plus", "StrongGeneral", "StrongAll", "MBProspects", "MBApplicants", "MBSent", "MBReturned"} or str(col).lower().endswith(" voters"):
-            # Values may already be comma-formatted strings from upstream display helpers.
-            # Strip commas before numeric conversion so statewide/home tables do not blank out.
             raw = show[col].astype(str).str.replace(",", "", regex=False).str.strip()
             nums = pd.to_numeric(raw, errors="coerce")
             show[col] = nums.map(lambda x: "" if pd.isna(x) else f"{int(x):,}")
+
+    display_df = show
+    hide_index = True
+    if sticky_first_col and len(show.columns) > 0:
+        first = show.columns[0]
+        display_df = show.set_index(first, drop=True)
+        display_df.index.name = str(first)
+        hide_index = False
+
     max_h = height or 360
     if len(show) <= 12:
-        max_h = min(max_h, max(110, 44 + 38 * (len(show) + 1)))
-    table_html = show.to_html(index=False, escape=True, classes="cc-html-table")
-    sticky_cls = " sticky-first" if sticky_first_col else ""
-    st.markdown(f'<div class="cc-table-wrap{sticky_cls}" style="max-height:{int(max_h)}px">{table_html}</div>', unsafe_allow_html=True)
+        max_h = min(max_h, max(120, 42 + 36 * (len(show) + 1)))
+
+    st.dataframe(
+        display_df,
+        height=int(max_h),
+        width="stretch",
+        hide_index=hide_index,
+        key=key,
+    )
     return None
+
 
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
     st.markdown(
@@ -7644,6 +7656,100 @@ header[data-testid="stHeader"] {
   }
   .cc-donut:after {
     inset: 36px !important;
+  }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Final chart/table policy: bar charts + native sortable tables.
+st.markdown("""
+<style>
+/* Replace donut visuals with stable bar-card layout */
+.cc-party-bar-card {
+  padding: 18px 20px !important;
+}
+.cc-party-bar-total {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 10px !important;
+  color: #071d3a !important;
+  margin: 4px 0 12px 0 !important;
+}
+.cc-party-bar-total b {
+  font-size: 18pt !important;
+  color: #071d3a !important;
+}
+.cc-party-bar-total span {
+  font-size: 10pt !important;
+  color: #5f6b7a !important;
+  font-weight: 800 !important;
+}
+.cc-party-bar-row {
+  display: grid !important;
+  grid-template-columns: 210px minmax(160px, 1fr) 150px !important;
+  align-items: center !important;
+  gap: 14px !important;
+  margin: 11px 0 !important;
+  color: #071d3a !important;
+}
+.cc-party-bar-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  font-weight: 850 !important;
+  color: #071d3a !important;
+}
+.cc-party-bar-track {
+  height: 14px !important;
+  border-radius: 999px !important;
+  background: #071d3a !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.12) !important;
+}
+.cc-party-bar-fill {
+  height: 100% !important;
+  border-radius: 999px !important;
+}
+.cc-party-bar-value {
+  text-align: right !important;
+  color: #071d3a !important;
+  font-weight: 900 !important;
+}
+
+/* Hide old donut if any old cached markup remains */
+.cc-donut { display:none !important; }
+
+/* Native Streamlit dataframe: sortable, readable, sticky header. */
+[data-testid="stDataFrame"] {
+  border: 1px solid #9f151c !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [role="columnheader"] * {
+  background: #9f151c !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 900 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataFrame"] [role="gridcell"] * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stDataFrame"] canvas {
+  background: #ffffff !important;
+}
+
+@media (max-width: 900px) {
+  .cc-party-bar-row {
+    grid-template-columns: 1fr !important;
+    gap: 5px !important;
+  }
+  .cc-party-bar-value {
+    text-align: left !important;
   }
 }
 </style>
