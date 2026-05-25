@@ -1104,6 +1104,7 @@ def dataframe_to_excel_bytes(df: pd.DataFrame, area_level: str = "Municipality")
 
 
 def render_group_bar(active: dict, field: str, title: str, order: list[str] | None = None):
+    """Render Party/Gender charts in a fixed-height component so Streamlit cannot clip the bottom row."""
     special = {k:v for k,v in active_special_filters().items() if not str(k).startswith("__Election")}
     df = duckdb_count_cube_group_filtered(
         json.dumps(count_safe_filters(active or {}), sort_keys=True),
@@ -1158,21 +1159,117 @@ def render_group_bar(active: dict, field: str, title: str, order: list[str] | No
         width = max(1, min(100, pct))
         color = _bar_color(lab)
         rows.append(
-            f'<div style="display:grid;grid-template-columns:150px minmax(150px,1fr) 135px;gap:10px;align-items:center;margin:7px 0;min-height:18px;">'
-            f'<div style="display:flex;align-items:center;gap:7px;color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};"></span>{html_escape(label)}</div>'
-            f'<div style="height:10px;border-radius:999px;background:#071d3a;overflow:hidden;"><div style="height:100%;border-radius:999px;width:{width:.1f}%;background:{color};"></div></div>'
-            f'<div style="color:#071d3a;font-weight:900;font-size:13px;line-height:1.1;white-space:nowrap;">{val:,} ({pct:.1f}%)</div>'
+            f'<div class="row">'
+            f'<div class="label"><span class="dot" style="background:{color};"></span>{html_escape(label)}</div>'
+            f'<div class="track"><div class="fill" style="width:{width:.1f}%; background:{color};"></div></div>'
+            f'<div class="value">{val:,} ({pct:.1f}%)</div>'
             f'</div>'
         )
 
-    html = (
-        '<div style="background:#f8f4ea;color:#071d3a;border:1px solid #b9ad99;border-radius:12px;box-shadow:0 8px 18px rgba(7,29,58,.12);padding:16px 20px 22px 20px;margin-bottom:16px;min-height:245px;height:auto;overflow:visible;">'
-        + '<h3 style="margin:0 0 10px 0;color:#071d3a;font-weight:950;">' + html_escape(title) + '</h3>'
-        + f'<div style="color:#071d3a;font-weight:950;font-size:15px;margin:0 0 10px 0;">{int(total):,}<span style="color:#5f6b7a;font-size:12px;margin-left:4px;">Total</span></div>'
-        + ''.join(rows)
-        + '</div>'
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    # Use a Streamlit component with an explicit height. st.markdown can be clipped by
+    # Streamlit's HTML height estimation inside columns/cards.
+    height = 210 + max(0, len(rows) - 3) * 30
+    html_doc = f"""
+    <html>
+    <head>
+      <style>
+        html, body {{
+          margin: 0;
+          padding: 0;
+          background: transparent;
+          overflow: hidden;
+          font-family: Arial, Helvetica, sans-serif;
+          color: #071d3a;
+        }}
+        .card {{
+          box-sizing: border-box;
+          width: 100%;
+          min-height: {height - 8}px;
+          background: #f8f4ea;
+          border: 1px solid #b9ad99;
+          border-radius: 12px;
+          box-shadow: 0 8px 18px rgba(7,29,58,.12);
+          padding: 16px 20px 18px 20px;
+          overflow: visible;
+        }}
+        h3 {{
+          margin: 0 0 8px 0;
+          color: #071d3a;
+          font-size: 22px;
+          font-weight: 950;
+          line-height: 1.1;
+        }}
+        .total {{
+          color: #071d3a;
+          font-weight: 950;
+          font-size: 15px;
+          margin: 0 0 10px 0;
+        }}
+        .total span {{
+          color: #5f6b7a;
+          font-size: 12px;
+          margin-left: 4px;
+        }}
+        .bars {{
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: 100%;
+        }}
+        .row {{
+          display: grid;
+          grid-template-columns: 150px minmax(140px, 1fr) 135px;
+          gap: 10px;
+          align-items: center;
+          min-height: 22px;
+        }}
+        .label {{
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          color: #071d3a;
+          font-weight: 900;
+          font-size: 13px;
+          line-height: 1.1;
+          white-space: nowrap;
+        }}
+        .dot {{
+          display: inline-block;
+          width: 10px;
+          height: 10px;
+          min-width: 10px;
+          border-radius: 50%;
+        }}
+        .track {{
+          height: 10px;
+          border-radius: 999px;
+          background: #071d3a;
+          overflow: hidden;
+        }}
+        .fill {{
+          height: 100%;
+          border-radius: 999px;
+        }}
+        .value {{
+          color: #071d3a;
+          font-weight: 900;
+          font-size: 13px;
+          line-height: 1.1;
+          white-space: nowrap;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h3>{html_escape(title)}</h3>
+        <div class="total">{int(total):,}<span>Total</span></div>
+        <div class="bars">{''.join(rows)}</div>
+      </div>
+    </body>
+    </html>
+    """
+    components.html(html_doc, height=height, scrolling=False)
+
 
 
 def election_method_sql(selected_cols: list[str], methods: list[str]) -> str:
@@ -8365,6 +8462,19 @@ div[data-testid="stForm"] {
   border: 1px solid #b9ad99 !important;
   border-radius: 16px !important;
   box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Final chart iframe polish v12.
+st.markdown("""
+<style>
+iframe[title="streamlit.components.v1.html"] {
+  width: 100% !important;
+  border: 0 !important;
+  background: transparent !important;
+  margin-bottom: 12px !important;
 }
 </style>
 """, unsafe_allow_html=True)
