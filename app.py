@@ -1920,6 +1920,88 @@ def enqueue_campaign_build(campaign_id: str, reason: str = "campaign_approved") 
     }
     return _put_json_to_r2_key(f"app_state/build_queue/{cid}.json", payload)
 
+def _r2_client_for_current_app():
+    """Return (client, target_name, bucket) for current app R2 writes/deletes."""
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        return None, "", "", f"boto3 not available: {exc}"
+    endpoint_url = _get_secret_value("R2_ENDPOINT_URL") or _get_secret_value("CLOUDFLARE_R2_ENDPOINT_URL")
+    account_id = _get_secret_value("R2_ACCOUNT_ID") or _get_secret_value("CLOUDFLARE_ACCOUNT_ID")
+    if not endpoint_url and account_id:
+        endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
+    access_key = _get_secret_value("R2_ACCESS_KEY_ID") or _get_secret_value("AWS_ACCESS_KEY_ID")
+    secret_key = _get_secret_value("R2_SECRET_ACCESS_KEY") or _get_secret_value("AWS_SECRET_ACCESS_KEY")
+    target_name, bucket, _public = _r2_bucket_for_current_app()
+    if not endpoint_url or not access_key or not secret_key or not bucket:
+        return None, target_name, bucket, "R2 write credentials/bucket not configured"
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="auto",
+        )
+        return client, target_name, bucket, ""
+    except Exception as exc:
+        return None, target_name, bucket, str(exc)
+
+
+def _delete_r2_prefix(prefix: str) -> tuple[bool, str]:
+    """Delete every R2 object under prefix in the current app bucket."""
+    client, target_name, bucket, err = _r2_client_for_current_app()
+    if client is None:
+        return False, err
+    prefix = str(prefix or "").lstrip("/")
+    if not prefix:
+        return False, "Refusing to delete empty R2 prefix"
+    try:
+        deleted = 0
+        token = None
+        while True:
+            kwargs = {"Bucket": bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = client.list_objects_v2(**kwargs)
+            objs = [{"Key": o["Key"]} for o in (resp.get("Contents") or []) if o.get("Key")]
+            if objs:
+                client.delete_objects(Bucket=bucket, Delete={"Objects": objs, "Quiet": True})
+                deleted += len(objs)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        return True, f"Deleted {deleted} object(s) from {target_name} R2 under {prefix}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _delete_r2_key(key: str) -> tuple[bool, str]:
+    client, target_name, bucket, err = _r2_client_for_current_app()
+    if client is None:
+        return False, err
+    key = str(key or "").lstrip("/")
+    if not key:
+        return False, "Refusing to delete empty R2 key"
+    try:
+        client.delete_object(Bucket=bucket, Key=key)
+        return True, f"Deleted {key} from {target_name} R2"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def refresh_security_admin_view():
+    """Clear cached app/security state and rerun without logging the user out."""
+    for fn_name in ("load_security_store", "_load_remote_app_state", "_load_state"):
+        try:
+            fn = globals().get(fn_name)
+            if fn and hasattr(fn, "clear"):
+                fn.clear()
+        except Exception:
+            pass
+    st.toast("Refreshed account/campaign state from app_state.")
+    st.rerun()
+
 def save_security_store(store: dict) -> bool:
     if not isinstance(store, dict):
         store = _empty_security_store()
@@ -2913,7 +2995,12 @@ def render_account_admin_workspace(filter_options=None):
     me = current_user()
     my_campaign = str(me.get("campaign") or "").strip()
 
-    st.markdown("### Current Accounts")
+    acct_hdr, acct_refresh_col = st.columns([5, 1])
+    with acct_hdr:
+        st.markdown("### Current Accounts")
+    with acct_refresh_col:
+        if st.button("Refresh Accounts", key="refresh_accounts_section", width="stretch"):
+            refresh_security_admin_view()
     rows = []
     visible_users = locals().get("visible_users", visible_user_records_for_current_user(users))
     visible_campaigns = locals().get("visible_campaigns", visible_campaign_records_for_current_user(campaigns if "campaigns" in locals() else {}))
@@ -2937,7 +3024,36 @@ def render_account_admin_workspace(filter_options=None):
     edit_user = st.selectbox("Optional: load existing account to edit", existing_names, key="security_edit_user")
     existing = users.get(edit_user, {}) if edit_user else {}
 
-    st.markdown("### Campaigns / Mini Datasets")
+    if edit_user:
+        with st.expander("Delete User", expanded=False):
+            st.warning("This permanently removes the selected user account from this app_state security store. It does not delete campaign datasets or saved universes.")
+            confirm_delete_user = st.checkbox(f"I understand — delete user {edit_user}", key=f"confirm_delete_user_{edit_user}")
+            can_delete_user = True
+            if edit_user == current_username():
+                can_delete_user = False
+                st.error("You cannot delete the account you are currently using.")
+            if users.get(edit_user, {}).get("role") == "Super Admin":
+                super_admin_count = sum(1 for _u in users.values() if (_u or {}).get("role") == "Super Admin" and not (_u or {}).get("disabled"))
+                if super_admin_count <= 1:
+                    can_delete_user = False
+                    st.error("You cannot delete the last active Super Admin.")
+            if not is_super_admin():
+                target = users.get(edit_user, {}) or {}
+                if str(target.get("campaign_id") or "") != str((current_user() or {}).get("campaign_id") or ""):
+                    can_delete_user = False
+                    st.error("Campaign Admins can only delete users inside their own campaign.")
+            if st.button("Delete Selected User", key=f"delete_user_btn_{edit_user}", type="primary", disabled=(not confirm_delete_user or not can_delete_user)):
+                users.pop(edit_user, None)
+                save_security_store(store)
+                st.success(f"Deleted user: {edit_user}")
+                st.rerun()
+
+    camp_hdr, camp_refresh_col = st.columns([5, 1])
+    with camp_hdr:
+        st.markdown("### Campaigns / Mini Datasets")
+    with camp_refresh_col:
+        if st.button("Refresh Campaigns", key="refresh_campaigns_section", width="stretch"):
+            refresh_security_admin_view()
     st.caption("Phase 2A: define campaign records now. Once its mini dataset is built/uploaded, campaign users can read the smaller dataset instead of statewide.")
     if is_super_admin():
         if st.button("Repair / Sync Campaign Records", key="repair_campaign_records_btn"):
@@ -2969,6 +3085,43 @@ def render_account_admin_workspace(filter_options=None):
     else:
         st.info("No campaign records yet.")
 
+    if is_super_admin() and visible_campaigns:
+        with st.expander("Delete Campaign", expanded=False):
+            st.warning("This is a hard-delete cleanup tool for test/bad campaigns. It removes the campaign record, build queue item, and R2 campaign folder for the current DEV/LIVE app. Linked users are deleted only if you check that option.")
+            delete_cid = st.selectbox("Campaign to delete", [""] + sorted(visible_campaigns.keys()), key="delete_campaign_select")
+            delete_linked_users = st.checkbox("Also delete users linked to this campaign", value=True, key="delete_campaign_linked_users")
+            confirm_delete_campaign = st.checkbox("I understand this permanently deletes the selected campaign data", key="confirm_delete_campaign")
+            if delete_cid:
+                linked_usernames = sorted([uname for uname, u in users.items() if str((u or {}).get("campaign_id") or "") == str(delete_cid)])
+                if linked_usernames:
+                    st.caption("Linked users: " + ", ".join(linked_usernames))
+                st.code(f"app_state/campaigns/{delete_cid}/", language="text")
+            if st.button("Delete Selected Campaign", key="delete_campaign_btn", type="primary", disabled=(not delete_cid or not confirm_delete_campaign)):
+                cid = str(delete_cid)
+                campaigns.pop(cid, None)
+                if delete_linked_users:
+                    for uname in list(users.keys()):
+                        if str((users.get(uname) or {}).get("campaign_id") or "") == cid:
+                            users.pop(uname, None)
+                else:
+                    for uname, u in list(users.items()):
+                        if str((u or {}).get("campaign_id") or "") == cid:
+                            u["disabled"] = True
+                            u["campaign_id"] = ""
+                            u["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                save_security_store(store)
+                ok1, msg1 = _delete_r2_prefix(f"app_state/campaigns/{cid}/")
+                ok2, msg2 = _delete_r2_key(f"app_state/build_queue/{cid}.json")
+                local_dir = Path("07_outputs") / "campaign_datasets" / cid
+                try:
+                    import shutil
+                    if local_dir.exists():
+                        shutil.rmtree(local_dir)
+                except Exception:
+                    pass
+                st.success(f"Deleted campaign {cid}. {msg1}. {msg2}.")
+                st.rerun()
+
     if is_super_admin():
         pending_campaigns = {cid: c for cid, c in campaigns.items() if str(c.get("account_status") or "") in ("pending_approval", "pending_manual_boundary", "pending_payment", "payment_failed")}
         if pending_campaigns:
@@ -2990,7 +3143,7 @@ def render_account_admin_workspace(filter_options=None):
             with c1:
                 if st.button("Approve Campaign", key="approve_pending_campaign", type="primary", disabled=not bool(selected_pending)):
                     if approve_campaign_request(store, selected_pending):
-                        st.success("Campaign approved and linked user enabled. Run Step 9, upload campaign datasets, then mark Dataset Status active. Security store now syncs to R2 automatically when credentials are configured.")
+                        st.success("Campaign approved and queued for automatic build. Use Refresh Campaigns in a minute to check whether the worker marked it active.")
                         st.rerun()
                     else:
                         st.error("This request needs manual boundary review before approval. Edit the campaign scope first, then approve it.")
