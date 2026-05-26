@@ -2686,6 +2686,62 @@ def build_scope_from_admin_widgets(prefix: str, filter_options: pd.DataFrame, ba
     return out
 
 
+
+def visible_campaign_records_for_current_user(campaigns: dict) -> dict:
+    """Return only campaign records visible to the current user.
+
+    Super Admin sees all campaigns. Campaign Admin sees only their assigned campaign.
+    This is a hard UI/data guard for Account Admin tables and controls.
+    """
+    try:
+        if is_super_admin():
+            return campaigns or {}
+        me = current_user() or {}
+        my_cid = str(me.get("campaign_id") or "").strip()
+        my_campaign = str(me.get("campaign") or "").strip()
+        out = {}
+        for cid, c in (campaigns or {}).items():
+            c = c or {}
+            if my_cid and str(cid).strip() == my_cid:
+                out[cid] = c
+                continue
+            if my_cid and str(c.get("campaign_id") or "").strip() == my_cid:
+                out[cid] = c
+                continue
+            if my_campaign and str(c.get("campaign_name") or "").strip() == my_campaign:
+                out[cid] = c
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def visible_user_records_for_current_user(users: dict) -> dict:
+    """Return only account records visible to current user."""
+    try:
+        if is_super_admin():
+            return users or {}
+        me = current_user() or {}
+        my_username = str(me.get("username") or "").strip()
+        my_cid = str(me.get("campaign_id") or "").strip()
+        my_campaign = str(me.get("campaign") or "").strip()
+        out = {}
+        for uname, u in (users or {}).items():
+            u = u or {}
+            if str(uname).strip() == my_username:
+                out[uname] = u
+                continue
+            if my_cid and str(u.get("campaign_id") or "").strip() == my_cid:
+                out[uname] = u
+                continue
+            if my_campaign and str(u.get("campaign") or "").strip() == my_campaign:
+                out[uname] = u
+                continue
+        return out
+    except Exception:
+        return {}
+
+
 def render_account_admin_workspace(filter_options=None):
     st.markdown("## Account Admin")
     st.caption("Manage Candidate Connect accounts and campaign scopes. Campaign-scoped users cannot see, search, export, or report outside their assigned universe.")
@@ -2699,7 +2755,7 @@ def render_account_admin_workspace(filter_options=None):
 
     st.markdown("### Current Accounts")
     rows = []
-    for uname, u in sorted(users.items()):
+    for uname, u in sorted(visible_users.items()):
         if not is_super_admin() and str(u.get("campaign") or "") != my_campaign:
             continue
         rows.append({
@@ -2731,8 +2787,10 @@ def render_account_admin_workspace(filter_options=None):
                 st.info("Campaign records already look synced.")
 
     campaigns = store.setdefault("campaigns", {})
+    visible_campaigns = visible_campaign_records_for_current_user(campaigns)
+    visible_users = visible_user_records_for_current_user(users)
     camp_rows = []
-    for cid, c in sorted(campaigns.items()):
+    for cid, c in sorted(visible_campaigns.items()):
         camp_rows.append({
             "Campaign ID": cid,
             "Campaign": c.get("campaign_name", ""),
