@@ -6935,12 +6935,16 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
         colWidths=[10.0*inch], rowHeights=[1.9*inch],
         style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)])
     ))
-    story.append(Spacer(1, 0.12*inch))
-    story.append(Table(
-        [[stacked_mail_chart(tables.get("MailBallotByParty"), w=700, h=215)]],
-        colWidths=[10.0*inch], rowHeights=[2.75*inch],
-        style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)])
-    ))
+    # Only include the mail-ballot-by-party history chart when the speed/index layer already has it.
+    # This intentionally avoids falling back to a full voter-file scan, which would slow the app down.
+    mb_party_df = tables.get("MailBallotByParty")
+    if mb_party_df is not None and not getattr(mb_party_df, "empty", True):
+        story.append(Spacer(1, 0.12*inch))
+        story.append(Table(
+            [[stacked_mail_chart(mb_party_df, w=700, h=215)]],
+            colWidths=[10.0*inch], rowHeights=[2.75*inch],
+            style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('BOX',(0,0),(-1,-1),0.25,colors.HexColor('#e5e7eb')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)])
+        ))
     story.append(PageBreak())
 
     # ---------------- Profile tables ----------------
