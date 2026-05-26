@@ -4,6 +4,8 @@
 
 import io
 import json
+import mimetypes
+import os
 import base64
 import re
 import hashlib
@@ -1779,6 +1781,52 @@ def load_security_store() -> dict:
     raw.setdefault("version", 1)
     return raw
 
+def _get_secret_value(name: str) -> str | None:
+    try:
+        val = st.secrets.get(name)  # type: ignore[attr-defined]
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    return os.environ.get(name)
+
+
+def _write_security_store_to_r2(store: dict) -> tuple[bool, str]:
+    """Best-effort durable sync for Account Admin changes.
+
+    Approval/activation should survive app reboot without manually downloading and
+    re-uploading security_store.json. If write credentials are not configured,
+    the local/export backup still works and the UI shows the manual fallback.
+    """
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        return False, f"boto3 not available: {exc}"
+
+    endpoint_url = _get_secret_value("R2_ENDPOINT_URL") or _get_secret_value("CLOUDFLARE_R2_ENDPOINT_URL")
+    account_id = _get_secret_value("R2_ACCOUNT_ID") or _get_secret_value("CLOUDFLARE_ACCOUNT_ID")
+    if not endpoint_url and account_id:
+        endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
+    access_key = _get_secret_value("R2_ACCESS_KEY_ID") or _get_secret_value("AWS_ACCESS_KEY_ID")
+    secret_key = _get_secret_value("R2_SECRET_ACCESS_KEY") or _get_secret_value("AWS_SECRET_ACCESS_KEY")
+    bucket = _get_secret_value("R2_BUCKET_NAME") or _get_secret_value("CANDIDATE_CONNECT_R2_BUCKET") or _get_secret_value("CANDIDATE_CONNECT_DEV_BUCKET") or "candidate-connect-data-dev"
+    if not endpoint_url or not access_key or not secret_key or not bucket:
+        return False, "R2 write credentials/bucket not configured"
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="auto",
+        )
+        body = json.dumps(store or {}, ensure_ascii=False, indent=2).encode("utf-8")
+        client.put_object(Bucket=bucket, Key="app_state/security_store.json", Body=body, ContentType="application/json")
+        return True, f"Synced security_store.json to R2 bucket {bucket}"
+    except Exception as exc:
+        return False, str(exc)
+
+
 def save_security_store(store: dict) -> bool:
     if not isinstance(store, dict):
         store = _empty_security_store()
@@ -1796,6 +1844,12 @@ def save_security_store(store: dict) -> bool:
         pass
     try:
         Path("/tmp/security_store.json").write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    ok_r2, msg_r2 = _write_security_store_to_r2(store)
+    try:
+        st.session_state["security_store_r2_sync"] = {"ok": ok_r2, "message": msg_r2, "at": datetime.now().isoformat(timespec="seconds")}
     except Exception:
         pass
     return True
@@ -2830,7 +2884,7 @@ def render_account_admin_workspace(filter_options=None):
             with c1:
                 if st.button("Approve Campaign", key="approve_pending_campaign", type="primary", disabled=not bool(selected_pending)):
                     if approve_campaign_request(store, selected_pending):
-                        st.success("Campaign approved and linked user enabled. Run Step 9, upload campaign datasets, then mark Dataset Status active.")
+                        st.success("Campaign approved and linked user enabled. Run Step 9, upload campaign datasets, then mark Dataset Status active. Security store now syncs to R2 automatically when credentials are configured.")
                         st.rerun()
                     else:
                         st.error("This request needs manual boundary review before approval. Edit the campaign scope first, then approve it.")
@@ -2849,7 +2903,7 @@ def render_account_admin_workspace(filter_options=None):
                 store.setdefault("campaigns", {})[selected_active]["dataset_status"] = "active"
                 store["campaigns"][selected_active]["updated_at"] = datetime.now().isoformat(timespec="seconds")
                 save_security_store(store)
-                st.success("Dataset marked active. Download/upload security_store.json so the setting survives reboot.")
+                st.success("Dataset marked active and security_store sync attempted automatically.")
                 st.rerun()
 
     st.markdown("#### Dataset Routing Rules")
