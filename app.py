@@ -2755,6 +2755,8 @@ def render_account_admin_workspace(filter_options=None):
 
     st.markdown("### Current Accounts")
     rows = []
+    visible_users = locals().get("visible_users", visible_user_records_for_current_user(users))
+    visible_campaigns = locals().get("visible_campaigns", visible_campaign_records_for_current_user(campaigns if "campaigns" in locals() else {}))
     for uname, u in sorted(visible_users.items()):
         if not is_super_admin() and str(u.get("campaign") or "") != my_campaign:
             continue
@@ -2790,6 +2792,7 @@ def render_account_admin_workspace(filter_options=None):
     visible_campaigns = visible_campaign_records_for_current_user(campaigns)
     visible_users = visible_user_records_for_current_user(users)
     camp_rows = []
+    visible_campaigns = locals().get("visible_campaigns", visible_campaign_records_for_current_user(campaigns if "campaigns" in locals() else {}))
     for cid, c in sorted(visible_campaigns.items()):
         camp_rows.append({
             "Campaign ID": cid,
