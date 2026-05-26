@@ -17,7 +17,10 @@ import pandas as pd
 import duckdb
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
+try:
+    import streamlit.components.v1 as components  # fallback only for older Streamlit builds
+except Exception:
+    components = None
 try:
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.pdfgen import canvas
@@ -891,18 +894,28 @@ def duckdb_count_cube_summary(active_json: str, special_json: str) -> dict:
     return summarize_from_df(df, row_count_mode=False)
 
 
-def index_urls_from_manifest() -> list[str]:
+@st.cache_data(ttl=600, show_spinner=False)
+def _index_urls_from_base(base_url: str) -> list[str]:
     """Remote index shard URLs for DuckDB. Keeps counting out of Streamlit memory."""
-    m = load_manifest()
+    m = _load_manifest_from_base(base_url)
     count = int(((m.get("index", {}) or {}).get("count", DETAIL_SHARDS)) or DETAIL_SHARDS)
-    return [r2_url(f"index/voters_index_{i:03d}.parquet") for i in range(count)]
+    return [f"{base_url.rstrip('/')}/index/voters_index_{i:03d}.parquet" for i in range(count)]
+
+
+def index_urls_from_manifest() -> list[str]:
+    return _index_urls_from_base(current_data_base_url())
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _detail_urls_from_base(base_url: str) -> list[str]:
+    """Remote detail shard URLs for DuckDB exports/reports."""
+    m = _load_manifest_from_base(base_url)
+    count = int(((m.get("detail", {}) or {}).get("count", DETAIL_SHARDS)) or DETAIL_SHARDS)
+    return [f"{base_url.rstrip('/')}/detail/voters_detail_{i:03d}.parquet" for i in range(count)]
 
 
 def detail_urls_from_manifest() -> list[str]:
-    """Remote detail shard URLs for DuckDB exports/reports."""
-    m = load_manifest()
-    count = int(((m.get("detail", {}) or {}).get("count", DETAIL_SHARDS)) or DETAIL_SHARDS)
-    return [r2_url(f"detail/voters_detail_{i:03d}.parquet") for i in range(count)]
+    return _detail_urls_from_base(current_data_base_url())
 
 
 def speed_table_key(stem: str) -> str:
@@ -1577,6 +1590,7 @@ def decode_corrections(raw):
     except Exception:
         return {}
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _load_remote_app_state() -> dict:
     """Read durable app_state uploaded to R2 by Pipeline Manager, when available."""
     state = {}
@@ -1701,6 +1715,10 @@ def _persist_state_section(section: str, data):
     state = _load_state()
     state[section] = data
     _save_state(state)
+    try:
+        load_security_store.clear()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -1772,6 +1790,7 @@ def _password_hash(username: str, password: str) -> str:
 def _empty_security_store() -> dict:
     return {"users": {}, "campaigns": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
 
+@st.cache_data(ttl=10, show_spinner=False)
 def load_security_store() -> dict:
     raw = (_load_state().get("security") or {})
     if not isinstance(raw, dict):
@@ -1848,6 +1867,14 @@ def save_security_store(store: dict) -> bool:
         pass
 
     ok_r2, msg_r2 = _write_security_store_to_r2(store)
+    try:
+        load_security_store.clear()
+    except Exception:
+        pass
+    try:
+        _load_remote_app_state.clear()
+    except Exception:
+        pass
     try:
         st.session_state["security_store_r2_sync"] = {"ok": ok_r2, "message": msg_r2, "at": datetime.now().isoformat(timespec="seconds")}
     except Exception:
@@ -5937,6 +5964,32 @@ def _drop_unusable_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
+def cc_iframe_html(html_doc: str, height: int = 360, scrolling: bool = False):
+    """Render isolated sortable-table HTML without the deprecated components.html call.
+
+    Streamlit is removing st.components.v1.html. New DEV builds expose st.iframe,
+    but older local builds may not, so keep a guarded fallback that will not affect
+    DEV when st.iframe is available.
+    """
+    if hasattr(st, "iframe"):
+        try:
+            return st.iframe(srcdoc=html_doc, height=height, scrolling=scrolling)
+        except TypeError:
+            try:
+                return st.iframe(html_doc, height=height, scrolling=scrolling)
+            except TypeError:
+                pass
+        except Exception:
+            pass
+    if components is not None:
+        return components.html(html_doc, height=height, scrolling=scrolling)
+    # Last-resort non-interactive fallback instead of crashing the app.
+    try:
+        return st.html(html_doc)
+    except Exception:
+        return st.markdown(html_doc, unsafe_allow_html=True)
+
+
 def cc_table(df: pd.DataFrame, height: int | None = None, key: str | None = None, sticky_first_col: bool = False):
     """Sortable, zebra-striped, sticky-header table in an isolated component."""
     if df is None:
@@ -5986,7 +6039,7 @@ document.querySelectorAll('th').forEach(function(th, idx) {{
 }});
 </script>
 </body></html>"""
-    components.html(html_doc, height=max_h + 8, scrolling=False)
+    cc_iframe_html(html_doc, height=max_h + 8, scrolling=False)
     return None
 
 def _mb_render_metric(label: str, value: int, note: str = "", color_class: str = ""):
