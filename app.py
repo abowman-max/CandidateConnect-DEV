@@ -12,7 +12,7 @@ import hashlib
 import html
 import secrets
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -1832,6 +1832,176 @@ def _refresh_current_session_user(store: dict, username: str = None) -> None:
 def _user_must_change_password() -> bool:
     return bool((current_user() or {}).get("force_password_change"))
 
+
+# ---------------------------------------------------------------------------
+# Temporary Gmail SMTP Forgot Password workflow (v19)
+# ---------------------------------------------------------------------------
+def _smtp_setting(*names: str) -> str:
+    for name in names:
+        val = _get_secret_value(name)
+        if val:
+            return str(val).strip()
+    return ""
+
+
+def _password_reset_code_hash(username: str, code: str) -> str:
+    uname = str(username or "").strip().lower()
+    clean_code = re.sub(r"\D+", "", str(code or ""))
+    return hashlib.sha256(f"candidate-connect-reset-v1::{uname}::{clean_code}".encode("utf-8")).hexdigest()
+
+
+def _find_password_reset_user(store: dict, identifier: str) -> tuple[str, dict]:
+    ident = str(identifier or "").strip().lower()
+    if not ident:
+        return "", {}
+    users = (store or {}).get("users") or {}
+    if ident in users:
+        return ident, users.get(ident) or {}
+    for uname, user in users.items():
+        email = str((user or {}).get("email") or "").strip().lower()
+        if email and email == ident:
+            return str(uname).strip().lower(), user or {}
+    return "", {}
+
+
+def _send_smtp_email(to_email: str, subject: str, body: str) -> tuple[bool, str]:
+    """Send a plain text email through SMTP. Gmail testing uses an App Password."""
+    to_email = str(to_email or "").strip()
+    if not to_email or "@" not in to_email:
+        return False, "No valid email is saved for this user."
+    host = _smtp_setting("SMTP_HOST", "GMAIL_SMTP_HOST") or "smtp.gmail.com"
+    port_raw = _smtp_setting("SMTP_PORT", "GMAIL_SMTP_PORT") or "465"
+    try:
+        port = int(port_raw)
+    except Exception:
+        port = 465
+    smtp_user = _smtp_setting("SMTP_USER", "GMAIL_SMTP_USER", "EMAIL_USER")
+    smtp_password = _smtp_setting("SMTP_PASSWORD", "GMAIL_SMTP_APP_PASSWORD", "EMAIL_PASSWORD")
+    from_email = _smtp_setting("SMTP_FROM", "GMAIL_SMTP_FROM") or smtp_user
+    from_name = _smtp_setting("SMTP_FROM_NAME") or "Candidate Connect"
+    if not smtp_user or not smtp_password or not from_email:
+        return False, "SMTP is not configured. Add SMTP_USER and SMTP_PASSWORD/GMAIL_SMTP_APP_PASSWORD."
+    try:
+        import smtplib
+        import ssl
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = f"{from_name} <{from_email}>"
+        msg["To"] = to_email
+        msg.set_content(body)
+        if port == 465:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, context=context, timeout=30) as server:
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                server.starttls(context=ssl.create_default_context())
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+        return True, "sent"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _request_password_reset(store: dict, identifier: str) -> tuple[bool, str]:
+    """Create and email a one-time code. Returns generic success for account privacy."""
+    uname, user = _find_password_reset_user(store, identifier)
+    if not uname or not user or user.get("disabled") or user.get("pending_approval"):
+        # Do not reveal whether the account exists.
+        return True, "If that account exists and has an email, a reset code was sent."
+    to_email = str(user.get("email") or "").strip()
+    if not to_email:
+        return False, "That account does not have an email address saved. Ask an admin to reset the password."
+    code = f"{secrets.randbelow(1000000):06d}"
+    expires = datetime.now() + timedelta(minutes=30)
+    resets = store.setdefault("password_resets", {})
+    resets[uname] = {
+        "code_hash": _password_reset_code_hash(uname, code),
+        "expires_at": expires.isoformat(timespec="seconds"),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "requested_for": uname,
+    }
+    save_security_store(store)
+    body = (
+        "Candidate Connect password reset\n\n"
+        f"Your one-time reset code is: {code}\n\n"
+        "This code expires in 30 minutes. If you did not request this, you can ignore this email.\n"
+    )
+    ok, msg = _send_smtp_email(to_email, "Candidate Connect password reset code", body)
+    if ok:
+        return True, "Reset code sent. Check your email."
+    # Remove unusable code if email failed.
+    try:
+        store.get("password_resets", {}).pop(uname, None)
+        save_security_store(store)
+    except Exception:
+        pass
+    return False, f"Could not send email: {msg}"
+
+
+def _complete_password_reset(store: dict, identifier: str, code: str, new_password: str, confirm_password: str) -> tuple[bool, str]:
+    uname, user = _find_password_reset_user(store, identifier)
+    if not uname or not user:
+        return False, "Invalid reset code or account."
+    err = _password_validation_error(new_password, confirm_password)
+    if err:
+        return False, err
+    reset = ((store or {}).get("password_resets") or {}).get(uname) or {}
+    if not reset:
+        return False, "Invalid or expired reset code."
+    try:
+        expires_at = datetime.fromisoformat(str(reset.get("expires_at") or ""))
+    except Exception:
+        expires_at = datetime.min
+    if datetime.now() > expires_at:
+        try:
+            store.get("password_resets", {}).pop(uname, None)
+            save_security_store(store)
+        except Exception:
+            pass
+        return False, "Reset code expired. Request a new one."
+    if str(reset.get("code_hash") or "") != _password_reset_code_hash(uname, code):
+        return False, "Invalid reset code."
+    if not _set_user_password(store, uname, new_password, force_change=False, reset_by="self_service_email_reset"):
+        return False, "Could not reset password."
+    try:
+        store.get("password_resets", {}).pop(uname, None)
+    except Exception:
+        pass
+    save_security_store(store)
+    return True, "Password changed. You can log in now."
+
+
+def render_forgot_password_panel(store: dict):
+    with st.expander("Forgot password?"):
+        st.caption("Temporary Gmail SMTP reset for testing. A one-time code will be emailed to the address saved on the account.")
+        tab_request, tab_reset = st.tabs(["Send code", "Use code"])
+        with tab_request:
+            with st.form("forgot_password_request_form"):
+                ident = st.text_input("Username or email", key="forgot_password_identifier")
+                send = st.form_submit_button("Send reset code", type="primary")
+            if send:
+                ok, msg = _request_password_reset(store, ident)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+        with tab_reset:
+            with st.form("forgot_password_complete_form"):
+                ident2 = st.text_input("Username or email", key="forgot_password_identifier_2")
+                code = st.text_input("Reset code", key="forgot_password_code")
+                pw1 = st.text_input("New password", type="password", key="forgot_password_pw1")
+                pw2 = st.text_input("Confirm new password", type="password", key="forgot_password_pw2")
+                reset = st.form_submit_button("Change password", type="primary")
+            if reset:
+                ok, msg = _complete_password_reset(store, ident2, code, pw1, pw2)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
 def _empty_security_store() -> dict:
     return {"users": {}, "campaigns": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
 
@@ -2899,6 +3069,10 @@ def render_security_gate():
             st.session_state["auth_user"] = user
             st.success("Logged in.")
             st.rerun()
+
+    _left_pw, _center_pw, _right_pw = st.columns([1, 1.15, 1])
+    with _center_pw:
+        render_forgot_password_panel(store)
 
     _left2, _center2, _right2 = st.columns([1, 1.15, 1])
     with _center2:
