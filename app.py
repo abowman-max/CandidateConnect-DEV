@@ -540,6 +540,40 @@ header[data-testid="stHeader"] {
 
 
 inject_clean_theme_css()
+
+st.markdown("""
+<style>
+/* Help ? icon and tooltip readability only */
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stTooltipHoverTarget"] *,
+button[aria-label="Help"],
+button[aria-label="Help"] *,
+svg[aria-label="Help"],
+[data-testid="stWidgetLabel"] svg {
+    color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+[data-baseweb="popover"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
 VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
@@ -3422,39 +3456,52 @@ def options_from_count_cube(field: str, active: dict) -> list:
 
 
 def field_options(filter_options: pd.DataFrame, field: str, active: dict | None = None):
+    """Return dropdown options for the left Create Universe filter pane.
+
+    Campaign users must see only option values inside their assigned hard boundary.
+    Geography options for campaign users now come from the current campaign mini
+    dataset/count cube instead of the statewide fallback filter_options table.
+    """
     try:
         scope = security_scope_filters()
         active = enforce_security_scope(active or {})
-        # If the logged-in account is scoped directly on this field, do not show
-        # values outside that campaign boundary in dropdowns.
+
         if field in scope and scope.get(field):
-            return list(scope.get(field) or [])
+            return sorted([str(v).strip() for v in (scope.get(field) or []) if str(v).strip()], key=smart_sort_key)
+
         fixed = clean_mail_options(field)
         if fixed:
             opts = fixed
+
         elif field in GEO_FIELDS:
-            # v21g: Use the smaller geo_hierarchy table for interdependent geography
-            # when it is safe to load. Never use count_cube to draw dropdowns; that
-            # was the source of the Create Universe crash.
-            geo_df = load_geo_hierarchy_safe()
-            opts = options_from_geo(geo_df, field, active) if geo_df is not None and not geo_df.empty else []
-            if not opts:
-                opts = options_from_filter_table(filter_options, field)
+            if is_campaign_scoped():
+                # Critical fix: use the campaign dataset/count cube for downstream
+                # geo fields like Precinct, USC, STS, STH, School District, etc.
+                # Do not fall back to statewide values for campaign users.
+                opts = options_from_count_cube(field, active) or []
+            else:
+                geo_df = load_geo_hierarchy_safe()
+                opts = options_from_geo(geo_df, field, active) if geo_df is not None and not geo_df.empty else []
+                if not opts:
+                    opts = options_from_filter_table(filter_options, field)
+
         else:
-            # v21g: Sidebar dropdowns must stay light. Voter/contact/mail fields
-            # come from filter_options; quick-count cube is used only after Update Counts.
             opts = options_from_filter_table(filter_options, field)
 
-        # Streamlit can throw if a previously selected value disappears from options.
-        # Keep current selections visible until the user clears them.
         current = [str(v) for v in (active or {}).get(field, []) if str(v).strip()]
         merged = list(opts)
-        for v in current:
-            if v not in merged:
-                merged.append(v)
-        return merged
+
+        # Only Super Admin or non-geo fields preserve stale current selections.
+        # Campaign geo dropdowns must not keep out-of-bound stale values.
+        if is_super_admin() or field not in GEO_FIELDS:
+            for v in current:
+                if v not in merged:
+                    merged.append(v)
+
+        return sorted([v for v in merged if not is_unusable_label(v)], key=smart_sort_key)
     except Exception:
         return []
+
 
 def is_cube_safe(active: dict) -> bool:
     # Geography + Party/Gender/Age_Range usually live in the count cube.
@@ -9129,40 +9176,4 @@ div[role="tooltip"] *,
 </style>
 """, unsafe_allow_html=True)
 
-
-# Help icon + tooltip readability only.
-st.markdown("""
-<style>
-/* The little ? icon on light background */
-[data-testid="stTooltipHoverTarget"],
-[data-testid="stTooltipHoverTarget"] *,
-button[aria-label="Help"],
-button[aria-label="Help"] *,
-svg[aria-label="Help"],
-[data-testid="stWidgetLabel"] svg {
-    color: #071d3a !important;
-    fill: #071d3a !important;
-    stroke: #071d3a !important;
-    opacity: 1 !important;
-}
-
-/* Tooltip content */
-div[data-testid="stTooltipContent"],
-div[role="tooltip"],
-[data-baseweb="popover"] {
-    background: #ffffff !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    border: 1px solid #b9ad99 !important;
-    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
-}
-div[data-testid="stTooltipContent"] *,
-div[role="tooltip"] *,
-[data-baseweb="popover"] * {
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-    opacity: 1 !important;
-}
-</style>
-""", unsafe_allow_html=True)
 
