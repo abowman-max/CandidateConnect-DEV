@@ -2615,7 +2615,7 @@ def reconcile_security_campaign_records(store: dict) -> bool:
 def approve_campaign_request(store: dict, campaign_id: str):
     campaigns = store.setdefault("campaigns", {})
     users = store.setdefault("users", {})
-    campaign_id = str(campaign_id or "").strip()
+    campaign_id = _campaign_slug(campaign_id)
 
     # Auto-create missing campaign record if an older/manual account has the campaign_id
     # but no campaigns[campaign_id] row yet.
