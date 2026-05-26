@@ -1828,7 +1828,10 @@ def _write_security_store_to_r2(store: dict) -> tuple[bool, str]:
         endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
     access_key = _get_secret_value("R2_ACCESS_KEY_ID") or _get_secret_value("AWS_ACCESS_KEY_ID")
     secret_key = _get_secret_value("R2_SECRET_ACCESS_KEY") or _get_secret_value("AWS_SECRET_ACCESS_KEY")
-    bucket = _get_secret_value("R2_BUCKET_NAME") or _get_secret_value("CANDIDATE_CONNECT_R2_BUCKET") or _get_secret_value("CANDIDATE_CONNECT_DEV_BUCKET") or "candidate-connect-data-dev"
+    try:
+        _target_name, bucket, _public = _r2_bucket_for_current_app()
+    except Exception:
+        bucket = _get_secret_value("R2_BUCKET_NAME") or _get_secret_value("CANDIDATE_CONNECT_R2_BUCKET") or _get_secret_value("CANDIDATE_CONNECT_DEV_BUCKET") or "candidate-connect-data-dev"
     if not endpoint_url or not access_key or not secret_key or not bucket:
         return False, "R2 write credentials/bucket not configured"
     try:
@@ -1845,6 +1848,77 @@ def _write_security_store_to_r2(store: dict) -> tuple[bool, str]:
     except Exception as exc:
         return False, str(exc)
 
+
+
+def _r2_bucket_for_current_app() -> tuple[str, str, str]:
+    """Return (target_name, bucket, public_url) for this app instance.
+
+    DEV and LIVE apps should keep separate app_state/security_store.json and
+    app_state/build_queue/*.json files. We infer from the public R2 base URL,
+    with secrets/env overrides available for deployments.
+    """
+    public = str(R2 or "").rstrip("/")
+    dev_public = "https://pub-376c4497d59b4a7988a8af29700531e0.r2.dev"
+    live_public = "https://pub-a9e33b718082407cbd85e7b86b0fcb5c.r2.dev"
+    env_name = (_get_secret_value("CANDIDATE_CONNECT_ENV") or _get_secret_value("APP_ENV") or "").strip().upper()
+    if env_name == "LIVE" or public == live_public:
+        return "LIVE", (_get_secret_value("R2_LIVE_BUCKET_NAME") or _get_secret_value("CANDIDATE_CONNECT_LIVE_BUCKET") or "candidate-connect-data"), live_public
+    return "DEV", (_get_secret_value("R2_DEV_BUCKET_NAME") or _get_secret_value("CANDIDATE_CONNECT_DEV_BUCKET") or _get_secret_value("R2_BUCKET_NAME") or "candidate-connect-data-dev"), dev_public
+
+
+def _put_json_to_r2_key(key: str, payload: dict) -> tuple[bool, str]:
+    """Best-effort JSON upload to the current app's R2 bucket."""
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        return False, f"boto3 not available: {exc}"
+    endpoint_url = _get_secret_value("R2_ENDPOINT_URL") or _get_secret_value("CLOUDFLARE_R2_ENDPOINT_URL")
+    account_id = _get_secret_value("R2_ACCOUNT_ID") or _get_secret_value("CLOUDFLARE_ACCOUNT_ID")
+    if not endpoint_url and account_id:
+        endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
+    access_key = _get_secret_value("R2_ACCESS_KEY_ID") or _get_secret_value("AWS_ACCESS_KEY_ID")
+    secret_key = _get_secret_value("R2_SECRET_ACCESS_KEY") or _get_secret_value("AWS_SECRET_ACCESS_KEY")
+    target_name, bucket, _public = _r2_bucket_for_current_app()
+    if not endpoint_url or not access_key or not secret_key or not bucket:
+        return False, "R2 write credentials/bucket not configured"
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="auto",
+        )
+        body = json.dumps(payload or {}, ensure_ascii=False, indent=2).encode("utf-8")
+        client.put_object(Bucket=bucket, Key=str(key).lstrip("/"), Body=body, ContentType="application/json")
+        return True, f"Synced {key} to {target_name} R2 bucket {bucket}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def enqueue_campaign_build(campaign_id: str, reason: str = "campaign_approved") -> tuple[bool, str]:
+    """Create a tiny R2 build request so the queue worker can build the campaign dataset.
+
+    R2 is storage only; this does not build the dataset by itself. The local or
+    hosted queue worker processes app_state/build_queue/*.json and marks the
+    campaign active/uploaded after the build succeeds.
+    """
+    cid = _campaign_slug(campaign_id or "")
+    if not cid:
+        return False, "Missing campaign_id"
+    target_name, bucket, public = _r2_bucket_for_current_app()
+    payload = {
+        "job_type": "build_campaign_dataset",
+        "campaign_id": cid,
+        "target": target_name,
+        "bucket": bucket,
+        "public_url": public,
+        "reason": reason,
+        "status": "queued",
+        "requested_at": datetime.now().isoformat(timespec="seconds"),
+        "requested_by": current_username() if 'current_username' in globals() else "",
+    }
+    return _put_json_to_r2_key(f"app_state/build_queue/{cid}.json", payload)
 
 def save_security_store(store: dict) -> bool:
     if not isinstance(store, dict):
@@ -2599,6 +2673,11 @@ def approve_campaign_request(store: dict, campaign_id: str):
 
     reconcile_security_campaign_records(store)
     save_security_store(store)
+    try:
+        ok_q, msg_q = enqueue_campaign_build(campaign_id, reason="campaign_approved")
+        st.session_state["campaign_build_queue_sync"] = {"ok": ok_q, "message": msg_q, "campaign_id": campaign_id, "at": datetime.now().isoformat(timespec="seconds")}
+    except Exception as exc:
+        st.session_state["campaign_build_queue_sync"] = {"ok": False, "message": str(exc), "campaign_id": campaign_id, "at": datetime.now().isoformat(timespec="seconds")}
     return True
 
 
