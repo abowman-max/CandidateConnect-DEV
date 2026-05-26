@@ -10,6 +10,8 @@ import base64
 import re
 import hashlib
 import html
+import secrets
+import string
 from datetime import datetime
 from pathlib import Path
 
@@ -1789,6 +1791,47 @@ def _password_hash(username: str, password: str) -> str:
     salt = f"candidate-connect-v1::{str(username).strip().lower()}::"
     return hashlib.sha256((salt + str(password or "")).encode("utf-8")).hexdigest()
 
+def _generate_temp_password(length: int = 14) -> str:
+    """Generate a readable one-time temporary password for admin resets."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.islower() for c in pw) and any(c.isupper() for c in pw)
+                and any(c.isdigit() for c in pw) and any(c in "!@#$%" for c in pw)):
+            return pw
+
+def _password_validation_error(password: str, confirm: str = None, old_password: str = None) -> str:
+    pw = str(password or "")
+    if confirm is not None and pw != str(confirm or ""):
+        return "Passwords do not match."
+    if len(pw) < 8:
+        return "Password must be at least 8 characters."
+    if old_password is not None and pw == str(old_password or ""):
+        return "New password must be different from the current password."
+    return ""
+
+def _set_user_password(store: dict, username: str, password: str, *, force_change: bool = False, reset_by: str = "") -> bool:
+    users = (store or {}).setdefault("users", {})
+    uname = str(username or "").strip().lower()
+    if not uname or uname not in users:
+        return False
+    users[uname]["password_hash"] = _password_hash(uname, password)
+    users[uname]["force_password_change"] = bool(force_change)
+    users[uname]["password_updated_at"] = datetime.now().isoformat(timespec="seconds")
+    if reset_by:
+        users[uname]["password_reset_by"] = str(reset_by)
+        users[uname]["password_reset_at"] = datetime.now().isoformat(timespec="seconds")
+    return True
+
+def _refresh_current_session_user(store: dict, username: str = None) -> None:
+    uname = str(username or current_username() or "").strip().lower()
+    user = ((store or {}).get("users") or {}).get(uname)
+    if user:
+        st.session_state["auth_user"] = user
+
+def _user_must_change_password() -> bool:
+    return bool((current_user() or {}).get("force_password_change"))
+
 def _empty_security_store() -> dict:
     return {"users": {}, "campaigns": {}, "version": 1, "updated_at": datetime.now().isoformat(timespec="seconds")}
 
@@ -2565,6 +2608,7 @@ def render_public_campaign_signup_request(store: dict):
                 users[username_clean] = {
                     "display_name": contact_name or username_clean,
                     "password_hash": _password_hash(username_clean, pw1),
+                    "force_password_change": False,
                     "role": "Campaign Admin",
                     "campaign": campaign_name,
                     "campaign_id": cid,
@@ -2819,6 +2863,7 @@ def render_security_gate():
                     "campaign": "",
                     "scope_filters": {},
                     "disabled": False,
+                    "force_password_change": False,
                     "created_at": datetime.now().isoformat(timespec="seconds"),
                 }
                 save_security_store(store)
@@ -2859,6 +2904,54 @@ def render_security_gate():
     with _center2:
         render_public_campaign_signup_request(store)
     st.stop()
+
+
+def render_password_change_panel(*, forced: bool = False):
+    """Logged-in password change screen. Forced mode stops all other app access."""
+    store = load_security_store()
+    users = store.setdefault("users", {})
+    uname = current_username()
+    user = users.get(uname, {})
+    title = "Change Password Required" if forced else "My Account"
+    st.markdown(f"## {title}")
+    if forced:
+        st.warning("Your administrator reset your password. Choose a new password before continuing.")
+    else:
+        st.caption("Change your Candidate Connect password.")
+
+    with st.form("logged_in_change_password_form"):
+        current_pw = st.text_input("Current password", type="password")
+        new_pw = st.text_input("New password", type="password")
+        new_pw2 = st.text_input("Confirm new password", type="password")
+        submitted = st.form_submit_button("Update Password", type="primary")
+
+    if submitted:
+        if not user:
+            st.error("Could not find your user record. Please log out and sign in again.")
+            return
+        if user.get("password_hash") != _password_hash(uname, current_pw):
+            st.error("Current password is incorrect.")
+            return
+        err = _password_validation_error(new_pw, new_pw2, current_pw)
+        if err:
+            st.error(err)
+            return
+        _set_user_password(store, uname, new_pw, force_change=False)
+        save_security_store(store)
+        _refresh_current_session_user(store, uname)
+        st.success("Password updated.")
+        if forced:
+            st.info("You can continue using Candidate Connect now.")
+        st.rerun()
+
+    if forced:
+        if st.button("Log Out", key="forced_password_logout"):
+            for _k in ["auth_user", "auth_username"]:
+                st.session_state.pop(_k, None)
+            st.rerun()
+
+def render_my_account_workspace():
+    render_password_change_panel(forced=False)
 
 
 def _scope_multiselect_options(filter_options: pd.DataFrame, field: str, current_scope: dict | None = None) -> list[str]:
@@ -3049,6 +3142,34 @@ def render_account_admin_workspace(filter_options=None):
                 save_security_store(store)
                 st.success(f"Deleted user: {edit_user}")
                 st.rerun()
+
+        with st.expander("Admin Reset Password", expanded=False):
+            st.warning("Generates a temporary password and forces this user to change it on next login.")
+            can_reset_user = True
+            if edit_user == current_username():
+                can_reset_user = False
+                st.info("Use My Account to change your own password.")
+            if not is_super_admin():
+                target = users.get(edit_user, {}) or {}
+                if str(target.get("campaign_id") or "") != str((current_user() or {}).get("campaign_id") or ""):
+                    can_reset_user = False
+                    st.error("Campaign Admins can only reset users inside their own campaign.")
+                if (target.get("role") or "") in ("Super Admin", "Campaign Admin"):
+                    can_reset_user = False
+                    st.error("Campaign Admins can reset Manager, Field User, and Viewer accounts only.")
+            confirm_reset = st.checkbox(f"I understand — reset password for {edit_user}", key=f"confirm_reset_password_{edit_user}")
+            if st.button("Generate Temporary Password", key=f"admin_reset_password_btn_{edit_user}", type="primary", disabled=(not can_reset_user or not confirm_reset)):
+                temp_pw = _generate_temp_password()
+                if _set_user_password(store, edit_user, temp_pw, force_change=True, reset_by=current_username()):
+                    save_security_store(store)
+                    st.session_state[f"temp_password_for_{edit_user}"] = temp_pw
+                    st.success(f"Temporary password created for {edit_user}. Give this to the user securely. They must change it on next login.")
+                else:
+                    st.error("Could not reset that user password.")
+            temp_display = st.session_state.get(f"temp_password_for_{edit_user}")
+            if temp_display:
+                st.code(temp_display, language="text")
+                st.caption("This is shown only in your current browser session. Copy it now.")
 
     camp_hdr, camp_refresh_col = st.columns([5, 1])
     with camp_hdr:
@@ -3246,6 +3367,7 @@ def render_account_admin_workspace(filter_options=None):
         username = st.text_input("Username", value=username_default).strip().lower()
         display_name = st.text_input("Display name", value=display_default)
         password = st.text_input("New password / reset password", type="password")
+        force_pw_change = st.checkbox("Force password change on next login", value=bool(password and existing and edit_user != current_username()), key="force_pw_change_on_save")
         role = st.selectbox("Role", allowed_roles, index=role_index)
         campaign = st.text_input("Campaign / client name", value=campaign_default, disabled=not is_super_admin())
         campaign_ids = [""] + sorted((store.get("campaigns") or {}).keys())
@@ -3326,9 +3448,21 @@ def render_account_admin_workspace(filter_options=None):
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         })
         if password:
+            err = _password_validation_error(password)
+            if err:
+                st.error(err)
+                return
             record["password_hash"] = _password_hash(username, password)
+            if username != current_username():
+                record["force_password_change"] = bool(force_pw_change or username in users)
+                record["password_reset_by"] = current_username()
+                record["password_reset_at"] = datetime.now().isoformat(timespec="seconds")
+            else:
+                record["force_password_change"] = False
+            record["password_updated_at"] = datetime.now().isoformat(timespec="seconds")
         if "created_at" not in record:
             record["created_at"] = datetime.now().isoformat(timespec="seconds")
+        record.setdefault("force_password_change", False)
         users[username] = record
         reconcile_security_campaign_records(store)
         save_security_store(store)
@@ -8296,6 +8430,11 @@ st.markdown(f'''<div class="cc-global-header">
 # Require login before loading the full data/filter layer.
 render_security_gate()
 
+# If an admin reset this password, block all app access until changed.
+if _user_must_change_password():
+    render_password_change_panel(forced=True)
+    st.stop()
+
 try:
     with st.spinner("Loading filters from R2..."):
         manifest, filter_options, geo_hierarchy = load_filter_layer()
@@ -8327,6 +8466,8 @@ with st.sidebar:
         st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
     if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
         st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+    if st.button("👤 My Account", width="stretch"):
+        st.session_state["left_section"]="my_account"; st.session_state["view"]="account"; st.rerun()
     if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
         st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
     if st.button("Log Out", width="stretch"):
@@ -8409,6 +8550,9 @@ with st.sidebar:
     elif st.session_state.get("left_section") == "area_intelligence":
         st.markdown("### Area Intelligence")
         st.caption("Select the area on the right.")
+    elif st.session_state.get("left_section") == "my_account":
+        st.markdown("### My Account")
+        st.caption("Change your password.")
     elif st.session_state.get("left_section") == "account_admin":
         st.markdown("### Account Admin")
         st.caption("Manage Candidate Connect accounts and campaign scopes.")
@@ -8425,6 +8569,7 @@ if section == "voter_lookup" and user_can("voter_lookup"): render_voter_lookup_w
 if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_mail_ballot_workspace(); st.stop()
 if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
 if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
+if section == "my_account": render_my_account_workspace(); st.stop()
 if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
 
 st.session_state["view"]="targeting"
