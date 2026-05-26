@@ -1832,6 +1832,25 @@ def campaign_scoped_option_values(field: str, current_filters: dict | None = Non
         return []
 
 
+
+def hard_scope_options(field: str, options: list, current_filters: dict | None = None) -> list:
+    """Final safety gate for dropdown values.
+
+    Even if an older option-loader returns statewide values, this intersects it
+    with the values available inside the logged-in campaign's hard boundary.
+    """
+    try:
+        if is_super_admin():
+            return options
+        scoped = campaign_scoped_option_values(field, current_filters or {})
+        if not scoped:
+            return []
+        scoped_set = {str(x).strip() for x in scoped}
+        return [x for x in options if str(x).strip() in scoped_set]
+    except Exception:
+        return options
+
+
 def option_filters_for_field(current_filters: dict | None, field: str) -> dict:
     """Filters to use when populating one dropdown's options.
 
@@ -2191,15 +2210,15 @@ def render_public_campaign_signup_request(store: dict):
             counties = _signup_options("County")
             munis = _signup_options("Municipality")
             with c1:
-                vals["county"] = st.selectbox("County", [""] + counties, key="signup_scope_county")
+                vals["county"] = st.selectbox("County", hard_scope_options("County", [""] + counties, active if "active" in locals() else st.session_state.get("active_filters", {})), key="signup_scope_county")
             with c2:
-                vals["municipality"] = st.selectbox("Municipality", [""] + munis, key="signup_scope_municipality")
+                vals["municipality"] = st.selectbox("Municipality", hard_scope_options("Municipality", [""] + munis, active if "active" in locals() else st.session_state.get("active_filters", {})), key="signup_scope_municipality")
         elif campaign_type == "Countywide":
             counties = _signup_options("County")
-            vals["county"] = st.selectbox("County", [""] + counties, key="signup_scope_countywide")
+            vals["county"] = st.selectbox("County", hard_scope_options("County", [""] + counties, active if "active" in locals() else st.session_state.get("active_filters", {})), key="signup_scope_countywide")
         elif campaign_type == "School District":
             sds = _signup_options("School District")
-            vals["school_district"] = st.selectbox("School District", [""] + sds, key="signup_scope_school_district")
+            vals["school_district"] = st.selectbox("School District", hard_scope_options("School District", [""] + sds, active if "active" in locals() else st.session_state.get("active_filters", {})), key="signup_scope_school_district")
             st.caption("School Region is intentionally not used because the SURE data is inconsistent.")
         elif campaign_type == "State House":
             vals["state_house"] = st.selectbox("State House District", [""] + _signup_options("STH"), key="signup_scope_sth")
@@ -9091,6 +9110,43 @@ st.markdown("""
 # Readable tooltip/help popovers only. No theme/color redesign.
 st.markdown("""
 <style>
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+[data-baseweb="popover"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# Help icon + tooltip readability only.
+st.markdown("""
+<style>
+/* The little ? icon on light background */
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stTooltipHoverTarget"] *,
+button[aria-label="Help"],
+button[aria-label="Help"] *,
+svg[aria-label="Help"],
+[data-testid="stWidgetLabel"] svg {
+    color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Tooltip content */
 div[data-testid="stTooltipContent"],
 div[role="tooltip"],
 [data-baseweb="popover"] {
