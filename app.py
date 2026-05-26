@@ -2104,7 +2104,7 @@ def current_data_base_url() -> str:
         if current_role() == "Super Admin":
             return R2
         rec = current_campaign_record()
-        if rec.get("dataset_status") == "active":
+        if str(rec.get("dataset_status") or "").lower() in {"active", "uploaded"}:
             # Always derive the mini-dataset URL from the current app R2 base.
             # This prevents a DEV app from spinning against an old LIVE dataset_base_url.
             cid = rec.get("campaign_id") or _campaign_slug(rec.get("campaign_name") or current_user().get("campaign") or "")
@@ -3864,9 +3864,22 @@ def duckdb_count_cube_group_filtered(active_json: str, special_json: str, field:
         except Exception: pass
 
 @st.cache_data(ttl=300, show_spinner=False)
-def duckdb_county_party_table(limit: int = 67) -> pd.DataFrame:
-    """County by party table for the load screen from the remote count cube."""
+def duckdb_county_party_table_filtered(active_json: str = "{}", special_json: str = "{}", limit: int = 67) -> pd.DataFrame:
+    """County by party table for the load screen from the remote count cube.
+
+    Campaign-scoped users must never see a statewide county table on the home
+    snapshot. The WHERE clause reuses the same security-scoped quick-count SQL
+    path as Create Universe counts.
+    """
+    active = enforce_security_scope(json.loads(active_json or "{}"))
+    special = json.loads(special_json or "{}")
     url = count_cube_url()
+    where = count_cube_where_sql(active, special)
+    extra = "CAST(County AS VARCHAR) IS NOT NULL AND TRIM(CAST(County AS VARCHAR)) <> ''"
+    if where:
+        where = where + " AND " + extra
+    else:
+        where = "WHERE " + extra
     query = f"""
         SELECT
             CAST(County AS VARCHAR) AS County,
@@ -3875,7 +3888,7 @@ def duckdb_county_party_table(limit: int = 67) -> pd.DataFrame:
             SUM(CASE WHEN CAST(Party AS VARCHAR)='D' THEN Voters ELSE 0 END) AS Democrat,
             SUM(CASE WHEN CAST(Party AS VARCHAR) NOT IN ('R','D') THEN Voters ELSE 0 END) AS Other
         FROM read_parquet({sql_lit(url)})
-        WHERE CAST(County AS VARCHAR) IS NOT NULL AND TRIM(CAST(County AS VARCHAR)) <> ''
+        {where}
         GROUP BY CAST(County AS VARCHAR)
         ORDER BY County
         LIMIT {int(limit)}
@@ -3894,12 +3907,16 @@ def duckdb_county_party_table(limit: int = 67) -> pd.DataFrame:
         try: con.close()
         except Exception: pass
 
+def duckdb_county_party_table(limit: int = 67) -> pd.DataFrame:
+    return duckdb_county_party_table_filtered(json.dumps(enforce_security_scope({}), sort_keys=True), json.dumps({}, sort_keys=True), limit)
+
 def render_icon_metric(label: str, value: int, sub: str = "", icon: str = "●", klass: str = ""):
     html = f'<div class="cc-icon-metric {klass}"><div class="cc-icon-dot {klass}">{icon}</div><div><div class="cc-icon-label">{label}</div><div class="cc-icon-value">{int(value or 0):,}</div><div class="cc-icon-sub">{sub}</div></div></div>'
     st.markdown(html, unsafe_allow_html=True)
 
-def render_home_age_card(total: int):
-    age = duckdb_count_cube_group("Age_Range", 12)
+def render_home_age_card(total: int, active_scope: dict | None = None):
+    active_scope = enforce_security_scope(active_scope or {})
+    age = duckdb_count_cube_group_filtered(json.dumps(active_scope, sort_keys=True), json.dumps({}, sort_keys=True), "Age_Range", 12)
     if age.empty or "Voters" not in age.columns:
         st.markdown('<div class="cc-home-card"><h3>Voters by Age Range</h3><p>Age range quick-count data is not available.</p></div>', unsafe_allow_html=True)
         return
@@ -3917,11 +3934,12 @@ def render_home_age_card(total: int):
         p = (val / total * 100) if total else 0
         w = max(2, val / maxv * 100)
         rows.append(f'<div class="cc-age-row"><b>{lab}</b><div class="cc-age-bar-bg"><div class="cc-age-bar" style="width:{w:.1f}%"></div></div><span>{p:.1f}%</span></div>')
-    html = '<div class="cc-home-card"><h3>Voters by Age Range</h3>' + ''.join(rows) + '<div style="color:#94a3b8;font-size:12px;margin-top:10px;">Universe: All Voters</div></div>'
+    html = '<div class="cc-home-card"><h3>Voters by Age Range</h3>' + ''.join(rows) + '<div style="color:#94a3b8;font-size:12px;margin-top:10px;">Universe: Campaign scope</div></div>'
     st.markdown(html, unsafe_allow_html=True)
 
-def render_home_geo_table(summary: dict):
-    df = duckdb_county_party_table(67)
+def render_home_geo_table(summary: dict, active_scope: dict | None = None):
+    active_scope = enforce_security_scope(active_scope or {})
+    df = duckdb_county_party_table_filtered(json.dumps(active_scope, sort_keys=True), json.dumps({}, sort_keys=True), 67)
     if df.empty:
         st.markdown('<div class="cc-home-card"><h3>County Breakdown</h3><p>County quick-count data is not available.</p></div>', unsafe_allow_html=True)
         return
@@ -3936,6 +3954,7 @@ def render_home_geo_table(summary: dict):
 
 def render_statewide_snapshot():
     st.markdown('<div class="cc-home-title">Voter Snapshot</div>', unsafe_allow_html=True)
+    scoped_active = enforce_security_scope({})
 
     summary = None
     err = None
@@ -3965,14 +3984,14 @@ def render_statewide_snapshot():
     left, right = st.columns([1.0, 1.25])
     with left:
         render_party_chart(summary, "Voters by Party")
-        gdf = duckdb_count_cube_group("Gender", 8)
+        gdf = duckdb_count_cube_group_filtered(json.dumps(scoped_active, sort_keys=True), json.dumps({}, sort_keys=True), "Gender", 8)
         if not gdf.empty and "Voters" in gdf.columns:
             gf = {str(row.get("label", "")).upper(): int(row.get("Voters", 0) or 0) for _, row in gdf.iterrows()}
             gs = {"total": sum(gf.values()), "f": gf.get("F", 0), "m": gf.get("M", 0), "u": sum(v for k, v in gf.items() if k not in {"F", "M"})}
             render_gender_chart(gs, "Voters by Gender")
     with right:
-        render_home_age_card(total)
-        render_home_geo_table(summary)
+        render_home_age_card(total, scoped_active)
+        render_home_geo_table(summary, scoped_active)
 
     if err and not (r or d or o):
         st.warning("Quick-count statewide party numbers were not available, so the app showed the manifest total only.")
