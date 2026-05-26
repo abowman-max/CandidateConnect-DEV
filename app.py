@@ -1658,24 +1658,26 @@ def _state_file_candidates():
 def _security_store_prefer_newer(remote_security, local_security):
     """Choose the safest security store when both R2 and local temp state exist.
 
-    Streamlit Cloud can leave a stale local/temp security file behind after a reboot.
-    R2 is the durable source of truth, but immediately after a Super Admin edit the
-    local file can be newer until the exported security_store.json is uploaded.
+    v17 rule: R2 is the durable source of truth for account/campaign security.
+    The queue worker updates app_state/security_store.json after a campaign build.
+    Streamlit Cloud local/temp files can have timestamps from a different clock/timezone
+    and can otherwise mask that worker update, leaving campaigns stuck as pending_build.
+    So when a valid remote store exists, prefer it. Local is only a fallback when R2
+    security_store.json is missing or empty.
     """
     if not isinstance(remote_security, dict):
         remote_security = {}
     if not isinstance(local_security, dict):
         local_security = {}
     remote_users = remote_security.get("users") if isinstance(remote_security.get("users"), dict) else {}
+    remote_campaigns = remote_security.get("campaigns") if isinstance(remote_security.get("campaigns"), dict) else {}
     local_users = local_security.get("users") if isinstance(local_security.get("users"), dict) else {}
-    if not remote_users and local_users:
-        return local_security
-    if remote_users and not local_users:
+    # Prefer R2 whenever it contains a real security store. R2 is updated by the app
+    # on admin edits and by queue_worker.py when campaign builds finish.
+    if remote_users or remote_campaigns:
         return remote_security
-    if remote_users and local_users:
-        r_time = str(remote_security.get("updated_at") or "")
-        l_time = str(local_security.get("updated_at") or "")
-        return local_security if l_time and l_time >= r_time else remote_security
+    if local_users:
+        return local_security
     return remote_security or local_security or {}
 
 
@@ -1999,7 +2001,7 @@ def refresh_security_admin_view():
                 fn.clear()
         except Exception:
             pass
-    st.toast("Refreshed account/campaign state from app_state.")
+    st.toast("Refreshed account/campaign state from R2 app_state.")
     st.rerun()
 
 def save_security_store(store: dict) -> bool:
