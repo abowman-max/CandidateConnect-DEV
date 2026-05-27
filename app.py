@@ -4103,19 +4103,21 @@ def clean_mail_options(field: str):
 def count_cube_option_filters(field: str, active: dict) -> dict:
     """Return the filters that should narrow the dropdown for this field.
 
-    v21f: Dropdowns are made interdependent from the rebuilt quick-count cube,
-    not from detail shards. For geography, only prior geography levels are used
-    so County -> Municipality -> Precinct stays predictable. For voter fields,
-    all other count-safe filters are used.
+    v23: Geography dropdowns are fully interdependent again. A selected value in
+    any geography field must narrow every other geography field, whether that
+    other field appears above or below it in the left pane. The field currently
+    being populated is removed so the user can change that field. Voter/detail
+    fields keep the existing count-safe behavior.
     """
     active = active or {}
     if field in GEO_FIELDS:
         relevant = {}
         for f in GEO_FIELDS:
             if f == field:
-                break
-            if active.get(f):
-                relevant[f] = active[f]
+                continue
+            vals = active.get(f)
+            if vals:
+                relevant[f] = vals
         return relevant
 
     relevant = count_safe_filters(active)
