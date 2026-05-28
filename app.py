@@ -9435,6 +9435,111 @@ def _assignments_df(assignments: list[dict]) -> pd.DataFrame:
             df[c] = ""
     return df[cols]
 
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: Mobile Package v1
+# ---------------------------------------------------------------------------
+def _mobile_package_key(campaign_id: str, assignment_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/mobile_packages/{clean_value(assignment_id)}.json"
+
+
+def _contact_program_from_id(campaign_id: str, program_id: str) -> dict:
+    try:
+        programs = load_contact_programs_store(campaign_id).get("programs") or []
+    except Exception:
+        programs = []
+    return next((p for p in programs if str(p.get("program_id") or "") == str(program_id or "")), {})
+
+
+def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, contact_lists: list[dict], people: list[dict]) -> dict:
+    """Create the small offline package the future phone app will download.
+
+    v1 intentionally includes placeholder voter rows. The next step will replace
+    those rows with the actual voters from the selected saved universe.
+    """
+    campaign_id = _ops_slug(campaign_id)
+    assignment = assignment or {}
+    cl = _contact_list_from_id(contact_lists or [], assignment.get("list_id", ""))
+    person = _team_person_from_id(people or [], assignment.get("person_id", ""))
+    program = _contact_program_from_id(campaign_id, assignment.get("program_id") or cl.get("program_id", ""))
+    generated_at = datetime.now().isoformat(timespec="seconds")
+    source_universe = clean_value(cl.get("source_saved_universe") or "")
+    return {
+        "version": 1,
+        "package_type": "candidate_connect_assignment_mobile_package",
+        "generated_at": generated_at,
+        "campaign_id": campaign_id,
+        "assignment": {
+            "assignment_id": clean_value(assignment.get("assignment_id", "")),
+            "name": clean_value(assignment.get("name", "")),
+            "status": clean_value(assignment.get("status", "")),
+            "due_date": clean_value(assignment.get("due_date", "")),
+            "notes": clean_value(assignment.get("notes", "")),
+        },
+        "team_member": {
+            "person_id": clean_value(person.get("person_id", assignment.get("person_id", ""))),
+            "name": clean_value(person.get("name", assignment.get("team_member_name", ""))),
+            "role": clean_value(person.get("role", "")),
+            "mobile": clean_value(person.get("mobile", person.get("phone", ""))),
+            "email": clean_value(person.get("email", "")),
+        },
+        "contact_program": {
+            "program_id": clean_value(program.get("program_id", assignment.get("program_id", ""))),
+            "name": clean_value(program.get("name", assignment.get("program_name", ""))),
+            "program_type": clean_value(program.get("program_type", assignment.get("contact_type", ""))),
+            "goal": clean_value(program.get("goal", "")),
+            "status": clean_value(program.get("status", "")),
+        },
+        "contact_list": {
+            "list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
+            "name": clean_value(cl.get("name", assignment.get("contact_list_name", ""))),
+            "contact_type": clean_value(cl.get("contact_type", assignment.get("contact_type", "Door-to-Door"))),
+            "priority": clean_value(cl.get("priority", assignment.get("priority", "Normal"))),
+            "source_saved_universe": source_universe,
+            "notes": clean_value(cl.get("notes", "")),
+        },
+        "mobile_schema": {
+            "offline_first": True,
+            "sync_mode": "upload_contact_attempts_only",
+            "voter_row_status": "placeholder_until_saved_universe_export_is_connected",
+            "expected_voter_fields": [
+                "voter_id", "FullName", "Age", "Party", "res_address", "Municipality", "Precinct",
+                "School District", "School Region", "Mobile", "Landline", "Email", "Tags", "notes"
+            ],
+            "result_options": [
+                "Not Home", "Contacted", "Support", "Oppose", "Undecided", "Refused", "Moved",
+                "Deceased", "Wrong Address", "Needs Follow-up", "Requested Mail Ballot Info"
+            ],
+        },
+        "voters": [
+            {
+                "voter_id": "PLACEHOLDER-001",
+                "FullName": "Placeholder Voter",
+                "Age": "",
+                "Party": "",
+                "res_address": "This will be replaced by voters from the saved universe in the next build.",
+                "Municipality": "",
+                "Precinct": "",
+                "School District": "",
+                "School Region": "",
+                "Mobile": "",
+                "Landline": "",
+                "Email": "",
+                "Tags": "",
+                "notes": ""
+            }
+        ],
+        "sync_template": {
+            "contact_attempts": [],
+            "device_id": "",
+            "synced_at": "",
+        },
+    }
+
+
+def save_assignment_mobile_package_v1(campaign_id: str, assignment_id: str, package: dict) -> tuple[bool, str]:
+    return _put_json_to_r2_key(_mobile_package_key(campaign_id, assignment_id), package)
+
 def render_assignments_workspace(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
     store = load_outreach_assignments_store(campaign_id)
@@ -9528,6 +9633,26 @@ def render_assignments_workspace(campaign_id: str | None = None):
             ok, msg = save_outreach_assignments_store(campaign_id, store)
             st.success("Assignment deleted.") if ok else st.error(msg)
             st.rerun()
+
+        st.markdown("#### Mobile Download Package")
+        st.caption("v1 creates the offline assignment package shell. The next build will fill it with the actual voters from the saved universe.")
+        mobile_package = build_assignment_mobile_package_v1(campaign_id, current, contact_lists, people)
+        mc1, mc2 = st.columns([1, 1])
+        with mc1:
+            if st.button("Generate Mobile Package", key=f"generate_mobile_package_{campaign_id}_{assignment_id}"):
+                ok, msg = save_assignment_mobile_package_v1(campaign_id, assignment_id, mobile_package)
+                if ok:
+                    st.success("Mobile package generated and saved for this assignment.")
+                else:
+                    st.error(f"Could not save mobile package: {msg}")
+        with mc2:
+            st.download_button(
+                "Download Package JSON",
+                data=json.dumps(mobile_package, ensure_ascii=False, indent=2).encode("utf-8"),
+                file_name=f"{_ops_slug(current.get('name') or 'assignment')}_mobile_package.json",
+                mime="application/json",
+                key=f"download_mobile_package_{campaign_id}_{assignment_id}",
+            )
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
