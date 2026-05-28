@@ -8935,6 +8935,89 @@ if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_
 if "left_section" not in st.session_state: st.session_state["left_section"] = None
 _filter_suffix = st.session_state["filter_reset_token"]
 
+
+# v29 DEV-only sidebar visual refinement:
+# Make the left navigation quieter and less overwhelming without touching main-pane action buttons.
+st.markdown("""
+<style>
+/* Sidebar-only navigation polish. Main workspace buttons are intentionally untouched. */
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button {
+    background: rgba(248,244,234,.72) !important;
+    background-color: rgba(248,244,234,.72) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid rgba(159,21,28,.24) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    font-weight: 850 !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 7px 10px !important;
+    margin: 2px 0 5px 0 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:hover {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    border-color: rgba(159,21,28,.55) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+/* Rollup headers: calm, professional blocks instead of mixed plain text/red buttons. */
+[data-testid="stSidebar"] details {
+    background: rgba(248,244,234,.30) !important;
+    border: 1px solid rgba(255,255,255,.34) !important;
+    border-radius: 11px !important;
+    margin: 9px 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+    background: rgba(248,244,234,.58) !important;
+    border: 1px solid rgba(159,21,28,.18) !important;
+    border-radius: 10px !important;
+    padding: 9px 10px !important;
+    font-size: 10.5pt !important;
+    font-weight: 950 !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+    background: #efe8d8 !important;
+    border-color: rgba(159,21,28,.42) !important;
+    box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    font-weight: 950 !important;
+}
+[data-testid="stSidebar"] details > div {
+    padding: 8px 8px 10px 8px !important;
+}
+
+/* Keep account captions quieter. */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+}
+
+/* Dashboard and logout no longer look like giant destructive action buttons. */
+[data-testid="stSidebar"] .stButton:first-of-type > button {
+    margin-top: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
