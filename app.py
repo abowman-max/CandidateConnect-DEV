@@ -548,6 +548,37 @@ header[data-testid="stHeader"] {
 
 inject_clean_theme_css()
 
+
+# v37: Hide Streamlit dataframe toolbar/action icons for cleaner production UI.
+st.markdown("""
+<style>
+/* Hide dataframe hover toolbar/action controls that render as black icon blocks.
+   This keeps the table itself visible while removing Streamlit's built-in
+   developer-style search/fullscreen/download/overflow toolbar. */
+[data-testid="stElementToolbar"],
+[data-testid="stElementToolbar"] *,
+[data-testid="StyledFullScreenButton"],
+[data-testid="StyledFullScreenButton"] *,
+[data-testid="stDataFrameResizable"] button[title],
+[data-testid="stDataFrameResizable"] button[aria-label],
+div[data-testid="stDataFrame"] div[role="toolbar"],
+div[data-testid="stDataFrame"] div[role="toolbar"] *,
+div[data-testid="stDataFrame"] button[title="Search"],
+div[data-testid="stDataFrame"] button[title="Fullscreen"],
+div[data-testid="stDataFrame"] button[title="Download"],
+div[data-testid="stDataFrame"] button[title="More"],
+div[data-testid="stDataFrame"] button[aria-label="Search"],
+div[data-testid="stDataFrame"] button[aria-label="Fullscreen"],
+div[data-testid="stDataFrame"] button[aria-label="Download"],
+div[data-testid="stDataFrame"] button[aria-label="More"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown("""
 <style>
 /* Help ? icon and tooltip readability only */
