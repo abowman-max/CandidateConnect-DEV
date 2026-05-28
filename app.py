@@ -9451,11 +9451,131 @@ def _contact_program_from_id(campaign_id: str, program_id: str) -> dict:
     return next((p for p in programs if str(p.get("program_id") or "") == str(program_id or "")), {})
 
 
-def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, contact_lists: list[dict], people: list[dict]) -> dict:
-    """Create the small offline package the future phone app will download.
 
-    v1 intentionally includes placeholder voter rows. The next step will replace
-    those rows with the actual voters from the selected saved universe.
+def _mobile_voter_value(row, *cols) -> str:
+    for col in cols:
+        try:
+            val = row.get(col, "")
+        except Exception:
+            val = ""
+        val = clean_value(val)
+        if val:
+            return val
+    return ""
+
+
+def _mobile_saved_universe_payload(source_universe: str) -> tuple[dict, dict]:
+    """Return saved universe filters/special for a contact list source name."""
+    saved = load_persistent_saved_universes() if "load_persistent_saved_universes" in globals() else {}
+    if not isinstance(saved, dict):
+        return {}, {}
+    source_universe = clean_value(source_universe)
+    data = saved.get(source_universe) or {}
+    if not data:
+        # Case-insensitive fallback for renamed/typed universe labels.
+        for k, v in saved.items():
+            if clean_value(k).lower() == source_universe.lower():
+                data = v or {}
+                break
+    return (data.get("filters") or {}, data.get("special") or {}) if isinstance(data, dict) else ({}, {})
+
+
+def _mobile_voters_from_saved_universe(source_universe: str, max_rows: int = 2500) -> tuple[list[dict], dict]:
+    """Build compact offline voter rows from a saved universe.
+
+    This is intentionally smaller than the full export: the phone app needs field
+    utility data, not the full statewide voter record. Contact attempts sync back
+    separately and never overwrite voter rows.
+    """
+    filters, special = _mobile_saved_universe_payload(source_universe)
+    meta = {
+        "source_saved_universe": clean_value(source_universe),
+        "filters_found": bool(filters or special),
+        "max_rows": int(max_rows),
+        "row_count": 0,
+        "truncated": False,
+        "error": "",
+    }
+    if not (filters or special):
+        meta["error"] = "Saved universe not found or has no filters."
+        return [], meta
+
+    try:
+        active = enforce_security_scope(filters or {})
+        # Pull one extra row so the package can tell the web/mobile user if the list was truncated.
+        df = duckdb_detail_filtered_df(active, special or {}, int(max_rows) + 1)
+        if df is None or df.empty:
+            meta["row_count"] = 0
+            return [], meta
+        try:
+            df = normalize_download_df(df)
+        except Exception:
+            pass
+        if len(df) > int(max_rows):
+            meta["truncated"] = True
+            df = df.head(int(max_rows)).copy()
+        meta["row_count"] = int(len(df))
+    except Exception as exc:
+        meta["error"] = str(exc)
+        return [], meta
+
+    rows = []
+    for i, (_, row) in enumerate(df.iterrows(), start=1):
+        try:
+            name = _mobile_voter_value(row, "FullName", "full_name", "Name")
+            if not name and "full_name" in globals():
+                name = clean_value(full_name(row))
+            if not name:
+                first = _mobile_voter_value(row, "FirstName", "First Name")
+                last = _mobile_voter_value(row, "LastName", "Last Name")
+                name = " ".join([x for x in [first, last] if x]).strip()
+            address = _mobile_voter_value(row, "res_address", "Residential Address", "Address")
+            if not address:
+                house = _mobile_voter_value(row, "House Number")
+                suffix = _mobile_voter_value(row, "House Number Suffix")
+                street = _mobile_voter_value(row, "Street Name")
+                apt = _mobile_voter_value(row, "Apartment Number")
+                address = " ".join([x for x in [house, suffix, street, apt] if x]).strip()
+            city = _mobile_voter_value(row, "res_city", "City")
+            state = _mobile_voter_value(row, "res_state", "State") or "PA"
+            zipc = _mobile_voter_value(row, "res_zip", "Zip")
+            rows.append({
+                "row_number": i,
+                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "SURE_ID", "PA_Voter_ID"),
+                "FullName": name,
+                "Age": _mobile_voter_value(row, "Age"),
+                "Party": _mobile_voter_value(row, "Party", "CalculatedParty"),
+                "Gender": _mobile_voter_value(row, "Gender"),
+                "res_address": address,
+                "res_city": city,
+                "res_state": state,
+                "res_zip": zipc,
+                "County": _mobile_voter_value(row, "County"),
+                "Municipality": _mobile_voter_value(row, "Municipality"),
+                "Precinct": _mobile_voter_value(row, "Precinct"),
+                "School District": _mobile_voter_value(row, "School District"),
+                "School Region": _mobile_voter_value(row, "School Region"),
+                "Mobile": _mobile_voter_value(row, "Mobile"),
+                "Landline": _mobile_voter_value(row, "Landline"),
+                "Email": _mobile_voter_value(row, "Email"),
+                "Tags": _mobile_voter_value(row, "Tags"),
+                "notes": "",
+                "contact_status": "Not Started",
+                "last_result": "",
+                "last_contacted_at": "",
+            })
+        except Exception:
+            continue
+    meta["row_count"] = len(rows)
+    return rows, meta
+
+
+def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, contact_lists: list[dict], people: list[dict]) -> dict:
+    """Create the offline package the future phone app will download.
+
+    v42 packages assignment turf as walk packets instead of a raw first-N voter
+    export. Existing generated packets are used when available; otherwise the
+    package includes guidance to generate packets first.
     """
     campaign_id = _ops_slug(campaign_id)
     assignment = assignment or {}
@@ -9464,8 +9584,15 @@ def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, conta
     program = _contact_program_from_id(campaign_id, assignment.get("program_id") or cl.get("program_id", ""))
     generated_at = datetime.now().isoformat(timespec="seconds")
     source_universe = clean_value(cl.get("source_saved_universe") or "")
+    packets = _assignment_packets(campaign_id, assignment.get("assignment_id", ""))
+    packet_meta = {
+        "packet_count": len(packets),
+        "total_voters": sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in packets),
+        "packet_status": "loaded_walk_packets" if packets else "no_packets_generated_yet",
+        "packet_rule": "Precinct first; oversized precincts split by Street Name.",
+    }
     return {
-        "version": 1,
+        "version": 3,
         "package_type": "candidate_connect_assignment_mobile_package",
         "generated_at": generated_at,
         "campaign_id": campaign_id,
@@ -9501,34 +9628,21 @@ def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, conta
         "mobile_schema": {
             "offline_first": True,
             "sync_mode": "upload_contact_attempts_only",
-            "voter_row_status": "placeholder_until_saved_universe_export_is_connected",
+            "voter_row_status": packet_meta["packet_status"],
+            "packet_meta": packet_meta,
+            "expected_packet_fields": ["packet_id", "packet_name", "group_type", "precinct", "street_group", "voter_count", "status", "voters"],
             "expected_voter_fields": [
-                "voter_id", "FullName", "Age", "Party", "res_address", "Municipality", "Precinct",
-                "School District", "School Region", "Mobile", "Landline", "Email", "Tags", "notes"
+                "voter_id", "FullName", "Age", "Party", "Gender", "res_address", "res_city", "res_state", "res_zip",
+                "County", "Municipality", "Precinct", "School District", "School Region", "Mobile", "Landline", "Email",
+                "Tags", "notes", "contact_status", "last_result", "last_contacted_at"
             ],
             "result_options": [
                 "Not Home", "Contacted", "Support", "Oppose", "Undecided", "Refused", "Moved",
                 "Deceased", "Wrong Address", "Needs Follow-up", "Requested Mail Ballot Info"
             ],
         },
-        "voters": [
-            {
-                "voter_id": "PLACEHOLDER-001",
-                "FullName": "Placeholder Voter",
-                "Age": "",
-                "Party": "",
-                "res_address": "This will be replaced by voters from the saved universe in the next build.",
-                "Municipality": "",
-                "Precinct": "",
-                "School District": "",
-                "School Region": "",
-                "Mobile": "",
-                "Landline": "",
-                "Email": "",
-                "Tags": "",
-                "notes": ""
-            }
-        ],
+        "packets": packets,
+        "voters": [],
         "sync_template": {
             "contact_attempts": [],
             "device_id": "",
@@ -9539,6 +9653,256 @@ def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, conta
 
 def save_assignment_mobile_package_v1(campaign_id: str, assignment_id: str, package: dict) -> tuple[bool, str]:
     return _put_json_to_r2_key(_mobile_package_key(campaign_id, assignment_id), package)
+
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: Walk Packets / Turf Generation v42
+# ---------------------------------------------------------------------------
+def _walk_packets_key(campaign_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/walk_packets.json"
+
+
+def load_walk_packets_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_walk_packets_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", 1)
+    data.setdefault("updated_at", "")
+    data.setdefault("packets", [])
+    if not isinstance(data.get("packets"), list):
+        data["packets"] = []
+    return data
+
+
+def save_walk_packets_store(campaign_id: str, store: dict) -> tuple[bool, str]:
+    if not isinstance(store, dict):
+        store = {"version": 1, "packets": []}
+    store["version"] = 1
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    store.setdefault("packets", [])
+    ok, msg = _put_json_to_r2_key(_walk_packets_key(campaign_id), store)
+    if ok:
+        try:
+            load_walk_packets_store.clear()
+        except Exception:
+            pass
+    return ok, msg
+
+
+def _mobile_voters_dataframe_from_saved_universe(source_universe: str, max_rows: int = 75000) -> tuple[pd.DataFrame, dict]:
+    """Return a compact saved-universe dataframe for turf packet generation.
+
+    This is the same saved-universe source used by the phone package, but packet
+    generation groups voters into useful walking units instead of taking the
+    first N rows. The max_rows parameter is a safety valve for browsers/R2, not
+    a turfing rule.
+    """
+    filters, special = _mobile_saved_universe_payload(source_universe)
+    meta = {
+        "source_saved_universe": clean_value(source_universe),
+        "filters_found": bool(filters or special),
+        "max_rows_safety": int(max_rows),
+        "row_count": 0,
+        "truncated_by_safety": False,
+        "error": "",
+    }
+    if not (filters or special):
+        meta["error"] = "Saved universe not found or has no filters."
+        return pd.DataFrame(), meta
+    try:
+        active = enforce_security_scope(filters or {})
+        df = duckdb_detail_filtered_df(active, special or {}, int(max_rows) + 1)
+        if df is None or df.empty:
+            return pd.DataFrame(), meta
+        try:
+            df = normalize_download_df(df)
+        except Exception:
+            pass
+        if len(df) > int(max_rows):
+            meta["truncated_by_safety"] = True
+            df = df.head(int(max_rows)).copy()
+        meta["row_count"] = int(len(df))
+        return df, meta
+    except Exception as exc:
+        meta["error"] = str(exc)
+        return pd.DataFrame(), meta
+
+
+def _mobile_rows_from_dataframe(df: pd.DataFrame) -> list[dict]:
+    rows = []
+    if df is None or df.empty:
+        return rows
+    for i, (_, row) in enumerate(df.iterrows(), start=1):
+        try:
+            name = _mobile_voter_value(row, "FullName", "full_name", "Name")
+            if not name and "full_name" in globals():
+                name = clean_value(full_name(row))
+            if not name:
+                first = _mobile_voter_value(row, "FirstName", "First Name")
+                last = _mobile_voter_value(row, "LastName", "Last Name")
+                name = " ".join([x for x in [first, last] if x]).strip()
+            address = _mobile_voter_value(row, "res_address", "Residential Address", "Address")
+            if not address:
+                house = _mobile_voter_value(row, "House Number")
+                suffix = _mobile_voter_value(row, "House Number Suffix")
+                street = _mobile_voter_value(row, "Street Name")
+                apt = _mobile_voter_value(row, "Apartment Number")
+                address = " ".join([x for x in [house, suffix, street, apt] if x]).strip()
+            rows.append({
+                "row_number": i,
+                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "SURE_ID", "PA_Voter_ID"),
+                "FullName": name,
+                "Age": _mobile_voter_value(row, "Age"),
+                "Party": _mobile_voter_value(row, "Party", "CalculatedParty"),
+                "Gender": _mobile_voter_value(row, "Gender"),
+                "res_address": address,
+                "res_city": _mobile_voter_value(row, "res_city", "City"),
+                "res_state": _mobile_voter_value(row, "res_state", "State") or "PA",
+                "res_zip": _mobile_voter_value(row, "res_zip", "Zip"),
+                "County": _mobile_voter_value(row, "County"),
+                "Municipality": _mobile_voter_value(row, "Municipality"),
+                "Precinct": _mobile_voter_value(row, "Precinct"),
+                "School District": _mobile_voter_value(row, "School District"),
+                "School Region": _mobile_voter_value(row, "School Region"),
+                "Street Name": _mobile_voter_value(row, "Street Name"),
+                "House Number": _mobile_voter_value(row, "House Number"),
+                "Mobile": _mobile_voter_value(row, "Mobile"),
+                "Landline": _mobile_voter_value(row, "Landline"),
+                "Email": _mobile_voter_value(row, "Email"),
+                "Tags": _mobile_voter_value(row, "Tags"),
+                "notes": "",
+                "contact_status": "Not Started",
+                "last_result": "",
+                "last_contacted_at": "",
+            })
+        except Exception:
+            continue
+    return rows
+
+
+def _packet_safe_slug(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "-", clean_value(value).lower()).strip("-") or "packet"
+
+
+def _street_sort_key(street: str):
+    s = clean_value(street).upper()
+    return (s == "", s)
+
+
+def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> list[tuple[str, pd.DataFrame]]:
+    """Split a large precinct into practical street-name packets."""
+    if packet_df is None or packet_df.empty:
+        return []
+    max_packet_size = max(50, int(max_packet_size or 400))
+    df = packet_df.copy()
+    if "Street Name" not in df.columns:
+        return [("All Streets", df)]
+    street_groups = []
+    for street, g in df.groupby(df["Street Name"].fillna("").astype(str), dropna=False):
+        street_groups.append((clean_value(street) or "Unknown Street", g.copy()))
+    street_groups.sort(key=lambda x: _street_sort_key(x[0]))
+
+    chunks = []
+    current_name_parts = []
+    current_frames = []
+    current_count = 0
+    for street, g in street_groups:
+        g_count = len(g)
+        if current_frames and current_count + g_count > max_packet_size:
+            chunks.append((" / ".join(current_name_parts[:3]) + (" +" if len(current_name_parts) > 3 else ""), pd.concat(current_frames, ignore_index=True)))
+            current_name_parts, current_frames, current_count = [], [], 0
+        current_name_parts.append(street)
+        current_frames.append(g)
+        current_count += g_count
+        # One very large street/apartment complex still needs to be chunked by row.
+        if current_count >= max_packet_size * 1.5:
+            combined = pd.concat(current_frames, ignore_index=True)
+            for start in range(0, len(combined), max_packet_size):
+                part = combined.iloc[start:start + max_packet_size].copy()
+                chunks.append((f"{street} #{(start // max_packet_size) + 1}", part))
+            current_name_parts, current_frames, current_count = [], [], 0
+    if current_frames:
+        chunks.append((" / ".join(current_name_parts[:3]) + (" +" if len(current_name_parts) > 3 else ""), pd.concat(current_frames, ignore_index=True)))
+    return chunks
+
+
+def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contact_lists: list[dict], max_packet_size: int = 400) -> tuple[list[dict], dict]:
+    """Generate precinct-first walk/turf packets for one assignment."""
+    campaign_id = _ops_slug(campaign_id)
+    assignment = assignment or {}
+    cl = _contact_list_from_id(contact_lists or [], assignment.get("list_id", ""))
+    source_universe = clean_value(cl.get("source_saved_universe") or "")
+    df, meta = _mobile_voters_dataframe_from_saved_universe(source_universe, max_rows=75000)
+    meta.update({
+        "assignment_id": clean_value(assignment.get("assignment_id", "")),
+        "contact_list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
+        "contact_list_name": clean_value(cl.get("name", assignment.get("contact_list_name", ""))),
+        "packet_rule": "Precinct first; oversized precincts split by Street Name.",
+        "max_packet_size_target": int(max_packet_size or 400),
+        "packet_count": 0,
+    })
+    if df is None or df.empty:
+        return [], meta
+
+    if "Precinct" not in df.columns:
+        df["Precinct"] = "Unassigned Precinct"
+    if "Street Name" not in df.columns:
+        df["Street Name"] = ""
+
+    packets = []
+    precinct_groups = []
+    for precinct, g in df.groupby(df["Precinct"].fillna("").astype(str), dropna=False):
+        precinct_groups.append((clean_value(precinct) or "Unassigned Precinct", g.copy()))
+    # Highest-voter precincts first, then name. This matches how campaigns prioritize turf.
+    precinct_groups.sort(key=lambda x: (-len(x[1]), clean_value(x[0]).upper()))
+
+    for precinct_index, (precinct, g) in enumerate(precinct_groups, start=1):
+        if len(g) <= int(max_packet_size or 400):
+            splits = [("All Streets", g)]
+        else:
+            splits = _split_precinct_by_street(g, max_packet_size)
+        for split_index, (street_label, part_df) in enumerate(splits, start=1):
+            county = clean_value(part_df["County"].dropna().astype(str).iloc[0]) if "County" in part_df.columns and not part_df.empty else ""
+            muni = clean_value(part_df["Municipality"].dropna().astype(str).iloc[0]) if "Municipality" in part_df.columns and not part_df.empty else ""
+            packet_name = precinct if len(splits) == 1 else f"{precinct} — {street_label}"
+            packet_id = "wp-" + hashlib.md5(f"{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{street_label}".encode("utf-8")).hexdigest()[:12]
+            rows = _mobile_rows_from_dataframe(part_df)
+            packets.append({
+                "packet_id": packet_id,
+                "assignment_id": clean_value(assignment.get("assignment_id", "")),
+                "contact_list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
+                "program_id": clean_value(cl.get("program_id", assignment.get("program_id", ""))),
+                "packet_name": packet_name,
+                "group_type": "Precinct" if len(splits) == 1 else "Precinct + Street Group",
+                "precinct": precinct,
+                "street_group": "" if len(splits) == 1 else street_label,
+                "county": county,
+                "municipality": muni,
+                "voter_count": len(rows),
+                "status": "Ready",
+                "priority_rank": precinct_index,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "voters": rows,
+            })
+    meta["packet_count"] = len(packets)
+    return packets, meta
+
+
+def _assignment_packets(campaign_id: str, assignment_id: str) -> list[dict]:
+    try:
+        store = load_walk_packets_store(campaign_id)
+        return [p for p in (store.get("packets") or []) if clean_value(p.get("assignment_id")) == clean_value(assignment_id)]
+    except Exception:
+        return []
+
+
+def _walk_packets_df(packets: list[dict]) -> pd.DataFrame:
+    cols = ["packet_id", "packet_name", "group_type", "county", "municipality", "precinct", "street_group", "voter_count", "status", "priority_rank"]
+    df = pd.DataFrame(packets or [])
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df[cols].sort_values(["priority_rank", "packet_name"], ascending=[True, True])
 
 def render_assignments_workspace(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
@@ -9634,8 +9998,39 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.success("Assignment deleted.") if ok else st.error(msg)
             st.rerun()
 
+        st.markdown("#### Walk Packets / Turf")
+        st.caption("Generate practical precinct-first walking packets from the saved universe. Oversized precincts are split by street group so packets are useful in the field.")
+        wp_existing = _assignment_packets(campaign_id, assignment_id)
+        wpc1, wpc2, wpc3 = st.columns(3)
+        with wpc1:
+            st.metric("Packets", len(wp_existing))
+        with wpc2:
+            st.metric("Voters in Packets", sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in wp_existing))
+        with wpc3:
+            max_packet_size = st.number_input("Target max voters/packet", min_value=100, max_value=1000, value=400, step=50, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
+        if st.button("Generate / Refresh Walk Packets", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
+            packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size))
+            if packet_meta.get("error"):
+                st.error(packet_meta.get("error"))
+            elif not packets:
+                st.warning("No voters were found for this saved universe.")
+            else:
+                wp_store = load_walk_packets_store(campaign_id)
+                other_packets = [p for p in (wp_store.get("packets") or []) if clean_value(p.get("assignment_id")) != clean_value(assignment_id)]
+                wp_store["packets"] = other_packets + packets
+                ok, msg = save_walk_packets_store(campaign_id, wp_store)
+                if ok:
+                    st.success(f"Generated {len(packets):,} walk packet(s) with {sum(int(p.get('voter_count') or 0) for p in packets):,} voter(s).")
+                    st.rerun()
+                else:
+                    st.error(f"Could not save walk packets: {msg}")
+        if wp_existing:
+            st.dataframe(_walk_packets_df(wp_existing).drop(columns=["packet_id"], errors="ignore"), width="stretch", hide_index=True)
+        else:
+            st.info("No walk packets generated yet for this assignment.")
+
         st.markdown("#### Mobile Download Package")
-        st.caption("v1 creates the offline assignment package shell. The next build will fill it with the actual voters from the saved universe.")
+        st.caption("The mobile package now uses generated walk packets/turfs. Generate packets first, then download the offline JSON package.")
         mobile_package = build_assignment_mobile_package_v1(campaign_id, current, contact_lists, people)
         mc1, mc2 = st.columns([1, 1])
         with mc1:
@@ -9667,8 +10062,8 @@ def render_voter_outreach_workspace():
         render_assignments_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
-        st.info("Next build: create a walk/contact list from a saved universe and assign it to a team member for offline mobile download.")
-        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Mobile Download → Offline Contacts → Sync Back.")
+        st.info("Use Contact Lists and Assignments to generate precinct-first walk packets, then download an offline mobile package for field work.")
+        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Walk Packets/Turf → Mobile Download → Offline Contacts → Sync Back.")
     with tab_phone:
         st.markdown("### Phone Bank")
         st.caption("Uses the same Contact Program / Assignment / Contact Result architecture as door-to-door.")
