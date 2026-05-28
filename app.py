@@ -8876,184 +8876,14 @@ def render_team_volunteers_workspace(campaign_id: str | None = None):
                         st.rerun()
 
 
-
-def _outreach_programs_key(campaign_id: str) -> str:
-    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/programs.json"
-
-
-def _empty_outreach_programs_store() -> dict:
-    return {"version": 1, "updated_at": datetime.now().isoformat(timespec="seconds"), "programs": []}
-
-
-@st.cache_data(ttl=15, show_spinner=False)
-def load_outreach_programs_store(campaign_id: str) -> dict:
-    data = _ops_json_get(_outreach_programs_key(campaign_id), {})
-    if not isinstance(data, dict):
-        data = {}
-    data.setdefault("version", 1)
-    data.setdefault("updated_at", "")
-    data.setdefault("programs", [])
-    if not isinstance(data.get("programs"), list):
-        data["programs"] = []
-    return data
-
-
-def save_outreach_programs_store(campaign_id: str, store: dict) -> tuple[bool, str]:
-    if not isinstance(store, dict):
-        store = _empty_outreach_programs_store()
-    store["version"] = int(store.get("version") or 1)
-    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    store.setdefault("programs", [])
-    ok, msg = _put_json_to_r2_key(_outreach_programs_key(campaign_id), store)
-    try:
-        load_outreach_programs_store.clear()
-    except Exception:
-        pass
-    return ok, msg
-
-
-def _contact_program_id(name: str, program_type: str = "") -> str:
-    raw = "|".join([str(name or "").strip().lower(), str(program_type or "").strip().lower(), datetime.now().isoformat(timespec="seconds")])
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
-    return f"cp-{digest}"
-
-
-def _normalize_contact_program(raw: dict, campaign_id: str, existing_id: str = "") -> dict:
-    raw = raw or {}
-    name = clean_value(raw.get("name") or raw.get("Program Name") or raw.get("program_name") or "")
-    program_type = clean_value(raw.get("program_type") or raw.get("Program Type") or raw.get("type") or "Door-to-Door")
-    status = clean_value(raw.get("status") or raw.get("Status") or "Planning")
-    goal = clean_value(raw.get("goal") or raw.get("Goal") or "")
-    start_date = clean_value(raw.get("start_date") or raw.get("Start Date") or "")
-    end_date = clean_value(raw.get("end_date") or raw.get("End Date") or "")
-    notes = clean_value(raw.get("notes") or raw.get("Notes") or "")
-    pid = clean_value(existing_id or raw.get("program_id") or raw.get("Program ID") or "") or _contact_program_id(name, program_type)
-    now = datetime.now().isoformat(timespec="seconds")
-    return {
-        "program_id": pid,
-        "campaign_id": _ops_slug(campaign_id),
-        "name": name,
-        "program_type": program_type,
-        "status": status,
-        "goal": goal,
-        "start_date": start_date,
-        "end_date": end_date,
-        "notes": notes,
-        "updated_at": now,
-    }
-
-
-def _programs_df(programs: list[dict]) -> pd.DataFrame:
-    cols = ["program_id", "name", "program_type", "status", "goal", "start_date", "end_date", "notes", "updated_at"]
-    df = pd.DataFrame(programs or [])
-    for c in cols:
-        if c not in df.columns:
-            df[c] = ""
-    return df[cols]
-
-
-def render_contact_programs_workspace(campaign_id: str | None = None):
-    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
-    store = load_outreach_programs_store(campaign_id)
-    programs = store.get("programs") or []
-
-    st.markdown("### Contact Programs")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Programs", len(programs))
-    with c2:
-        st.metric("Active", sum(1 for p in programs if str(p.get("status", "")).lower() == "active"))
-    with c3:
-        st.metric("Door-to-Door", sum(1 for p in programs if "door" in str(p.get("program_type", "")).lower()))
-
-    tab_create, tab_manage = st.tabs(["Create Program", "Manage Programs"])
-    with tab_create:
-        with st.form(f"contact_program_create_{campaign_id}"):
-            a, b = st.columns(2)
-            with a:
-                name = st.text_input("Program name", placeholder="Spring Door-to-Door Launch")
-                program_type = st.selectbox("Program type", ["Door-to-Door", "Phone Bank", "Mail Ballot Chase", "Postcard", "Texting", "Email", "Other"])
-                status = st.selectbox("Status", ["Planning", "Active", "Paused", "Completed", "Archived"])
-                goal = st.text_input("Goal", placeholder="Knock 1,500 likely supporters")
-            with b:
-                start_date = st.text_input("Start date", placeholder="2026-06-01")
-                end_date = st.text_input("End date", placeholder="2026-06-30")
-                notes = st.text_area("Notes", height=120, placeholder="Script, universe, turf, or planning notes")
-            submitted = st.form_submit_button("Create Contact Program", type="primary")
-        if submitted:
-            if not str(name or "").strip():
-                st.error("Program name is required.")
-            else:
-                program = _normalize_contact_program({"name": name, "program_type": program_type, "status": status, "goal": goal, "start_date": start_date, "end_date": end_date, "notes": notes}, campaign_id)
-                store["programs"] = programs + [program]
-                ok, msg = save_outreach_programs_store(campaign_id, store)
-                if ok:
-                    st.success("Contact program saved.")
-                    st.rerun()
-                else:
-                    st.error(f"Could not save contact program: {msg}")
-
-    with tab_manage:
-        if not programs:
-            st.info("No contact programs yet. Create one to begin organizing voter outreach.")
-            return
-        df = _programs_df(programs)
-        search = st.text_input("Search programs", key=f"program_search_{campaign_id}")
-        view = df.copy()
-        if search:
-            s = str(search).lower().strip()
-            view = view[view.apply(lambda row: s in " ".join(str(x).lower() for x in row.values), axis=1)]
-        st.dataframe(view.drop(columns=["program_id"], errors="ignore"), width="stretch", hide_index=True)
-
-        options = [f"{p.get('name','Unnamed')} — {p.get('program_type','')} — {p.get('status','')}" for p in programs]
-        selected_label = st.selectbox("Edit program", options, key=f"program_edit_select_{campaign_id}")
-        idx = options.index(selected_label)
-        current = programs[idx]
-        pid = current.get("program_id", "")
-        with st.form(f"contact_program_edit_{campaign_id}_{pid}"):
-            a, b = st.columns(2)
-            with a:
-                e_name = st.text_input("Program name", value=current.get("name", ""))
-                type_options = ["Door-to-Door", "Phone Bank", "Mail Ballot Chase", "Postcard", "Texting", "Email", "Other"]
-                cur_type = current.get("program_type", "Door-to-Door")
-                e_type = st.selectbox("Program type", type_options, index=type_options.index(cur_type) if cur_type in type_options else 0)
-                status_options = ["Planning", "Active", "Paused", "Completed", "Archived"]
-                cur_status = current.get("status", "Planning")
-                e_status = st.selectbox("Status", status_options, index=status_options.index(cur_status) if cur_status in status_options else 0)
-                e_goal = st.text_input("Goal", value=current.get("goal", ""))
-            with b:
-                e_start = st.text_input("Start date", value=current.get("start_date", ""))
-                e_end = st.text_input("End date", value=current.get("end_date", ""))
-                e_notes = st.text_area("Notes", value=current.get("notes", ""), height=120)
-            save_btn = st.form_submit_button("Save Program", type="primary")
-        if save_btn:
-            updated = _normalize_contact_program({"name": e_name, "program_type": e_type, "status": e_status, "goal": e_goal, "start_date": e_start, "end_date": e_end, "notes": e_notes}, campaign_id, pid)
-            store["programs"] = [updated if p.get("program_id") == pid else p for p in programs]
-            ok, msg = save_outreach_programs_store(campaign_id, store)
-            if ok:
-                st.success("Program updated.")
-                st.rerun()
-            else:
-                st.error(msg)
-        confirm = st.checkbox("Confirm delete selected program", key=f"program_delete_confirm_{campaign_id}_{pid}")
-        if st.button("Delete Program", key=f"program_delete_{campaign_id}_{pid}", disabled=not confirm):
-            store["programs"] = [p for p in programs if p.get("program_id") != pid]
-            ok, msg = save_outreach_programs_store(campaign_id, store)
-            st.success("Program deleted.") if ok else st.error(msg)
-            st.rerun()
-
-
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Plan direct voter contact in Candidate Connect and execute it later from the offline mobile utility.")
-    campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_programs, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
-    with tab_programs:
-        render_contact_programs_workspace(campaign_id)
+    tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
     with tab_door:
         st.markdown("### Door-to-Door")
         st.info("Next build: create a walk/contact list from a saved universe and assign it to a team member for offline mobile download.")
-        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Mobile Download → Offline Contacts → Sync Back.")
+        st.markdown("Workflow: Saved Universe → Contact List → Assignment → Mobile Download → Offline Contacts → Sync Back.")
     with tab_phone:
         st.markdown("### Phone Bank")
         st.caption("Uses the same Contact Program / Assignment / Contact Result architecture as door-to-door.")
@@ -9063,6 +8893,7 @@ def render_voter_outreach_workspace():
     with tab_results:
         st.markdown("### Contact Results")
         st.caption("Future dashboard for contact attempts, support IDs, follow-up needs, and volunteer productivity.")
+
 
 def render_election_day_workspace():
     st.markdown("## Election Day Operations")
@@ -9529,6 +9360,77 @@ st.markdown("""
 }
 [data-testid="stSidebar"] hr {
   margin: 5px 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# v34 DEV-only dataframe / mouseover toolbar readability fix:
+# Loaded late and scoped to dataframes/tooltips so it does not change right-pane action buttons.
+st.markdown("""
+<style>
+/* v34: make Streamlit dataframe hover toolbar / three-dot menu readable */
+div[data-testid="stDataFrame"] button,
+div[data-testid="stDataFrame"] [role="button"],
+div[data-testid="stDataFrame"] [data-testid*="toolbar"],
+div[data-testid="stDataFrame"] [data-testid*="Toolbar"] {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  border-color: #cdbdaa !important;
+  opacity: 1 !important;
+}
+
+div[data-testid="stDataFrame"] button *,
+div[data-testid="stDataFrame"] [role="button"] *,
+div[data-testid="stDataFrame"] svg,
+div[data-testid="stDataFrame"] path {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  opacity: 1 !important;
+}
+
+div[data-testid="stDataFrame"] button:hover,
+div[data-testid="stDataFrame"] [role="button"]:hover {
+  background: #efe8d8 !important;
+  background-color: #efe8d8 !important;
+}
+
+/* Popover/tooltip/menu text that appears from dataframe toolbar icons */
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] *,
+div[role="tooltip"],
+div[role="tooltip"] *,
+div[data-testid="stTooltipContent"],
+div[data-testid="stTooltipContent"] * {
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* The tiny floating dataframe toolbar sometimes renders outside the dataframe node. */
+button[title*="Search"],
+button[title*="Download"],
+button[title*="Fullscreen"],
+button[title*="full screen"],
+button[aria-label*="Search"],
+button[aria-label*="Download"],
+button[aria-label*="Fullscreen"],
+button[aria-label*="full screen"] {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  border: 1px solid #cdbdaa !important;
 }
 </style>
 """, unsafe_allow_html=True)
