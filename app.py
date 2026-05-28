@@ -9282,6 +9282,88 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+
+# v31 DEV-only ultra-compact sidebar spacing override:
+# Loaded last so it tightens only the left sidebar navigation without touching right-pane controls.
+st.markdown("""
+<style>
+/* v31 ultra-compact sidebar spacing — sidebar only */
+[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+/* reduce generic Streamlit vertical wrappers inside sidebar */
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 0px !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  gap: 0.08rem !important;
+}
+
+/* top-level nav buttons */
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  min-height: 25px !important;
+  height: 25px !important;
+  max-height: 25px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.25pt !important;
+  line-height: 1 !important;
+}
+
+/* section rollups */
+[data-testid="stSidebar"] details {
+  margin: 3px 0 4px 0 !important;
+  border-radius: 9px !important;
+}
+[data-testid="stSidebar"] details summary {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 3px 7px !important;
+  border-radius: 8px !important;
+  font-size: 9.35pt !important;
+  line-height: 1 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 3px 5px 4px 5px !important;
+}
+
+/* submenu items inside open rollups */
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 24px !important;
+  height: 24px !important;
+  max-height: 24px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.1pt !important;
+  line-height: 1 !important;
+}
+
+/* compact account/status text and separators */
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+  margin-bottom: 0.22rem !important;
+  line-height: 1.15 !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  margin-bottom: 0px !important;
+  line-height: 1.05 !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 5px 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 active = active_filters()
 section = st.session_state.get("left_section")
 
