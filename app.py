@@ -9325,15 +9325,221 @@ def render_contact_lists_workspace(campaign_id: str | None = None):
             st.success("Contact list deleted.") if ok else st.error(msg)
             st.rerun()
 
+
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: Assignments v1
+# ---------------------------------------------------------------------------
+def _outreach_assignments_key(campaign_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/assignments.json"
+
+@st.cache_data(ttl=15, show_spinner=False)
+def load_outreach_assignments_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_outreach_assignments_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", 1)
+    data.setdefault("updated_at", "")
+    data.setdefault("assignments", [])
+    if not isinstance(data.get("assignments"), list):
+        data["assignments"] = []
+    return data
+
+def save_outreach_assignments_store(campaign_id: str, store: dict) -> tuple[bool, str]:
+    if not isinstance(store, dict):
+        store = {"version": 1, "assignments": []}
+    store["version"] = int(store.get("version") or 1)
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    store.setdefault("assignments", [])
+    ok, msg = _put_json_to_r2_key(_outreach_assignments_key(campaign_id), store)
+    try:
+        load_outreach_assignments_store.clear()
+    except Exception:
+        pass
+    return ok, msg
+
+def _assignment_id(name: str, list_id: str = "", person_id: str = "") -> str:
+    raw = "|".join([str(name or "").lower(), str(list_id or "").lower(), str(person_id or "").lower(), datetime.now().isoformat(timespec="seconds")])
+    return "as-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+def _team_lookup_for_assignments(campaign_id: str) -> tuple[list[dict], dict, list[str]]:
+    try:
+        people = load_team_people_store(campaign_id).get("people") or []
+    except Exception:
+        people = []
+    label_to_id, labels = {}, []
+    for p in people:
+        pid = str(p.get("person_id") or "").strip()
+        if not pid:
+            continue
+        label = f"{p.get('name','Unnamed')} — {p.get('role','')} — {p.get('status','')}"
+        labels.append(label)
+        label_to_id[label] = pid
+    return people, label_to_id, labels
+
+def _contact_list_lookup_for_assignments(campaign_id: str) -> tuple[list[dict], dict, list[str]]:
+    try:
+        contact_lists = load_contact_lists_store(campaign_id).get("contact_lists") or []
+    except Exception:
+        contact_lists = []
+    label_to_id, labels = {}, []
+    for cl in contact_lists:
+        lid = str(cl.get("list_id") or "").strip()
+        if not lid:
+            continue
+        label = f"{cl.get('name','Unnamed')} — {cl.get('contact_type','')} — {cl.get('status','')}"
+        labels.append(label)
+        label_to_id[label] = lid
+    return contact_lists, label_to_id, labels
+
+def _contact_list_from_id(contact_lists: list[dict], list_id: str) -> dict:
+    return next((cl for cl in (contact_lists or []) if str(cl.get("list_id") or "") == str(list_id or "")), {})
+
+def _team_person_from_id(people: list[dict], person_id: str) -> dict:
+    return next((p for p in (people or []) if str(p.get("person_id") or "") == str(person_id or "")), {})
+
+def _normalize_assignment(raw: dict, campaign_id: str, contact_lists: list[dict] | None = None, people: list[dict] | None = None, existing_id: str = "") -> dict:
+    raw = raw or {}
+    list_id = clean_value(raw.get("list_id") or "")
+    person_id = clean_value(raw.get("person_id") or "")
+    cl = _contact_list_from_id(contact_lists or [], list_id)
+    person = _team_person_from_id(people or [], person_id)
+    contact_list_name = clean_value(raw.get("contact_list_name") or cl.get("name", ""))
+    team_member_name = clean_value(raw.get("team_member_name") or person.get("name", ""))
+    name = clean_value(raw.get("name") or raw.get("assignment_name") or "") or " — ".join([x for x in [contact_list_name, team_member_name] if x]) or "Outreach Assignment"
+    now = datetime.now().isoformat(timespec="seconds")
+    return {
+        "assignment_id": clean_value(existing_id or raw.get("assignment_id") or "") or _assignment_id(name, list_id, person_id),
+        "campaign_id": _ops_slug(campaign_id),
+        "name": name,
+        "list_id": list_id,
+        "contact_list_name": contact_list_name,
+        "person_id": person_id,
+        "team_member_name": team_member_name,
+        "program_id": clean_value(raw.get("program_id") or cl.get("program_id", "")),
+        "program_name": clean_value(raw.get("program_name") or cl.get("program_name", "")),
+        "contact_type": clean_value(raw.get("contact_type") or cl.get("contact_type", "Door-to-Door")),
+        "priority": clean_value(raw.get("priority") or cl.get("priority", "Normal")),
+        "status": clean_value(raw.get("status") or "Assigned"),
+        "due_date": clean_value(raw.get("due_date") or ""),
+        "notes": clean_value(raw.get("notes") or ""),
+        "created_at": clean_value(raw.get("created_at") or now),
+        "updated_at": now,
+    }
+
+def _assignments_df(assignments: list[dict]) -> pd.DataFrame:
+    cols = ["assignment_id", "name", "team_member_name", "contact_list_name", "program_name", "contact_type", "priority", "status", "due_date", "notes", "created_at", "updated_at"]
+    df = pd.DataFrame(assignments or [])
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df[cols]
+
+def render_assignments_workspace(campaign_id: str | None = None):
+    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
+    store = load_outreach_assignments_store(campaign_id)
+    assignments = store.get("assignments") or []
+    contact_lists, list_label_to_id, list_labels = _contact_list_lookup_for_assignments(campaign_id)
+    people, person_label_to_id, person_labels = _team_lookup_for_assignments(campaign_id)
+
+    st.markdown("### Assignments")
+    st.caption("Assign contact lists to team members for field work, phone banks, mail-ballot chase, or future mobile download.")
+    c1, c2, c3 = st.columns(3)
+    with c1: st.metric("Assignments", len(assignments))
+    with c2: st.metric("Active", sum(1 for x in assignments if str(x.get("status", "")).lower() in {"assigned", "in progress", "active"}))
+    with c3: st.metric("Completed", sum(1 for x in assignments if str(x.get("status", "")).lower() == "completed"))
+
+    tab_create, tab_manage = st.tabs(["Create Assignment", "Manage Assignments"])
+    with tab_create:
+        if not list_labels:
+            st.warning("Create a Contact List first, then assign it to a team member.")
+        if not person_labels:
+            st.warning("Add Team / Volunteers first, then assign outreach work to them.")
+        with st.form(f"assignment_create_{campaign_id}"):
+            a, b = st.columns(2)
+            with a:
+                name = st.text_input("Assignment name", placeholder="Washington 3 doors — Saturday morning")
+                list_label = st.selectbox("Contact list", list_labels if list_labels else [""], disabled=not bool(list_labels))
+                person_label = st.selectbox("Team member / volunteer", person_labels if person_labels else [""], disabled=not bool(person_labels))
+            with b:
+                status = st.selectbox("Status", ["Assigned", "In Progress", "Completed", "Paused", "Canceled"])
+                due_date = st.text_input("Due date", placeholder="2026-06-15")
+                notes = st.text_area("Notes", height=120, placeholder="Instructions, turf notes, meetup point, or special reminders")
+            submitted = st.form_submit_button("Create Assignment", type="primary")
+        if submitted:
+            if not str(name or "").strip():
+                st.error("Assignment name is required.")
+            elif not list_label_to_id.get(list_label, ""):
+                st.error("Choose a contact list.")
+            elif not person_label_to_id.get(person_label, ""):
+                st.error("Choose a team member / volunteer.")
+            else:
+                rec = _normalize_assignment({"name": name, "list_id": list_label_to_id.get(list_label, ""), "person_id": person_label_to_id.get(person_label, ""), "status": status, "due_date": due_date, "notes": notes}, campaign_id, contact_lists, people)
+                store["assignments"] = assignments + [rec]
+                ok, msg = save_outreach_assignments_store(campaign_id, store)
+                if ok:
+                    st.success("Assignment saved.")
+                    st.rerun()
+                else:
+                    st.error(f"Could not save assignment: {msg}")
+
+    with tab_manage:
+        if not assignments:
+            st.info("No assignments yet. Create one after you have a contact list and team member.")
+            return
+        df = _assignments_df(assignments)
+        search = st.text_input("Search assignments", key=f"assignment_search_{campaign_id}")
+        view = df.copy()
+        if search:
+            s = str(search).lower().strip()
+            view = view[view.apply(lambda row: s in " ".join(str(x).lower() for x in row.values), axis=1)]
+        st.dataframe(view.drop(columns=["assignment_id"], errors="ignore"), width="stretch", hide_index=True)
+        options = [f"{x.get('name','Unnamed')} — {x.get('team_member_name','')} — {x.get('status','')}" for x in assignments]
+        selected_label = st.selectbox("Edit assignment", options, key=f"assignment_edit_select_{campaign_id}")
+        current = assignments[options.index(selected_label)]
+        assignment_id = current.get("assignment_id", "")
+        current_list_label = next((label for label, lid in list_label_to_id.items() if lid == current.get("list_id", "")), "")
+        current_person_label = next((label for label, pid in person_label_to_id.items() if pid == current.get("person_id", "")), "")
+        with st.form(f"assignment_edit_{campaign_id}_{assignment_id}"):
+            a, b = st.columns(2)
+            with a:
+                e_name = st.text_input("Assignment name", value=current.get("name", ""))
+                e_list_label = st.selectbox("Contact list", list_labels if list_labels else [""], index=(list_labels.index(current_list_label) if current_list_label in list_labels else 0), disabled=not bool(list_labels))
+                e_person_label = st.selectbox("Team member / volunteer", person_labels if person_labels else [""], index=(person_labels.index(current_person_label) if current_person_label in person_labels else 0), disabled=not bool(person_labels))
+            with b:
+                status_options = ["Assigned", "In Progress", "Completed", "Paused", "Canceled"]
+                cur_status = current.get("status", "Assigned")
+                e_status = st.selectbox("Status", status_options, index=status_options.index(cur_status) if cur_status in status_options else 0)
+                e_due = st.text_input("Due date", value=current.get("due_date", ""))
+                e_notes = st.text_area("Notes", value=current.get("notes", ""), height=120)
+            save_btn = st.form_submit_button("Save Assignment", type="primary")
+        if save_btn:
+            updated = _normalize_assignment({**current, "name": e_name, "list_id": list_label_to_id.get(e_list_label, current.get("list_id", "")), "person_id": person_label_to_id.get(e_person_label, current.get("person_id", "")), "status": e_status, "due_date": e_due, "notes": e_notes, "created_at": current.get("created_at", "")}, campaign_id, contact_lists, people, assignment_id)
+            store["assignments"] = [updated if x.get("assignment_id") == assignment_id else x for x in assignments]
+            ok, msg = save_outreach_assignments_store(campaign_id, store)
+            if ok:
+                st.success("Assignment updated.")
+                st.rerun()
+            else:
+                st.error(msg)
+        confirm = st.checkbox("Confirm delete selected assignment", key=f"assignment_delete_confirm_{campaign_id}_{assignment_id}")
+        if st.button("Delete Assignment", key=f"assignment_delete_{campaign_id}_{assignment_id}", disabled=not confirm):
+            store["assignments"] = [x for x in assignments if x.get("assignment_id") != assignment_id]
+            ok, msg = save_outreach_assignments_store(campaign_id, store)
+            st.success("Assignment deleted.") if ok else st.error(msg)
+            st.rerun()
+
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Plan direct voter contact in Candidate Connect and execute it later from the offline mobile utility.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_programs, tab_lists, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Contact Lists", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
+    tab_programs, tab_lists, tab_assign, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Contact Lists", "Assignments", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
     with tab_programs:
         render_contact_programs_workspace(campaign_id)
     with tab_lists:
         render_contact_lists_workspace(campaign_id)
+    with tab_assign:
+        render_assignments_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
         st.info("Next build: create a walk/contact list from a saved universe and assign it to a team member for offline mobile download.")
