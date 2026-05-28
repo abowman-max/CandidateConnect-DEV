@@ -4056,16 +4056,13 @@ def options_from_geo(df: pd.DataFrame, field: str, active: dict) -> list:
     try:
         if df is None or df.empty or field not in df.columns:
             return []
-        hierarchy_order = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
         relevant = {}
-        for f in hierarchy_order:
+        for f, vals in (active or {}).items():
             if f == field:
-                break
-            if active.get(f):
-                relevant[f] = active[f]
+                continue
+            if vals and f in df.columns:
+                relevant[f] = vals
         narrowed = apply_filters(df, relevant)
-        if field not in narrowed.columns:
-            return []
         vals = narrowed[field].astype(str).map(clean_value)
         return sorted([v for v in vals.unique().tolist() if not is_unusable_label(v)], key=smart_sort_key)
     except Exception:
@@ -4101,24 +4098,7 @@ def clean_mail_options(field: str):
     return fixed.get(field, [])
 
 def count_cube_option_filters(field: str, active: dict) -> dict:
-    """Return the filters that should narrow the dropdown for this field.
-
-    v24: Geography dropdowns are fully interdependent. A selected value in
-    any geography field narrows every other geography field, regardless of
-    vertical order in the sidebar. The field currently being populated is
-    removed so the user can change that field.
-    """
     active = active or {}
-    if field in GEO_FIELDS:
-        relevant = {}
-        for f in GEO_FIELDS:
-            if f == field:
-                continue
-            vals = active.get(f)
-            if vals:
-                relevant[f] = vals
-        return relevant
-
     relevant = count_safe_filters(active)
     relevant.pop(field, None)
     return relevant
