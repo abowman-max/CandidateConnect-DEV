@@ -9160,6 +9160,128 @@ with st.sidebar:
         st.markdown("### Account Admin")
         st.caption("Manage Candidate Connect accounts and campaign scopes.")
 
+
+
+# v30 DEV-only sidebar compact polish:
+# Final sidebar-only override loaded after the global Candidate Connect theme so the
+# left nav stays calm/compact even when a submenu item is the active page.
+st.markdown("""
+<style>
+/* v30 sidebar compact navigation — sidebar only; main/right-pane buttons untouched */
+[data-testid="stSidebar"] {
+  width: 250px !important;
+  min-width: 250px !important;
+  max-width: 250px !important;
+}
+
+/* compact all sidebar buttons: Dashboard, submenu items, Logout */
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  background: rgba(248,244,234,.74) !important;
+  background-color: rgba(248,244,234,.74) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 1px solid rgba(159,21,28,.22) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  font-size: 9.6pt !important;
+  font-weight: 750 !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  line-height: 1.05 !important;
+  padding: 3px 8px !important;
+  margin: 1px 0 3px 0 !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled):hover {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  border-color: rgba(159,21,28,.50) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+
+/* rollup cards: smaller and less vertical spacing */
+[data-testid="stSidebar"] details {
+  background: rgba(248,244,234,.20) !important;
+  border: 1px solid rgba(159,21,28,.14) !important;
+  border-radius: 11px !important;
+  margin: 5px 0 7px 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+  background: rgba(248,244,234,.62) !important;
+  border: 1px solid rgba(159,21,28,.18) !important;
+  border-radius: 10px !important;
+  min-height: 31px !important;
+  padding: 6px 8px !important;
+  font-size: 10pt !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+  background: #f4edde !important;
+  border-color: rgba(159,21,28,.32) !important;
+  box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  font-weight: 900 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 5px 6px 6px 6px !important;
+}
+
+/* buttons inside open rollups: even denser nav links */
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 28px !important;
+  height: 28px !important;
+  max-height: 28px !important;
+  margin: 1px 0 4px 0 !important;
+  padding: 3px 8px !important;
+  border-radius: 9px !important;
+  font-weight: 700 !important;
+  justify-content: center !important;
+}
+
+/* compact captions and separators */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  font-size: 8.7pt !important;
+  line-height: 1.15 !important;
+  margin-bottom: 2px !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 8px 0 !important;
+}
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 2px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 active = active_filters()
 section = st.session_state.get("left_section")
 
