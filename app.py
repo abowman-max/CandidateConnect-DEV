@@ -8943,38 +8943,44 @@ with st.sidebar:
     elif is_super_admin():
         st.caption("Dataset: Statewide")
 
+    # v28 DEV-only navigation cleanup:
+    # Keep Dashboard top-level, then group operational areas into collapsible rollups.
+    # This is navigation/UI only. It does not change data, auth, filters, saved universes, shards, or R2 behavior.
+    _current_section = st.session_state.get("left_section")
+
     if st.button("🏠 Dashboard", width="stretch"):
         st.session_state["left_section"] = None
         st.session_state["view"] = "dashboard"
         st.rerun()
 
-    st.markdown("### 🧠 Voter Intelligence")
-    if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
-        st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
-    if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
-        st.session_state["left_section"]="voter_lookup"; st.session_state["view"]="dashboard"; st.rerun()
-    if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
-        st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
-    if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
-        st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+    with st.expander("🧠 Voter Intelligence", expanded=_current_section in {"create_universe", "voter_lookup", "mail_ballot_center", "area_intelligence"}):
+        if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
+            st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
+        if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
+            st.session_state["left_section"]="voter_lookup"; st.session_state["view"]="dashboard"; st.rerun()
+        if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
+            st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
+        if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
+            st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
 
-    st.markdown("### 👥 Campaign Organization")
-    if st.button("👥 Team / Volunteers", width="stretch"):
-        st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
+    with st.expander("👥 Campaign Organization", expanded=_current_section in {"campaign_organization"}):
+        if st.button("👥 Team / Volunteers", width="stretch"):
+            st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
 
-    st.markdown("### 📣 Voter Outreach")
-    if st.button("🚪 Door-to-Door / Contact Programs", width="stretch"):
-        st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
+    with st.expander("📣 Voter Outreach", expanded=_current_section in {"voter_outreach"}):
+        if st.button("🚪 Door-to-Door / Contact Programs", width="stretch"):
+            st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
-    st.markdown("### 🗳️ Election Day")
-    if st.button("🗳️ Election Day Operations", width="stretch"):
-        st.session_state["left_section"]="election_day"; st.session_state["view"]="election_day"; st.rerun()
+    with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
+        if st.button("🗳️ Election Day Operations", width="stretch"):
+            st.session_state["left_section"]="election_day"; st.session_state["view"]="election_day"; st.rerun()
 
-    st.markdown("### ⚙️ Administration")
-    if st.button("👤 My Account", width="stretch"):
-        st.session_state["left_section"]="my_account"; st.session_state["view"]="account"; st.rerun()
-    if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
-        st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
+    with st.expander("⚙️ Administration", expanded=_current_section in {"my_account", "account_admin"}):
+        if st.button("👤 My Account", width="stretch"):
+            st.session_state["left_section"]="my_account"; st.session_state["view"]="account"; st.rerun()
+        if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
+            st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
+
     if st.button("Log Out", width="stretch"):
         for _k in ["auth_user", "auth_username"]:
             st.session_state.pop(_k, None)
