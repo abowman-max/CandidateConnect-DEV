@@ -1,6 +1,7 @@
 # Candidate Connect LIVE — Final Hybrid Cloud App v21zp VOTER_LOOKUP_PERSIST_HISTORY_PDF_FIX
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
+# v38 DEV: adds Voter Outreach Contact Lists v1 definitions linked to Contact Programs and Saved Universes.
 
 import io
 import json
@@ -9074,13 +9075,265 @@ def render_contact_programs_workspace(campaign_id: str | None = None):
             st.rerun()
 
 
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: Contact Lists v1
+# ---------------------------------------------------------------------------
+def _contact_lists_key(campaign_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/contact_lists.json"
+
+
+def _empty_contact_lists_store() -> dict:
+    return {"version": 1, "updated_at": datetime.now().isoformat(timespec="seconds"), "contact_lists": []}
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def load_contact_lists_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_contact_lists_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", 1)
+    data.setdefault("updated_at", "")
+    data.setdefault("contact_lists", [])
+    if not isinstance(data.get("contact_lists"), list):
+        data["contact_lists"] = []
+    return data
+
+
+def save_contact_lists_store(campaign_id: str, store: dict) -> tuple[bool, str]:
+    if not isinstance(store, dict):
+        store = _empty_contact_lists_store()
+    store["version"] = int(store.get("version") or 1)
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    store.setdefault("contact_lists", [])
+    ok, msg = _put_json_to_r2_key(_contact_lists_key(campaign_id), store)
+    try:
+        load_contact_lists_store.clear()
+    except Exception:
+        pass
+    return ok, msg
+
+
+def _contact_list_id(name: str, program_id: str = "", universe: str = "") -> str:
+    raw = "|".join([
+        str(name or "").strip().lower(),
+        str(program_id or "").strip().lower(),
+        str(universe or "").strip().lower(),
+        datetime.now().isoformat(timespec="seconds"),
+    ])
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return f"cl-{digest}"
+
+
+def _saved_universe_names_for_contact_lists() -> list[str]:
+    try:
+        saved = load_persistent_saved_universes()
+        if isinstance(saved, dict):
+            return sorted([str(k) for k in saved.keys() if str(k).strip()])
+    except Exception:
+        pass
+    return []
+
+
+def _program_lookup_for_contact_lists(campaign_id: str) -> tuple[list[dict], dict, list[str]]:
+    try:
+        programs = load_outreach_programs_store(campaign_id).get("programs") or []
+    except Exception:
+        programs = []
+    label_to_id = {}
+    labels = []
+    for p in programs:
+        pid = str(p.get("program_id") or "").strip()
+        if not pid:
+            continue
+        label = f"{p.get('name','Unnamed')} — {p.get('program_type','')} — {p.get('status','')}"
+        labels.append(label)
+        label_to_id[label] = pid
+    return programs, label_to_id, labels
+
+
+def _program_name_from_id(programs: list[dict], program_id: str) -> str:
+    for p in programs or []:
+        if str(p.get("program_id") or "") == str(program_id or ""):
+            return str(p.get("name") or "")
+    return ""
+
+
+def _normalize_contact_list(raw: dict, campaign_id: str, programs: list[dict] | None = None, existing_id: str = "") -> dict:
+    raw = raw or {}
+    name = clean_value(raw.get("name") or raw.get("List Name") or raw.get("list_name") or "")
+    program_id = clean_value(raw.get("program_id") or raw.get("Program ID") or "")
+    program_name = clean_value(raw.get("program_name") or raw.get("Program") or "") or _program_name_from_id(programs or [], program_id)
+    source_saved_universe = clean_value(raw.get("source_saved_universe") or raw.get("Saved Universe") or raw.get("saved_universe") or "")
+    contact_type = clean_value(raw.get("contact_type") or raw.get("Contact Type") or "Door-to-Door")
+    priority = clean_value(raw.get("priority") or raw.get("Priority") or "Normal")
+    status = clean_value(raw.get("status") or raw.get("Status") or "Draft")
+    notes = clean_value(raw.get("notes") or raw.get("Notes") or "")
+    list_id = clean_value(existing_id or raw.get("list_id") or raw.get("Contact List ID") or "") or _contact_list_id(name, program_id, source_saved_universe)
+    now = datetime.now().isoformat(timespec="seconds")
+    created_at = clean_value(raw.get("created_at") or now)
+    return {
+        "list_id": list_id,
+        "campaign_id": _ops_slug(campaign_id),
+        "name": name,
+        "program_id": program_id,
+        "program_name": program_name,
+        "source_saved_universe": source_saved_universe,
+        "contact_type": contact_type,
+        "priority": priority,
+        "status": status,
+        "notes": notes,
+        "created_at": created_at,
+        "updated_at": now,
+    }
+
+
+def _contact_lists_df(contact_lists: list[dict]) -> pd.DataFrame:
+    cols = ["list_id", "name", "program_name", "source_saved_universe", "contact_type", "priority", "status", "notes", "created_at", "updated_at"]
+    df = pd.DataFrame(contact_lists or [])
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df[cols]
+
+
+def render_contact_lists_workspace(campaign_id: str | None = None):
+    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
+    store = load_contact_lists_store(campaign_id)
+    contact_lists = store.get("contact_lists") or []
+    programs, label_to_id, program_labels = _program_lookup_for_contact_lists(campaign_id)
+    saved_universes = _saved_universe_names_for_contact_lists()
+
+    st.markdown("### Contact Lists")
+    st.caption("Build reusable outreach list definitions from saved universes, then assign them to team members in the next step.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Contact Lists", len(contact_lists))
+    with c2:
+        st.metric("Ready/Active", sum(1 for x in contact_lists if str(x.get("status", "")).lower() in {"ready", "active"}))
+    with c3:
+        st.metric("Door Lists", sum(1 for x in contact_lists if "door" in str(x.get("contact_type", "")).lower()))
+
+    tab_create, tab_manage = st.tabs(["Create Contact List", "Manage Contact Lists"])
+    with tab_create:
+        if not program_labels:
+            st.warning("Create a Contact Program first, then create contact lists under it.")
+        if not saved_universes:
+            st.info("No saved universes found yet. Save a universe in Create Universe before building a contact list.")
+        with st.form(f"contact_list_create_{campaign_id}"):
+            a, b = st.columns(2)
+            with a:
+                name = st.text_input("List name", placeholder="Washington 3 evening doors")
+                program_label = st.selectbox("Contact program", program_labels if program_labels else [""], disabled=not bool(program_labels))
+                source_universe = st.selectbox("Source saved universe", saved_universes if saved_universes else [""], disabled=not bool(saved_universes))
+                contact_type = st.selectbox("Contact type", ["Door-to-Door", "Phone Bank", "Mail Ballot Chase", "Postcard", "Texting", "Email", "Other"])
+            with b:
+                priority = st.selectbox("Priority", ["High", "Normal", "Low"])
+                status = st.selectbox("Status", ["Draft", "Ready", "Active", "Completed", "Archived"])
+                notes = st.text_area("Notes", height=130, placeholder="Turf notes, script notes, volunteer instructions, or list purpose")
+            submitted = st.form_submit_button("Create Contact List", type="primary")
+        if submitted:
+            if not str(name or "").strip():
+                st.error("List name is required.")
+            elif not program_label or not label_to_id.get(program_label):
+                st.error("Choose a contact program.")
+            elif not source_universe:
+                st.error("Choose a source saved universe.")
+            else:
+                program_id = label_to_id.get(program_label, "")
+                rec = _normalize_contact_list({
+                    "name": name,
+                    "program_id": program_id,
+                    "source_saved_universe": source_universe,
+                    "contact_type": contact_type,
+                    "priority": priority,
+                    "status": status,
+                    "notes": notes,
+                }, campaign_id, programs)
+                store["contact_lists"] = contact_lists + [rec]
+                ok, msg = save_contact_lists_store(campaign_id, store)
+                if ok:
+                    st.success("Contact list saved.")
+                    st.rerun()
+                else:
+                    st.error(f"Could not save contact list: {msg}")
+
+    with tab_manage:
+        if not contact_lists:
+            st.info("No contact lists yet. Create one from a saved universe to begin assigning outreach work.")
+            return
+        df = _contact_lists_df(contact_lists)
+        search = st.text_input("Search contact lists", key=f"contact_list_search_{campaign_id}")
+        view = df.copy()
+        if search:
+            s = str(search).lower().strip()
+            view = view[view.apply(lambda row: s in " ".join(str(x).lower() for x in row.values), axis=1)]
+        st.dataframe(view.drop(columns=["list_id"], errors="ignore"), width="stretch", hide_index=True)
+
+        options = [f"{x.get('name','Unnamed')} — {x.get('contact_type','')} — {x.get('status','')}" for x in contact_lists]
+        selected_label = st.selectbox("Edit contact list", options, key=f"contact_list_edit_select_{campaign_id}")
+        idx = options.index(selected_label)
+        current = contact_lists[idx]
+        list_id = current.get("list_id", "")
+        current_program_label = ""
+        for label, pid in label_to_id.items():
+            if pid == current.get("program_id", ""):
+                current_program_label = label
+                break
+        with st.form(f"contact_list_edit_{campaign_id}_{list_id}"):
+            a, b = st.columns(2)
+            with a:
+                e_name = st.text_input("List name", value=current.get("name", ""))
+                e_program_label = st.selectbox("Contact program", program_labels if program_labels else [""], index=(program_labels.index(current_program_label) if current_program_label in program_labels else 0), disabled=not bool(program_labels))
+                e_source = st.selectbox("Source saved universe", saved_universes if saved_universes else [current.get("source_saved_universe", "")], index=(saved_universes.index(current.get("source_saved_universe", "")) if current.get("source_saved_universe", "") in saved_universes else 0), disabled=not bool(saved_universes))
+                type_options = ["Door-to-Door", "Phone Bank", "Mail Ballot Chase", "Postcard", "Texting", "Email", "Other"]
+                cur_type = current.get("contact_type", "Door-to-Door")
+                e_type = st.selectbox("Contact type", type_options, index=type_options.index(cur_type) if cur_type in type_options else 0)
+            with b:
+                priority_options = ["High", "Normal", "Low"]
+                cur_priority = current.get("priority", "Normal")
+                e_priority = st.selectbox("Priority", priority_options, index=priority_options.index(cur_priority) if cur_priority in priority_options else 1)
+                status_options = ["Draft", "Ready", "Active", "Completed", "Archived"]
+                cur_status = current.get("status", "Draft")
+                e_status = st.selectbox("Status", status_options, index=status_options.index(cur_status) if cur_status in status_options else 0)
+                e_notes = st.text_area("Notes", value=current.get("notes", ""), height=130)
+            save_btn = st.form_submit_button("Save Contact List", type="primary")
+        if save_btn:
+            program_id = label_to_id.get(e_program_label, current.get("program_id", ""))
+            updated = _normalize_contact_list({
+                **current,
+                "name": e_name,
+                "program_id": program_id,
+                "source_saved_universe": e_source,
+                "contact_type": e_type,
+                "priority": e_priority,
+                "status": e_status,
+                "notes": e_notes,
+                "created_at": current.get("created_at", ""),
+            }, campaign_id, programs, list_id)
+            store["contact_lists"] = [updated if x.get("list_id") == list_id else x for x in contact_lists]
+            ok, msg = save_contact_lists_store(campaign_id, store)
+            if ok:
+                st.success("Contact list updated.")
+                st.rerun()
+            else:
+                st.error(msg)
+        confirm = st.checkbox("Confirm delete selected contact list", key=f"contact_list_delete_confirm_{campaign_id}_{list_id}")
+        if st.button("Delete Contact List", key=f"contact_list_delete_{campaign_id}_{list_id}", disabled=not confirm):
+            store["contact_lists"] = [x for x in contact_lists if x.get("list_id") != list_id]
+            ok, msg = save_contact_lists_store(campaign_id, store)
+            st.success("Contact list deleted.") if ok else st.error(msg)
+            st.rerun()
+
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Plan direct voter contact in Candidate Connect and execute it later from the offline mobile utility.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_programs, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
+    tab_programs, tab_lists, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Contact Lists", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
     with tab_programs:
         render_contact_programs_workspace(campaign_id)
+    with tab_lists:
+        render_contact_lists_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
         st.info("Next build: create a walk/contact list from a saved universe and assign it to a team member for offline mobile download.")
