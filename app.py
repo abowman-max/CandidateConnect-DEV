@@ -8564,6 +8564,341 @@ def render_output_buttons(active):
             if uploaded is not None:
                 _ = st.success(f"Loaded {uploaded.name}. Contact update import will be applied in the pipeline pass.")
 
+
+
+# ---------------------------------------------------------------------------
+# Campaign Operations modules: Campaign Organization / Voter Outreach foundation
+# ---------------------------------------------------------------------------
+def _ops_slug(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower()).strip("-") or "default"
+
+
+def _campaign_records_for_current_user() -> dict:
+    try:
+        store = load_security_store()
+        campaigns = store.get("campaigns") if isinstance(store.get("campaigns"), dict) else {}
+        return campaigns or {}
+    except Exception:
+        return {}
+
+
+def _current_campaign_ops_id() -> str:
+    """Campaign-scoped app_state folder for operations modules.
+
+    Super Admin can select a campaign inside the workspace. Campaign users are
+    locked to their own campaign. This keeps volunteer/team/contact operations
+    out of the statewide voter data and out of security_store.json.
+    """
+    try:
+        u = current_user() or {}
+        if is_super_admin():
+            selected = st.session_state.get("ops_selected_campaign_id") or ""
+            if selected:
+                return _ops_slug(selected)
+            campaigns = _campaign_records_for_current_user()
+            if campaigns:
+                first = sorted([_ops_slug(k) for k in campaigns.keys() if str(k).strip()])[0]
+                st.session_state["ops_selected_campaign_id"] = first
+                return first
+            return "super-admin-sandbox"
+        return _ops_slug(u.get("campaign_id") or u.get("campaign") or u.get("campaign_name") or current_username())
+    except Exception:
+        return "default"
+
+
+def _ops_json_get(key: str, default):
+    try:
+        r = requests.get(root_r2_url(key), timeout=10)
+        if r.ok:
+            data = r.json()
+            return data if data is not None else default
+    except Exception:
+        pass
+    return default
+
+
+def _team_people_key(campaign_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/team/people.json"
+
+
+def _empty_team_people_store() -> dict:
+    return {"version": 1, "updated_at": datetime.now().isoformat(timespec="seconds"), "people": []}
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def load_team_people_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_team_people_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", 1)
+    data.setdefault("people", [])
+    if not isinstance(data.get("people"), list):
+        data["people"] = []
+    return data
+
+
+def save_team_people_store(campaign_id: str, store: dict) -> tuple[bool, str]:
+    if not isinstance(store, dict):
+        store = _empty_team_people_store()
+    store["version"] = int(store.get("version") or 1)
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    store.setdefault("people", [])
+    ok, msg = _put_json_to_r2_key(_team_people_key(campaign_id), store)
+    try:
+        load_team_people_store.clear()
+    except Exception:
+        pass
+    return ok, msg
+
+
+def _team_person_id(name: str, email: str = "", mobile: str = "") -> str:
+    raw = "|".join([str(name or "").strip().lower(), str(email or "").strip().lower(), re.sub(r"\D+", "", str(mobile or ""))])
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return f"tm-{digest}"
+
+
+def _clean_phone(value) -> str:
+    s = clean_value(value) if 'clean_value' in globals() else str(value or "").strip()
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _normalize_team_person(raw: dict, campaign_id: str, source: str = "manual") -> dict:
+    raw = raw or {}
+    first = clean_value(raw.get("first_name") or raw.get("First Name") or raw.get("FirstName") or "") if 'clean_value' in globals() else str(raw.get("first_name") or "")
+    last = clean_value(raw.get("last_name") or raw.get("Last Name") or raw.get("LastName") or "") if 'clean_value' in globals() else str(raw.get("last_name") or "")
+    name = clean_value(raw.get("name") or raw.get("Name") or raw.get("Full Name") or raw.get("FullName") or " ".join([first, last]).strip()) if 'clean_value' in globals() else str(raw.get("name") or "")
+    email_raw = raw.get("email") or raw.get("Email") or raw.get("E-mail") or ""
+    email = clean_value(email_raw).lower() if 'clean_value' in globals() else str(email_raw or "").strip().lower()
+    mobile = _clean_phone(raw.get("mobile") or raw.get("Mobile") or raw.get("Cell") or raw.get("Cell Phone") or raw.get("Phone") or "")
+    landline = _clean_phone(raw.get("landline") or raw.get("Landline") or raw.get("Home Phone") or raw.get("HomePhone") or "")
+    role = clean_value(raw.get("role") or raw.get("Role") or "Volunteer") if 'clean_value' in globals() else str(raw.get("role") or "Volunteer")
+    status = clean_value(raw.get("status") or raw.get("Status") or "Active") if 'clean_value' in globals() else str(raw.get("status") or "Active")
+    address = clean_value(raw.get("address") or raw.get("Address") or raw.get("Street Address") or "") if 'clean_value' in globals() else str(raw.get("address") or "")
+    city = clean_value(raw.get("city") or raw.get("City") or "") if 'clean_value' in globals() else str(raw.get("city") or "")
+    state = clean_value(raw.get("state") or raw.get("State") or "PA") if 'clean_value' in globals() else str(raw.get("state") or "PA")
+    zip_code = clean_value(raw.get("zip") or raw.get("Zip") or raw.get("ZIP") or raw.get("Zip Code") or "") if 'clean_value' in globals() else str(raw.get("zip") or "")
+    notes = clean_value(raw.get("notes") or raw.get("Notes") or "") if 'clean_value' in globals() else str(raw.get("notes") or "")
+    skills = clean_value(raw.get("skills") or raw.get("Skills") or "") if 'clean_value' in globals() else str(raw.get("skills") or "")
+    person_id = clean_value(raw.get("person_id") or raw.get("team_member_id") or "") if 'clean_value' in globals() else str(raw.get("person_id") or "")
+    if not person_id:
+        person_id = _team_person_id(name, email, mobile)
+    return {
+        "person_id": person_id,
+        "campaign_id": _ops_slug(campaign_id),
+        "name": name,
+        "email": email,
+        "mobile": mobile,
+        "landline": landline,
+        "address": address,
+        "city": city,
+        "state": state,
+        "zip": zip_code,
+        "role": role or "Volunteer",
+        "status": status or "Active",
+        "skills": skills,
+        "notes": notes,
+        "source": source,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _merge_team_people(existing: list, incoming: list) -> tuple[list, int, int]:
+    by_id = {str(p.get("person_id")): dict(p) for p in (existing or []) if isinstance(p, dict) and p.get("person_id")}
+    added = updated = 0
+    for p in incoming or []:
+        if not isinstance(p, dict) or not p.get("person_id"):
+            continue
+        pid = str(p.get("person_id"))
+        if pid in by_id:
+            old = by_id[pid]
+            old.update({k: v for k, v in p.items() if v not in [None, ""] or k in {"status", "role"}})
+            by_id[pid] = old
+            updated += 1
+        else:
+            by_id[pid] = p
+            added += 1
+    people = sorted(by_id.values(), key=lambda r: (str(r.get("status", "")), str(r.get("name", "")).lower()))
+    return people, added, updated
+
+
+def _team_people_dataframe(people: list) -> pd.DataFrame:
+    cols = ["person_id", "name", "role", "status", "mobile", "landline", "email", "address", "city", "state", "zip", "skills", "notes"]
+    df = pd.DataFrame(people or [])
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df[cols]
+
+
+def _select_ops_campaign_control(prefix: str = "ops") -> str:
+    if not is_super_admin():
+        return _current_campaign_ops_id()
+    campaigns = _campaign_records_for_current_user()
+    options = sorted([_ops_slug(k) for k in campaigns.keys() if str(k).strip()])
+    if not options:
+        st.info("No campaigns exist yet. Create/approve a campaign first, or use the Super Admin sandbox for testing.")
+        st.session_state.setdefault("ops_selected_campaign_id", "super-admin-sandbox")
+        return st.session_state.get("ops_selected_campaign_id")
+    current = st.session_state.get("ops_selected_campaign_id")
+    if current not in options:
+        current = options[0]
+        st.session_state["ops_selected_campaign_id"] = current
+    selected = st.selectbox("Campaign", options, index=options.index(current), key=f"{prefix}_campaign_select")
+    st.session_state["ops_selected_campaign_id"] = selected
+    return selected
+
+
+def render_campaign_organization_workspace():
+    st.markdown("## Campaign Organization")
+    st.caption("Manage the people who help the campaign: candidates, staff, volunteers, canvassers, phone bankers, drivers, poll workers, and Election Day helpers.")
+    campaign_id = _select_ops_campaign_control("campaign_org")
+    tab_team, tab_roles, tab_assign = st.tabs(["Team / Volunteers", "Roles", "Assignment Readiness"])
+    with tab_team:
+        render_team_volunteers_workspace(campaign_id)
+    with tab_roles:
+        st.markdown("### Roles")
+        st.info("First pass: roles are saved on each team member. Later this becomes role-based permissions, training status, and Election Day jobs.")
+        st.markdown("Common roles: Candidate, Campaign Manager, Volunteer, Canvasser, Phone Banker, Driver, Poll Worker, Observer, Data Entry, Election Day Captain.")
+    with tab_assign:
+        st.markdown("### Assignment Readiness")
+        store = load_team_people_store(campaign_id)
+        people = store.get("people") or []
+        active_people = [p for p in people if str(p.get("status", "")).lower() == "active"]
+        st.metric("Active team members", len(active_people))
+        st.caption("Voter Outreach will assign door/phone/postcard lists to these team members, not directly to the voter database.")
+
+
+def render_team_volunteers_workspace(campaign_id: str | None = None):
+    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
+    store = load_team_people_store(campaign_id)
+    people = store.get("people") or []
+    st.markdown("### Team / Volunteers")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Total people", len(people))
+    with c2:
+        st.metric("Active", sum(1 for p in people if str(p.get("status", "")).lower() == "active"))
+    with c3:
+        st.metric("Canvassers", sum(1 for p in people if "canvass" in str(p.get("role", "")).lower()))
+
+    tab_add, tab_upload, tab_roster = st.tabs(["Add Person", "Upload List", "Roster"])
+    with tab_add:
+        with st.form(f"team_add_form_{campaign_id}"):
+            a, b = st.columns(2)
+            with a:
+                name = st.text_input("Name")
+                role = st.selectbox("Role", ["Volunteer", "Canvasser", "Phone Banker", "Campaign Manager", "Candidate", "Driver", "Poll Worker", "Observer", "Data Entry", "Election Day Captain", "Other"])
+                status = st.selectbox("Status", ["Active", "Prospect", "Inactive", "Do Not Contact"])
+                mobile = st.text_input("Mobile")
+                landline = st.text_input("Landline")
+                email = st.text_input("Email")
+            with b:
+                address = st.text_input("Address")
+                city = st.text_input("City")
+                state_val = st.text_input("State", value="PA")
+                zip_code = st.text_input("Zip")
+                skills = st.text_input("Skills / interests")
+                notes = st.text_area("Notes", height=90)
+            submitted = st.form_submit_button("Add Team Member", type="primary")
+        if submitted:
+            if not str(name or "").strip():
+                st.error("Name is required.")
+            else:
+                person = _normalize_team_person({"name": name, "role": role, "status": status, "mobile": mobile, "landline": landline, "email": email, "address": address, "city": city, "state": state_val, "zip": zip_code, "skills": skills, "notes": notes}, campaign_id, "manual")
+                merged, added, updated = _merge_team_people(people, [person])
+                store["people"] = merged
+                ok, msg = save_team_people_store(campaign_id, store)
+                if ok:
+                    st.success(f"Saved team member. Added {added}, updated {updated}.")
+                    st.rerun()
+                else:
+                    st.error(f"Could not save team member: {msg}")
+
+    with tab_upload:
+        st.caption("Upload an existing volunteer/worker list. Supported columns include Name, Email, Mobile/Cell/Phone, Landline/Home Phone, Address, City, State, Zip, Role, Status, Skills, Notes.")
+        sample = pd.DataFrame([{"Name": "Jane Volunteer", "Email": "jane@example.com", "Mobile": "717-555-0100", "Landline": "", "Address": "123 Main St", "City": "York", "State": "PA", "Zip": "17401", "Role": "Canvasser", "Status": "Active", "Skills": "Doors, phones", "Notes": "Prefers weekends"}])
+        st.download_button("Download volunteer upload template", sample.to_csv(index=False).encode("utf-8"), "candidate_connect_team_upload_template.csv", "text/csv")
+        uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"], key=f"team_upload_{campaign_id}")
+        if uploaded is not None:
+            try:
+                if uploaded.name.lower().endswith(".csv"):
+                    df = pd.read_csv(uploaded, dtype=str).fillna("")
+                else:
+                    df = pd.read_excel(uploaded, dtype=str).fillna("")
+                st.write("Preview")
+                st.dataframe(df.head(25), use_container_width=True, hide_index=True)
+                if st.button("Import Team List", key=f"team_import_btn_{campaign_id}", type="primary"):
+                    incoming = [_normalize_team_person(row.to_dict(), campaign_id, "upload") for _, row in df.iterrows()]
+                    incoming = [p for p in incoming if str(p.get("name", "")).strip()]
+                    merged, added, updated = _merge_team_people(people, incoming)
+                    store["people"] = merged
+                    ok, msg = save_team_people_store(campaign_id, store)
+                    if ok:
+                        st.success(f"Imported team list. Added {added}, updated {updated}.")
+                        st.rerun()
+                    else:
+                        st.error(f"Could not save import: {msg}")
+            except Exception as exc:
+                st.error("Could not read that upload.")
+                st.exception(exc)
+
+    with tab_roster:
+        df = _team_people_dataframe(people)
+        if df.empty:
+            st.info("No team members saved yet.")
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button("Download roster CSV", df.to_csv(index=False).encode("utf-8"), f"team_roster_{campaign_id}.csv", "text/csv")
+            st.markdown("#### Update / Delete")
+            options = [f"{r.get('name','')} — {r.get('role','')} — {r.get('person_id','')}" for r in people]
+            choice = st.selectbox("Select team member", [""] + options, key=f"team_edit_choice_{campaign_id}")
+            if choice:
+                pid = choice.rsplit(" — ", 1)[-1]
+                rec = next((p for p in people if p.get("person_id") == pid), {})
+                e1, e2 = st.columns(2)
+                with e1:
+                    new_status = st.selectbox("Status", ["Active", "Prospect", "Inactive", "Do Not Contact"], index=["Active", "Prospect", "Inactive", "Do Not Contact"].index(rec.get("status", "Active") if rec.get("status", "Active") in ["Active", "Prospect", "Inactive", "Do Not Contact"] else "Active"), key=f"team_status_{pid}")
+                    if st.button("Update Status", key=f"team_update_{pid}"):
+                        for p in people:
+                            if p.get("person_id") == pid:
+                                p["status"] = new_status
+                                p["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                        store["people"] = people
+                        ok, msg = save_team_people_store(campaign_id, store)
+                        st.success("Updated.") if ok else st.error(msg)
+                        st.rerun()
+                with e2:
+                    confirm = st.checkbox("Confirm delete", key=f"team_del_confirm_{pid}")
+                    if st.button("Delete Team Member", key=f"team_delete_{pid}", disabled=not confirm):
+                        store["people"] = [p for p in people if p.get("person_id") != pid]
+                        ok, msg = save_team_people_store(campaign_id, store)
+                        st.success("Deleted.") if ok else st.error(msg)
+                        st.rerun()
+
+
+def render_voter_outreach_workspace():
+    st.markdown("## Voter Outreach")
+    st.caption("Plan direct voter contact in Candidate Connect and execute it later from the offline mobile utility.")
+    tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
+    with tab_door:
+        st.markdown("### Door-to-Door")
+        st.info("Next build: create a walk/contact list from a saved universe and assign it to a team member for offline mobile download.")
+        st.markdown("Workflow: Saved Universe → Contact List → Assignment → Mobile Download → Offline Contacts → Sync Back.")
+    with tab_phone:
+        st.markdown("### Phone Bank")
+        st.caption("Uses the same Contact Program / Assignment / Contact Result architecture as door-to-door.")
+    with tab_mail:
+        st.markdown("### Postcards / Mail")
+        st.caption("Future voter-to-voter postcards, email, text, and mail-ballot chase can reuse the same contact-history structure.")
+    with tab_results:
+        st.markdown("### Contact Results")
+        st.caption("Future dashboard for contact attempts, support IDs, follow-up needs, and volunteer productivity.")
+
+
+def render_election_day_workspace():
+    st.markdown("## Election Day Operations")
+    st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
+
 # Full-width branded header fixed across both the sidebar and main workspace.
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
 _tss_logo_uri = img_data_uri(LOGO_TPTC)
@@ -8608,11 +8943,12 @@ with st.sidebar:
     elif is_super_admin():
         st.caption("Dataset: Statewide")
 
-    if st.button("🏠 Home", width="stretch"):
+    if st.button("🏠 Dashboard", width="stretch"):
         st.session_state["left_section"] = None
         st.session_state["view"] = "dashboard"
         st.rerun()
 
+    st.markdown("### 🧠 Voter Intelligence")
     if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
         st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
     if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
@@ -8621,6 +8957,20 @@ with st.sidebar:
         st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
     if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
         st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+
+    st.markdown("### 👥 Campaign Organization")
+    if st.button("👥 Team / Volunteers", width="stretch"):
+        st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
+
+    st.markdown("### 📣 Voter Outreach")
+    if st.button("🚪 Door-to-Door / Contact Programs", width="stretch"):
+        st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
+
+    st.markdown("### 🗳️ Election Day")
+    if st.button("🗳️ Election Day Operations", width="stretch"):
+        st.session_state["left_section"]="election_day"; st.session_state["view"]="election_day"; st.rerun()
+
+    st.markdown("### ⚙️ Administration")
     if st.button("👤 My Account", width="stretch"):
         st.session_state["left_section"]="my_account"; st.session_state["view"]="account"; st.rerun()
     if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
@@ -8708,6 +9058,15 @@ with st.sidebar:
     elif st.session_state.get("left_section") == "my_account":
         st.markdown("### My Account")
         st.caption("Change your password.")
+    elif st.session_state.get("left_section") == "campaign_organization":
+        st.markdown("### Campaign Organization")
+        st.caption("Manage team members, volunteers, roles, and assignment readiness.")
+    elif st.session_state.get("left_section") == "voter_outreach":
+        st.markdown("### Voter Outreach")
+        st.caption("Plan door-to-door, phone, postcard, text, email, and mail-ballot chase programs.")
+    elif st.session_state.get("left_section") == "election_day":
+        st.markdown("### Election Day")
+        st.caption("Poll coverage, worker scheduling, turnout tracking, and incident reporting will live here.")
     elif st.session_state.get("left_section") == "account_admin":
         st.markdown("### Account Admin")
         st.caption("Manage Candidate Connect accounts and campaign scopes.")
@@ -8723,6 +9082,9 @@ def render_enhanced_home():
 if section == "voter_lookup" and user_can("voter_lookup"): render_voter_lookup_workspace(); st.stop()
 if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_mail_ballot_workspace(); st.stop()
 if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
+if section == "campaign_organization": render_campaign_organization_workspace(); st.stop()
+if section == "voter_outreach": render_voter_outreach_workspace(); st.stop()
+if section == "election_day": render_election_day_workspace(); st.stop()
 if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
 if section == "my_account": render_my_account_workspace(); st.stop()
 if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
