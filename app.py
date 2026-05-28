@@ -10797,3 +10797,122 @@ div[role="tooltip"] *,
 """, unsafe_allow_html=True)
 
 
+
+
+# v36 DEV-only: final dataframe toolbar/menu polish.
+# This is intentionally loaded last so it wins over Streamlit's generated dataframe toolbar styles.
+# It does not change app logic, auth, filters, shards, or right-pane action buttons.
+st.markdown("""
+<style>
+/* Streamlit dataframe floating toolbar: make icons readable instead of black/navy blocks */
+div[data-testid="stElementToolbar"],
+div[data-testid="stElementToolbar"] > div,
+div[data-testid="stElementToolbar"] [role="toolbar"] {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    border: 1px solid #cdbdaa !important;
+    border-radius: 9px !important;
+    box-shadow: 0 4px 12px rgba(7,29,58,.14) !important;
+    opacity: 1 !important;
+}
+
+div[data-testid="stElementToolbar"] button,
+div[data-testid="stElementToolbar"] [role="button"] {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    min-height: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    width: 24px !important;
+    padding: 2px !important;
+    margin: 1px !important;
+}
+
+div[data-testid="stElementToolbar"] button:hover,
+div[data-testid="stElementToolbar"] [role="button"]:hover {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+}
+
+/* Icons inside dataframe/element toolbar */
+div[data-testid="stElementToolbar"] svg,
+div[data-testid="stElementToolbar"] svg *,
+div[data-testid="stElementToolbar"] path,
+div[data-testid="stElementToolbar"] rect,
+div[data-testid="stElementToolbar"] circle,
+div[data-testid="stElementToolbar"] line,
+div[data-testid="stElementToolbar"] polyline,
+div[data-testid="stElementToolbar"] polygon {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    opacity: 1 !important;
+}
+
+/* Some toolbar icons render as small divs/spans instead of pure SVG */
+div[data-testid="stElementToolbar"] span,
+div[data-testid="stElementToolbar"] span *,
+div[data-testid="stElementToolbar"] button div,
+div[data-testid="stElementToolbar"] button div * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Dataframe toolbar/menu popovers */
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] ul,
+div[data-baseweb="popover"] li,
+div[data-baseweb="popover"] [role="menu"],
+div[data-baseweb="popover"] [role="menuitem"],
+div[role="tooltip"],
+div[data-testid="stTooltipContent"] {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border-color: #cdbdaa !important;
+    opacity: 1 !important;
+}
+
+div[data-baseweb="popover"] *,
+div[role="tooltip"] *,
+div[data-testid="stTooltipContent"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Keep dataframes readable but avoid turning toolbar buttons into dark table headers */
+div[data-testid="stDataFrame"] {
+    background: #ffffff !important;
+    border: 1px solid #caa89d !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+div[data-testid="stDataFrame"] [role="columnheader"] {
+    background: #2d3340 !important;
+    background-color: #2d3340 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 850 !important;
+}
+div[data-testid="stDataFrame"] [role="gridcell"] {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+</style>
+""", unsafe_allow_html=True)
