@@ -1,7 +1,7 @@
 # Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v43B DEV: Smart Turf Generation fixes R2 turf paths, packet balancing, saved-universe fallback warnings, and adds Turf Review Map.
+# v43C DEV: Smart Turf fixes county+street centroid/neighbor matching, hard packet rebalancing fallback, and suppresses stale saved-universe warnings.
 
 import io
 import json
@@ -9819,17 +9819,37 @@ def _street_sort_key(street: str):
     return (s == "", s)
 
 
+def _normalize_turf_street_name(street: str) -> str:
+    """Normalize voter street labels to the Step 10/11 street_norm convention."""
+    s = clean_value(street).upper()
+    s = s.replace(".", " ").replace(",", " ").replace("#", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    # Keep abbreviations because Step 10 street_norm is abbreviation-based: ST, DR, RD, AVE, LN, CIR, etc.
+    replacements = {
+        " STREET": " ST", " DRIVE": " DR", " ROAD": " RD", " AVENUE": " AVE",
+        " LANE": " LN", " CIRCLE": " CIR", " COURT": " CT", " PLACE": " PL",
+        " BOULEVARD": " BLVD", " HIGHWAY": " HWY", " PARKWAY": " PKWY",
+        " TERRACE": " TER", " TRAIL": " TRL", " WAY": " WAY",
+    }
+    for long, short in replacements.items():
+        if s.endswith(long):
+            s = s[: -len(long)] + short
+            break
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _smart_street_key_parts(row) -> tuple[str, str, str, str]:
-    county = clean_value(row.get("County", "")).upper()
-    muni = clean_value(row.get("Municipality", "")).upper()
-    precinct = clean_value(row.get("Precinct", "")).upper()
-    street = clean_value(row.get("Street Name", "")).upper()
-    street = re.sub(r"\s+", " ", street)
+    county = clean_value(row.get("County", row.get("county", ""))).upper()
+    muni = clean_value(row.get("Municipality", row.get("municipality", ""))).upper()
+    precinct = clean_value(row.get("Precinct", row.get("precinct", ""))).upper()
+    street = _normalize_turf_street_name(row.get("Street Name", row.get("street_norm", row.get("street", ""))))
     return county, muni, precinct, street
 
 
 def _smart_street_key_from_parts(county: str, muni: str, precinct: str, street: str) -> str:
-    return "|".join([clean_value(county).upper(), clean_value(muni).upper(), clean_value(precinct).upper(), clean_value(street).upper()])
+    # Step 10/11 turf support files are keyed by county + street_norm only.
+    # Municipality/precinct remain on packets, but cannot be used for centroid/neighbor joins.
+    return "|".join([clean_value(county).upper(), _normalize_turf_street_name(street)])
 
 
 def _add_smart_street_key(df: pd.DataFrame) -> pd.DataFrame:
@@ -9940,18 +9960,17 @@ def _normalize_centroids_table(centroids: pd.DataFrame) -> pd.DataFrame:
     df = centroids.copy()
     key_col = _pick_col(df, ["street_key", "StreetKey", "_smart_street_key", "segment_key"])
     county_col = _pick_col(df, ["County", "county"])
-    muni_col = _pick_col(df, ["Municipality", "municipality", "muni"])
-    precinct_col = _pick_col(df, ["Precinct", "precinct"])
-    street_col = _pick_col(df, ["Street Name", "street_name", "street", "StreetName"])
+    street_col = _pick_col(df, ["street_norm", "Street Name", "street_name", "street", "StreetName"])
     lat_col = _pick_col(df, ["lat", "latitude", "centroid_lat", "y"])
     lon_col = _pick_col(df, ["lon", "lng", "longitude", "centroid_lon", "x"])
     if key_col:
         df["_smart_street_key"] = df[key_col].astype(str).str.upper().str.strip()
     else:
-        for c in [county_col, muni_col, precinct_col, street_col]:
-            if not c:
-                df[c or "__missing"] = ""
-        df["_smart_street_key"] = df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), r.get(muni_col, ""), r.get(precinct_col, ""), r.get(street_col, "")), axis=1)
+        if not county_col:
+            df["__county"] = ""; county_col = "__county"
+        if not street_col:
+            df["__street"] = ""; street_col = "__street"
+        df["_smart_street_key"] = df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), "", "", r.get(street_col, "")), axis=1)
     df["_lat"] = pd.to_numeric(df[lat_col], errors="coerce") if lat_col else pd.NA
     df["_lon"] = pd.to_numeric(df[lon_col], errors="coerce") if lon_col else pd.NA
     df["_street_label"] = df[street_col].astype(str) if street_col else ""
@@ -9962,12 +9981,18 @@ def _normalize_neighbors_table(neighbors: pd.DataFrame) -> pd.DataFrame:
     if neighbors is None or neighbors.empty:
         return pd.DataFrame(columns=["a", "b", "distance"])
     df = neighbors.copy()
-    a = _pick_col(df, ["street_key", "source_key", "from_key", "a", "street_key_a"])
-    b = _pick_col(df, ["neighbor_key", "target_key", "to_key", "b", "street_key_b"])
-    d = _pick_col(df, ["distance", "distance_m", "meters", "dist", "rank"])
+    county_col = _pick_col(df, ["County", "county"])
+    a = _pick_col(df, ["street_key", "source_key", "from_key", "a", "street_key_a", "street_norm"])
+    b = _pick_col(df, ["neighbor_key", "target_key", "to_key", "b", "street_key_b", "neighbor_street_norm"])
+    d = _pick_col(df, ["distance_miles", "distance", "distance_m", "meters", "dist", "rank", "neighbor_rank"])
     if not (a and b):
         return pd.DataFrame(columns=["a", "b", "distance"])
-    out = pd.DataFrame({"a": df[a].astype(str).str.upper().str.strip(), "b": df[b].astype(str).str.upper().str.strip()})
+    if not county_col:
+        df["__county"] = ""; county_col = "__county"
+    out = pd.DataFrame({
+        "a": df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), "", "", r.get(a, "")), axis=1),
+        "b": df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), "", "", r.get(b, "")), axis=1),
+    })
     out["distance"] = pd.to_numeric(df[d], errors="coerce") if d else 999999
     out = out[(out["a"] != "") & (out["b"] != "") & (out["a"] != out["b"])]
     return out.drop_duplicates(["a", "b"])
@@ -10202,6 +10227,86 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
     meta["smart_turf_method"] = ", ".join(sorted(set(smart_methods_seen))) if smart_methods_seen else "none"
     return packets, meta
 
+
+def build_walk_packets_from_existing_packets(campaign_id: str, assignment: dict, existing_packets: list[dict], max_packet_size: int = 400, use_smart_turf: bool = True) -> tuple[list[dict], dict]:
+    """Rebuild/rebalance packets from already-saved packet voters when saved-universe lookup is stale.
+
+    This prevents an old saved-universe label from blocking packet balancing after packets
+    already exist for the assignment.
+    """
+    rows = []
+    for p in existing_packets or []:
+        for v in p.get("voters") or []:
+            if isinstance(v, dict):
+                rows.append(v.copy())
+    meta = {
+        "assignment_id": clean_value((assignment or {}).get("assignment_id", "")),
+        "packet_rule": "Smart Turf v43C: rebuilt from existing assignment packet voters because the saved universe lookup was unavailable/stale.",
+        "max_packet_size_target": int(max_packet_size or 400),
+        "packet_count": 0,
+        "smart_turf_enabled": bool(use_smart_turf),
+        "smart_turf_method": "existing_packet_rebalance",
+        "error": "",
+    }
+    if not rows:
+        meta["error"] = "No existing packet voters were available to rebalance."
+        return [], meta
+    df = pd.DataFrame(rows)
+    rename_map = {"county": "County", "municipality": "Municipality", "precinct": "Precinct", "street_name": "Street Name"}
+    for a, b in rename_map.items():
+        if a in df.columns and b not in df.columns:
+            df[b] = df[a]
+    for c in ["County", "Municipality", "Precinct", "Street Name"]:
+        if c not in df.columns:
+            df[c] = ""
+    if "Street Name" not in df.columns or df["Street Name"].fillna("").astype(str).str.strip().eq("").all():
+        df["Street Name"] = df.get("street", "")
+
+    packets = []
+    smart_methods_seen = []
+    precinct_groups = []
+    for precinct, g in df.groupby(df["Precinct"].fillna("").astype(str), dropna=False):
+        precinct_groups.append((clean_value(precinct) or "Unassigned Precinct", g.copy()))
+    precinct_groups.sort(key=lambda x: (-len(x[1]), clean_value(x[0]).upper()))
+    for precinct_index, (precinct, g) in enumerate(precinct_groups, start=1):
+        if use_smart_turf:
+            splits, split_meta = _smart_split_precinct(g, max_packet_size)
+            if not splits:
+                splits = _split_precinct_by_street(g, max_packet_size)
+                split_meta = {"method": "street_name_fallback"}
+        else:
+            splits = _split_precinct_by_street(g, max_packet_size)
+            split_meta = {"method": "street_name_fallback"}
+        splits = _rebalance_packet_splits(splits, max_packet_size)
+        smart_methods_seen.append(split_meta.get("method", "unknown"))
+        for split_index, (street_label, part_df) in enumerate(splits, start=1):
+            county = clean_value(part_df["County"].dropna().astype(str).iloc[0]) if "County" in part_df.columns and not part_df.empty else ""
+            muni = clean_value(part_df["Municipality"].dropna().astype(str).iloc[0]) if "Municipality" in part_df.columns and not part_df.empty else ""
+            packet_name = precinct if len(splits) == 1 else f"{precinct} — {street_label}"
+            packet_id = "wp-" + hashlib.md5(f"v43c|{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{street_label}|{split_index}".encode("utf-8")).hexdigest()[:12]
+            voter_rows = _mobile_rows_from_dataframe(part_df)
+            packets.append({
+                "packet_id": packet_id,
+                "assignment_id": clean_value((assignment or {}).get("assignment_id", "")),
+                "contact_list_id": clean_value((assignment or {}).get("list_id", "")),
+                "program_id": clean_value((assignment or {}).get("program_id", "")),
+                "packet_name": packet_name,
+                "group_type": "Precinct" if len(splits) == 1 else "Smart Street Turf",
+                "precinct": precinct,
+                "street_group": "" if len(splits) == 1 else street_label,
+                "county": county,
+                "municipality": muni,
+                "voter_count": len(voter_rows),
+                "status": "Ready",
+                "priority_rank": precinct_index,
+                "smart_turf_method": split_meta.get("method", "unknown") + "+existing_rebalance",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "voters": voter_rows,
+            })
+    meta["packet_count"] = len(packets)
+    meta["smart_turf_method"] = ", ".join(sorted(set(smart_methods_seen))) + "+existing_rebalance" if smart_methods_seen else "existing_packet_rebalance"
+    return packets, meta
+
 def _assignment_packets(campaign_id: str, assignment_id: str) -> list[dict]:
     try:
         store = load_walk_packets_store(campaign_id)
@@ -10434,10 +10539,14 @@ def render_assignments_workspace(campaign_id: str | None = None):
             use_smart_turf = st.checkbox("Use Smart Turf v43", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
         if st.button("Generate / Refresh Smart Turf", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
             packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
+            # If the saved universe label is stale/missing but this assignment already has packet voters,
+            # rebalance from those existing voters instead of blocking the user with a false error.
+            if packet_meta.get("error") and wp_existing:
+                packets, packet_meta = build_walk_packets_from_existing_packets(campaign_id, current, wp_existing, int(max_packet_size), bool(use_smart_turf))
             if packet_meta.get("error"):
                 st.error(packet_meta.get("error"))
             elif not packets:
-                st.warning("No voters were found for this saved universe.")
+                st.warning("No voters were found for this saved universe or existing assignment packets.")
             else:
                 wp_store = load_walk_packets_store(campaign_id)
                 other_packets = [p for p in (wp_store.get("packets") or []) if clean_value(p.get("assignment_id")) != clean_value(assignment_id)]
