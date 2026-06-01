@@ -1,7 +1,7 @@
-# Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION
+# Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v43 DEV: Smart Turf Generation uses street_neighbors.parquet and street_centroids.parquet for contiguous walk packets.
+# v43B DEV: Smart Turf Generation fixes R2 turf paths, packet balancing, saved-universe fallback warnings, and adds Turf Review Map.
 
 import io
 import json
@@ -20,6 +20,10 @@ import pandas as pd
 import duckdb
 import requests
 import streamlit as st
+try:
+    import pydeck as pdk
+except Exception:
+    pdk = None
 try:
     import streamlit.components.v1 as components  # fallback only for older Streamlit builds
 except Exception:
@@ -9465,20 +9469,52 @@ def _mobile_voter_value(row, *cols) -> str:
 
 
 def _mobile_saved_universe_payload(source_universe: str) -> tuple[dict, dict]:
-    """Return saved universe filters/special for a contact list source name."""
-    saved = load_persistent_saved_universes() if "load_persistent_saved_universes" in globals() else {}
-    if not isinstance(saved, dict):
-        return {}, {}
-    source_universe = clean_value(source_universe)
-    data = saved.get(source_universe) or {}
-    if not data:
-        # Case-insensitive fallback for renamed/typed universe labels.
-        for k, v in saved.items():
-            if clean_value(k).lower() == source_universe.lower():
-                data = v or {}
-                break
-    return (data.get("filters") or {}, data.get("special") or {}) if isinstance(data, dict) else ({}, {})
+    """Return saved universe filters/special for a contact list source name.
 
+    v43B note: older contact lists can outlive a user's current saved-universe
+    section. This resolver now checks the active section first, then every saved
+    universe section in app_state, then a case-insensitive/trimmed fallback.
+    """
+    source_universe = clean_value(source_universe)
+    if not source_universe:
+        return {}, {}
+
+    def _extract(data):
+        return (data.get("filters") or {}, data.get("special") or {}) if isinstance(data, dict) else ({}, {})
+
+    candidate_stores = []
+    try:
+        saved = load_persistent_saved_universes()
+        if isinstance(saved, dict):
+            candidate_stores.append(saved)
+    except Exception:
+        pass
+    try:
+        state = _load_state() or {}
+        if isinstance(state, dict):
+            for key, val in state.items():
+                if str(key).startswith("saved_universes") and isinstance(val, dict):
+                    candidate_stores.append(val)
+    except Exception:
+        pass
+
+    seen_ids = set()
+    for saved in candidate_stores:
+        if id(saved) in seen_ids or not isinstance(saved, dict):
+            continue
+        seen_ids.add(id(saved))
+        data = saved.get(source_universe) or {}
+        filters, special = _extract(data)
+        if filters or special:
+            return filters, special
+        src_norm = re.sub(r"\s+", " ", source_universe).strip().lower()
+        for k, v in saved.items():
+            key_norm = re.sub(r"\s+", " ", clean_value(k)).strip().lower()
+            if key_norm == src_norm:
+                filters, special = _extract(v or {})
+                if filters or special:
+                    return filters, special
+    return {}, {}
 
 def _mobile_voters_from_saved_universe(source_universe: str, max_rows: int = 2500) -> tuple[list[dict], dict]:
     """Build compact offline voter rows from a saved universe.
@@ -9814,11 +9850,29 @@ def _manifest_speed_key(stem: str, default_key: str) -> str:
         return default_key
 
 
+def _smart_turf_urls(stem: str) -> list[str]:
+    """Candidate R2 URLs for turf support files.
+
+    Pipeline Manager v43 uploads Step 10/11 files under turf/. Older experiments
+    looked under speed/. Try manifest first, then turf/, then speed/ for safety.
+    """
+    keys = []
+    try:
+        keys.append(_manifest_speed_key(stem, f"turf/{stem}.parquet"))
+    except Exception:
+        pass
+    keys.extend([f"turf/{stem}.parquet", f"speed/{stem}.parquet"])
+    out, seen = [], set()
+    for key in keys:
+        key = clean_value(key)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(r2_url(key))
+    return out
+
+
 def _smart_turf_url(stem: str) -> str:
-    # Step 11 is expected to upload these under speed/. The manifest lookup keeps this compatible
-    # if the pipeline later stores a different key.
-    key = _manifest_speed_key(stem, f"speed/{stem}.parquet")
-    return r2_url(key)
+    return _smart_turf_urls(stem)[0]
 
 
 def _duckdb_read_remote_parquet(url: str, limit: int | None = None) -> pd.DataFrame:
@@ -9842,22 +9896,31 @@ def _duckdb_read_remote_parquet(url: str, limit: int | None = None) -> pd.DataFr
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _smart_turf_support_tables() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Load street centroids/neighbors from Step 11. Fails soft so turf can fall back."""
-    meta = {"centroids_loaded": False, "neighbors_loaded": False, "error": ""}
+    """Load street centroids/neighbors from Step 10/11. Fails soft so turf can fall back."""
+    meta = {"centroids_loaded": False, "neighbors_loaded": False, "centroids_url": "", "neighbors_url": "", "error": ""}
+    errors = []
     centroids = pd.DataFrame()
     neighbors = pd.DataFrame()
-    try:
-        centroids = _duckdb_read_remote_parquet(_smart_turf_url("street_centroids"))
-        meta["centroids_loaded"] = not centroids.empty
-    except Exception as exc:
-        meta["error"] = clean_value(exc)
-    try:
-        neighbors = _duckdb_read_remote_parquet(_smart_turf_url("street_neighbors"))
-        meta["neighbors_loaded"] = not neighbors.empty
-    except Exception as exc:
-        meta["error"] = (meta.get("error") + " | " if meta.get("error") else "") + clean_value(exc)
+    for url in _smart_turf_urls("street_centroids"):
+        try:
+            centroids = _duckdb_read_remote_parquet(url)
+            if centroids is not None and not centroids.empty:
+                meta["centroids_loaded"] = True
+                meta["centroids_url"] = url
+                break
+        except Exception as exc:
+            errors.append(f"centroids {url}: {clean_value(exc)}")
+    for url in _smart_turf_urls("street_neighbors"):
+        try:
+            neighbors = _duckdb_read_remote_parquet(url)
+            if neighbors is not None and not neighbors.empty:
+                meta["neighbors_loaded"] = True
+                meta["neighbors_url"] = url
+                break
+        except Exception as exc:
+            errors.append(f"neighbors {url}: {clean_value(exc)}")
+    meta["error"] = " | ".join(errors[-3:])
     return centroids, neighbors, meta
-
 
 def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
     if df is None or df.empty:
@@ -9988,6 +10051,46 @@ def _smart_split_precinct(packet_df: pd.DataFrame, max_packet_size: int) -> tupl
     return chunks, meta
 
 
+def _rebalance_packet_splits(splits: list[tuple[str, pd.DataFrame]], max_packet_size: int) -> list[tuple[str, pd.DataFrame]]:
+    """Hard-enforce max packet size after smart grouping.
+
+    Smart grouping chooses geographically sensible street clusters first. This
+    pass preserves that order but breaks oversized clusters into smaller packets
+    so the target max voters/packet is respected.
+    """
+    max_packet_size = max(50, int(max_packet_size or 400))
+    out = []
+    for label, part in splits or []:
+        if part is None or part.empty:
+            continue
+        if len(part) <= max_packet_size:
+            out.append((label, part))
+            continue
+        # Split by street first inside an oversized smart cluster.
+        if "Street Name" in part.columns:
+            street_groups = [(clean_value(st) or "Unknown Street", g.copy()) for st, g in part.groupby(part["Street Name"].fillna("").astype(str), dropna=False)]
+            street_groups.sort(key=lambda x: _street_sort_key(x[0]))
+            frames, labels, count = [], [], 0
+            for street, g in street_groups:
+                if len(g) > max_packet_size:
+                    if frames:
+                        out.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+                        frames, labels, count = [], [], 0
+                    for start in range(0, len(g), max_packet_size):
+                        out.append((f"{street} #{(start // max_packet_size) + 1}", g.iloc[start:start + max_packet_size].copy()))
+                    continue
+                if frames and count + len(g) > max_packet_size:
+                    out.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+                    frames, labels, count = [], [], 0
+                frames.append(g); labels.append(street); count += len(g)
+            if frames:
+                out.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+        else:
+            for start in range(0, len(part), max_packet_size):
+                out.append((f"{label} #{(start // max_packet_size) + 1}", part.iloc[start:start + max_packet_size].copy()))
+    return out
+
+
 def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> list[tuple[str, pd.DataFrame]]:
     """Legacy fallback splitter retained for safety."""
     if packet_df is None or packet_df.empty:
@@ -10069,6 +10172,7 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
         else:
             splits = _split_precinct_by_street(g, max_packet_size)
             split_meta = {"method": "street_name_fallback"}
+        splits = _rebalance_packet_splits(splits, max_packet_size)
         smart_methods_seen.append(split_meta.get("method", "unknown"))
         for split_index, (street_label, part_df) in enumerate(splits, start=1):
             county = clean_value(part_df["County"].dropna().astype(str).iloc[0]) if "County" in part_df.columns and not part_df.empty else ""
@@ -10113,6 +10217,115 @@ def _walk_packets_df(packets: list[dict]) -> pd.DataFrame:
         if c not in df.columns:
             df[c] = ""
     return df[cols].sort_values(["priority_rank", "packet_name"], ascending=[True, True])
+
+
+def _packet_color(packet_id: str) -> list[int]:
+    digest = hashlib.md5(clean_value(packet_id).encode("utf-8")).hexdigest()
+    return [80 + int(digest[0:2], 16) % 150, 80 + int(digest[2:4], 16) % 150, 80 + int(digest[4:6], 16) % 150, 190]
+
+
+def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
+    """Build street-centroid points for generated walk packets."""
+    meta = {"point_count": 0, "missing_centroids": 0, "error": ""}
+    if not packets:
+        return pd.DataFrame(), meta
+    try:
+        centroids, _neighbors, support_meta = _smart_turf_support_tables()
+        c = _normalize_centroids_table(centroids)
+        if c.empty:
+            meta["error"] = support_meta.get("error") or "street_centroids.parquet was not loaded."
+            return pd.DataFrame(), meta
+        c = c.dropna(subset=["_lat", "_lon"]).copy()
+        centroid_lookup = c.set_index("_smart_street_key")[["_lat", "_lon"]].to_dict("index")
+        rows = []
+        missing = 0
+        for p in packets:
+            packet_id = clean_value(p.get("packet_id"))
+            packet_name = clean_value(p.get("packet_name"))
+            color = _packet_color(packet_id or packet_name)
+            street_counts = {}
+            for v in p.get("voters") or []:
+                key = _smart_street_key_from_parts(v.get("County", p.get("county", "")), v.get("Municipality", p.get("municipality", "")), v.get("Precinct", p.get("precinct", "")), v.get("Street Name", ""))
+                if not key.strip("|"):
+                    continue
+                street_counts[key] = street_counts.get(key, 0) + 1
+            for key, count in street_counts.items():
+                loc = centroid_lookup.get(key)
+                if not loc:
+                    missing += 1
+                    continue
+                street = key.split("|")[-1].title()
+                rows.append({
+                    "packet_id": packet_id,
+                    "packet_name": packet_name,
+                    "street": street,
+                    "voters": int(count),
+                    "lat": float(loc["_lat"]),
+                    "lon": float(loc["_lon"]),
+                    "radius": max(40, min(240, 25 + int(count) * 4)),
+                    "color": color,
+                    "label": f"{street}: {int(count)}",
+                })
+        out = pd.DataFrame(rows)
+        meta["point_count"] = int(len(out))
+        meta["missing_centroids"] = int(missing)
+        return out, meta
+    except Exception as exc:
+        meta["error"] = clean_value(exc)
+        return pd.DataFrame(), meta
+
+
+def render_turf_review_map(packets: list[dict], campaign_id: str, assignment_id: str):
+    st.markdown("#### Turf Review Map")
+    st.caption("Street centroid map for reviewing whether generated packets stay geographically compact. This is a review map, not a turn-by-turn walking route yet.")
+    if pdk is None:
+        st.warning("Map library is not available in this deployment. The packets still generated correctly, but the review map cannot render.")
+        return
+    if not packets:
+        st.info("Generate Smart Turf first, then the review map will appear here.")
+        return
+    packet_options = ["All packets"] + [f"{p.get('packet_name','Packet')} ({int(p.get('voter_count') or 0):,})" for p in packets]
+    choice = st.selectbox("Map packet", packet_options, key=f"turf_map_packet_{campaign_id}_{assignment_id}")
+    selected = packets if choice == "All packets" else [packets[packet_options.index(choice) - 1]]
+    points, meta = _packet_map_points(selected)
+    if points.empty:
+        st.warning(meta.get("error") or "No street centroids matched these packets yet.")
+        if meta.get("missing_centroids"):
+            st.caption(f"Missing centroid matches: {meta.get('missing_centroids'):,}")
+        return
+    st.caption(f"Mapped {len(points):,} street centroid(s). Missing centroid matches: {int(meta.get('missing_centroids') or 0):,}.")
+    center_lat = float(points["lat"].mean())
+    center_lon = float(points["lon"].mean())
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=points,
+        get_position="[lon, lat]",
+        get_fill_color="color",
+        get_radius="radius",
+        pickable=True,
+        auto_highlight=True,
+    )
+    text_layer = pdk.Layer(
+        "TextLayer",
+        data=points if len(points) <= 80 else points.sort_values("voters", ascending=False).head(80),
+        get_position="[lon, lat]",
+        get_text="label",
+        get_size=12,
+        get_color=[7, 29, 58, 220],
+        get_angle=0,
+        get_text_anchor="middle",
+        get_alignment_baseline="bottom",
+        pickable=False,
+    )
+    deck = pdk.Deck(
+        map_style="mapbox://styles/mapbox/light-v9",
+        initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=12, pitch=0),
+        layers=[layer, text_layer],
+        tooltip={"html": "<b>{packet_name}</b><br/>{street}<br/>{voters} voters", "style": {"backgroundColor": "#071d3a", "color": "white"}},
+    )
+    st.pydeck_chart(deck, use_container_width=True)
+    summary = points.groupby(["packet_name"], dropna=False).agg(streets=("street", "nunique"), voters=("voters", "sum")).reset_index().sort_values("voters", ascending=False)
+    st.dataframe(summary, width="stretch", hide_index=True)
 
 def render_assignments_workspace(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
@@ -10217,7 +10430,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
         with wpc2:
             st.metric("Voters in Packets", sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in wp_existing))
         with wpc3:
-            max_packet_size = st.number_input("Target max voters/packet", min_value=100, max_value=1000, value=400, step=50, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
+            max_packet_size = st.number_input("Target max voters/packet", min_value=50, max_value=1000, value=100, step=25, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
             use_smart_turf = st.checkbox("Use Smart Turf v43", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
         if st.button("Generate / Refresh Smart Turf", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
             packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
@@ -10236,7 +10449,12 @@ def render_assignments_workspace(campaign_id: str | None = None):
                 else:
                     st.error(f"Could not save walk packets: {msg}")
         if wp_existing:
-            st.dataframe(_walk_packets_df(wp_existing).drop(columns=["packet_id"], errors="ignore"), width="stretch", hide_index=True)
+            packet_view = _walk_packets_df(wp_existing).drop(columns=["packet_id"], errors="ignore")
+            st.dataframe(packet_view, width="stretch", hide_index=True)
+            oversized = packet_view[pd.to_numeric(packet_view.get("voter_count"), errors="coerce").fillna(0) > int(max_packet_size)] if "voter_count" in packet_view.columns else pd.DataFrame()
+            if not oversized.empty:
+                st.warning(f"{len(oversized):,} existing packet(s) are above the current target. Click Generate / Refresh Smart Turf to rebalance them to the selected max.")
+            render_turf_review_map(wp_existing, campaign_id, assignment_id)
         else:
             st.info("No walk packets generated yet for this assignment.")
 
