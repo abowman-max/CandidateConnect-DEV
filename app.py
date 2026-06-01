@@ -9625,7 +9625,7 @@ def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, conta
         "packet_count": len(packets),
         "total_voters": sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in packets),
         "packet_status": "loaded_walk_packets" if packets else "no_packets_generated_yet",
-        "packet_rule": "Smart Turf v43: precinct first; oversized precincts split by street-neighbor graph.",
+        "packet_rule": "Smart Turf v44D: precinct first; oversized precincts split by street-neighbor graph.",
     }
     return {
         "version": 3,
@@ -10256,7 +10256,7 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
         "assignment_id": clean_value(assignment.get("assignment_id", "")),
         "contact_list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
         "contact_list_name": clean_value(cl.get("name", assignment.get("contact_list_name", ""))),
-        "packet_rule": "Smart Turf v43: precinct first; oversized precincts split by street-neighbor graph using street_neighbors/street_centroids.",
+        "packet_rule": "Smart Turf v44D: precinct first; oversized precincts split by street-neighbor graph using street_neighbors/street_centroids.",
         "max_packet_size_target": int(max_packet_size or 400),
         "packet_count": 0,
         "smart_turf_enabled": bool(use_smart_turf),
@@ -10534,13 +10534,39 @@ def _packet_color(packet_id: str) -> list[int]:
     return [80 + int(digest[0:2], 16) % 150, 80 + int(digest[2:4], 16) % 150, 80 + int(digest[4:6], 16) % 150, 190]
 
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _smart_turf_centroids_only_table() -> tuple[pd.DataFrame, dict]:
+    """Load only street_centroids.parquet for the review map.
+
+    Important: do not load street_neighbors.parquet during normal assignment-page
+    rendering. The neighbor file can be large enough to make Streamlit Cloud kill
+    the process with no Python traceback.
+    """
+    meta = {"centroids_loaded": False, "centroids_url": "", "error": ""}
+    errors = []
+    centroids = pd.DataFrame()
+    for url in _smart_turf_urls("street_centroids"):
+        try:
+            centroids = _duckdb_read_remote_parquet(url)
+            if centroids is not None and not centroids.empty:
+                meta["centroids_loaded"] = True
+                meta["centroids_url"] = url
+                break
+        except Exception as exc:
+            errors.append(f"centroids {url}: {clean_value(exc)}")
+    meta["error"] = " | ".join(errors[-3:])
+    return centroids, meta
+
 def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
     """Build street-instance centroid points for generated walk packets."""
     meta = {"point_count": 0, "missing_centroids": 0, "error": ""}
     if not packets:
         return pd.DataFrame(), meta
     try:
-        centroids, _neighbors, support_meta = _smart_turf_support_tables()
+        # v44D safety: map needs only centroids. Loading neighbors here can
+        # exhaust Streamlit Cloud memory before any traceback is written.
+        centroids, support_meta = _smart_turf_centroids_only_table()
         c = _normalize_centroids_table(centroids)
         if c.empty:
             meta["error"] = support_meta.get("error") or "street_centroids.parquet was not loaded."
@@ -10625,7 +10651,7 @@ def _osm_tile_layer():
 
 def render_turf_review_map(packets: list[dict], campaign_id: str, assignment_id: str):
     st.markdown("#### Turf Review Map")
-    st.caption("Actual road-map review for checking whether generated packets stay geographically compact. This is still a review map, not a turn-by-turn walking route.")
+    st.caption("Actual road-map review (lazy-loaded for Streamlit stability) for checking whether generated packets stay geographically compact. This is still a review map, not a turn-by-turn walking route.")
     if pdk is None:
         st.warning("Map library is not available in this deployment. The packets still generated correctly, but the review map cannot render.")
         return
@@ -10633,9 +10659,24 @@ def render_turf_review_map(packets: list[dict], campaign_id: str, assignment_id:
         st.info("Generate Smart Turf first, then the review map will appear here.")
         return
 
-    packet_options = ["All packets"] + [f"{p.get('packet_name','Packet')} ({int(p.get('voter_count') or 0):,})" for p in packets]
+    # v44D safety: do not build the map automatically when the user opens the
+    # assignment page. Streamlit Cloud was killing the process during automatic
+    # map/table loading with no traceback. The page now opens first; the user
+    # explicitly loads the review map afterward.
+    load_map = st.checkbox(
+        "Load Turf Review Map",
+        value=False,
+        key=f"turf_map_load_{campaign_id}_{assignment_id}",
+        help="Loads street centroids only after the assignment page is already open."
+    )
+    if not load_map:
+        st.info("Map is paused to keep the assignment page stable. Check this box when you are ready to review a packet on the road map.")
+        return
+
+    individual_options = [f"{p.get('packet_name','Packet')} ({int(p.get('voter_count') or 0):,})" for p in packets]
+    packet_options = individual_options + ["All packets"]
     choice = st.selectbox("Map packet", packet_options, key=f"turf_map_packet_{campaign_id}_{assignment_id}")
-    selected = packets if choice == "All packets" else [packets[packet_options.index(choice) - 1]]
+    selected = packets if choice == "All packets" else [packets[individual_options.index(choice)]]
 
     points, meta = _packet_map_points(selected)
     if points.empty:
@@ -10824,7 +10865,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.rerun()
 
         st.markdown("#### Walk Packets / Turf")
-        st.caption("Generate Smart Turf v43 walking packets from the saved universe. Oversized precincts are split using Step 11 street neighbors and centroids when available.")
+        st.caption("Generate Smart Turf v44D walking packets from the saved universe. Oversized precincts are split using Step 11 street neighbors and centroids when available.")
         wp_existing = _assignment_packets(campaign_id, assignment_id)
         wpc1, wpc2, wpc3 = st.columns(3)
         with wpc1:
@@ -10833,7 +10874,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.metric("Voters in Packets", sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in wp_existing))
         with wpc3:
             max_packet_size = st.number_input("Target max voters/packet", min_value=50, max_value=1000, value=100, step=25, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
-            use_smart_turf = st.checkbox("Use Smart Turf v43", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
+            use_smart_turf = st.checkbox("Use Smart Turf v44D", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
         if st.button("Generate / Refresh Smart Turf", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
             try:
                 # v43D safety: if this assignment already has voters in packets, rebalance those
@@ -10872,24 +10913,28 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.info("No walk packets generated yet for this assignment.")
 
         st.markdown("#### Mobile Download Package")
-        st.caption("The mobile package now uses generated walk packets/turfs. Generate packets first, then download the offline JSON package.")
-        mobile_package = build_assignment_mobile_package_v1(campaign_id, current, contact_lists, people)
-        mc1, mc2 = st.columns([1, 1])
-        with mc1:
-            if st.button("Generate Mobile Package", key=f"generate_mobile_package_{campaign_id}_{assignment_id}"):
-                ok, msg = save_assignment_mobile_package_v1(campaign_id, assignment_id, mobile_package)
-                if ok:
-                    st.success("Mobile package generated and saved for this assignment.")
-                else:
-                    st.error(f"Could not save mobile package: {msg}")
-        with mc2:
-            st.download_button(
-                "Download Package JSON",
-                data=json.dumps(mobile_package, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name=f"{_ops_slug(current.get('name') or 'assignment')}_mobile_package.json",
-                mime="application/json",
-                key=f"download_mobile_package_{campaign_id}_{assignment_id}",
-            )
+        st.caption("The mobile package uses generated walk packets/turfs. To keep the assignment page stable, the package is built only when requested.")
+        build_mobile_now = st.checkbox("Load mobile download package", value=False, key=f"mobile_pkg_load_{campaign_id}_{assignment_id}")
+        if build_mobile_now:
+            mobile_package = build_assignment_mobile_package_v1(campaign_id, current, contact_lists, people)
+            mc1, mc2 = st.columns([1, 1])
+            with mc1:
+                if st.button("Generate Mobile Package", key=f"generate_mobile_package_{campaign_id}_{assignment_id}"):
+                    ok, msg = save_assignment_mobile_package_v1(campaign_id, assignment_id, mobile_package)
+                    if ok:
+                        st.success("Mobile package generated and saved for this assignment.")
+                    else:
+                        st.error(f"Could not save mobile package: {msg}")
+            with mc2:
+                st.download_button(
+                    "Download Package JSON",
+                    data=json.dumps(mobile_package, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name=f"{_ops_slug(current.get('name') or 'assignment')}_mobile_package.json",
+                    mime="application/json",
+                    key=f"download_mobile_package_{campaign_id}_{assignment_id}",
+                )
+        else:
+            st.info("Mobile package is paused until you check the box above.")
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
@@ -10904,7 +10949,7 @@ def render_voter_outreach_workspace():
         render_assignments_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
-        st.info("Use Contact Lists and Assignments to generate Smart Turf v43 walk packets, then download an offline mobile package for field work.")
+        st.info("Use Contact Lists and Assignments to generate Smart Turf v44D walk packets, then download an offline mobile package for field work.")
         st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Smart Turf → Mobile Download → Offline Contacts → Sync Back.")
     with tab_phone:
         st.markdown("### Phone Bank")
