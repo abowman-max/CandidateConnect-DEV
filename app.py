@@ -1,7 +1,7 @@
-# Candidate Connect LIVE — Final Hybrid Cloud App v21zp VOTER_LOOKUP_PERSIST_HISTORY_PDF_FIX
+# Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v38 DEV: adds Voter Outreach Contact Lists v1 definitions linked to Contact Programs and Saved Universes.
+# v43 DEV: Smart Turf Generation uses street_neighbors.parquet and street_centroids.parquet for contiguous walk packets.
 
 import io
 import json
@@ -9573,7 +9573,7 @@ def _mobile_voters_from_saved_universe(source_universe: str, max_rows: int = 250
 def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, contact_lists: list[dict], people: list[dict]) -> dict:
     """Create the offline package the future phone app will download.
 
-    v42 packages assignment turf as walk packets instead of a raw first-N voter
+    v43 packages smart turf walk packets instead of a raw first-N voter
     export. Existing generated packets are used when available; otherwise the
     package includes guidance to generate packets first.
     """
@@ -9589,7 +9589,7 @@ def build_assignment_mobile_package_v1(campaign_id: str, assignment: dict, conta
         "packet_count": len(packets),
         "total_voters": sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in packets),
         "packet_status": "loaded_walk_packets" if packets else "no_packets_generated_yet",
-        "packet_rule": "Precinct first; oversized precincts split by Street Name.",
+        "packet_rule": "Smart Turf v43: precinct first; oversized precincts split by street-neighbor graph.",
     }
     return {
         "version": 3,
@@ -9656,7 +9656,7 @@ def save_assignment_mobile_package_v1(campaign_id: str, assignment_id: str, pack
 
 
 # ---------------------------------------------------------------------------
-# Voter Outreach: Walk Packets / Turf Generation v42
+# Voter Outreach: Smart Turf Generation v43
 # ---------------------------------------------------------------------------
 def _walk_packets_key(campaign_id: str) -> str:
     return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/walk_packets.json"
@@ -9666,7 +9666,7 @@ def load_walk_packets_store(campaign_id: str) -> dict:
     data = _ops_json_get(_walk_packets_key(campaign_id), {})
     if not isinstance(data, dict):
         data = {}
-    data.setdefault("version", 1)
+    data.setdefault("version", 2)
     data.setdefault("updated_at", "")
     data.setdefault("packets", [])
     if not isinstance(data.get("packets"), list):
@@ -9676,8 +9676,8 @@ def load_walk_packets_store(campaign_id: str) -> dict:
 
 def save_walk_packets_store(campaign_id: str, store: dict) -> tuple[bool, str]:
     if not isinstance(store, dict):
-        store = {"version": 1, "packets": []}
-    store["version"] = 1
+        store = {"version": 2, "packets": []}
+    store["version"] = 2
     store["updated_at"] = datetime.now().isoformat(timespec="seconds")
     store.setdefault("packets", [])
     ok, msg = _put_json_to_r2_key(_walk_packets_key(campaign_id), store)
@@ -9690,13 +9690,7 @@ def save_walk_packets_store(campaign_id: str, store: dict) -> tuple[bool, str]:
 
 
 def _mobile_voters_dataframe_from_saved_universe(source_universe: str, max_rows: int = 75000) -> tuple[pd.DataFrame, dict]:
-    """Return a compact saved-universe dataframe for turf packet generation.
-
-    This is the same saved-universe source used by the phone package, but packet
-    generation groups voters into useful walking units instead of taking the
-    first N rows. The max_rows parameter is a safety valve for browsers/R2, not
-    a turfing rule.
-    """
+    """Return a compact saved-universe dataframe for turf packet generation."""
     filters, special = _mobile_saved_universe_payload(source_universe)
     meta = {
         "source_saved_universe": clean_value(source_universe),
@@ -9789,8 +9783,213 @@ def _street_sort_key(street: str):
     return (s == "", s)
 
 
+def _smart_street_key_parts(row) -> tuple[str, str, str, str]:
+    county = clean_value(row.get("County", "")).upper()
+    muni = clean_value(row.get("Municipality", "")).upper()
+    precinct = clean_value(row.get("Precinct", "")).upper()
+    street = clean_value(row.get("Street Name", "")).upper()
+    street = re.sub(r"\s+", " ", street)
+    return county, muni, precinct, street
+
+
+def _smart_street_key_from_parts(county: str, muni: str, precinct: str, street: str) -> str:
+    return "|".join([clean_value(county).upper(), clean_value(muni).upper(), clean_value(precinct).upper(), clean_value(street).upper()])
+
+
+def _add_smart_street_key(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for c in ["County", "Municipality", "Precinct", "Street Name"]:
+        if c not in df.columns:
+            df[c] = ""
+    df["_smart_street_key"] = df.apply(lambda r: _smart_street_key_from_parts(*_smart_street_key_parts(r)), axis=1)
+    return df
+
+
+def _manifest_speed_key(stem: str, default_key: str) -> str:
+    try:
+        m = load_manifest()
+        tables = ((m.get("speed", {}) or {}).get("tables", {}) or {})
+        return tables.get(stem) or tables.get(default_key.replace("speed/", "").replace(".parquet", "")) or default_key
+    except Exception:
+        return default_key
+
+
+def _smart_turf_url(stem: str) -> str:
+    # Step 11 is expected to upload these under speed/. The manifest lookup keeps this compatible
+    # if the pipeline later stores a different key.
+    key = _manifest_speed_key(stem, f"speed/{stem}.parquet")
+    return r2_url(key)
+
+
+def _duckdb_read_remote_parquet(url: str, limit: int | None = None) -> pd.DataFrame:
+    con = duckdb.connect(database=":memory:")
+    try:
+        try:
+            con.execute("INSTALL httpfs; LOAD httpfs;")
+        except Exception:
+            try:
+                con.execute("LOAD httpfs;")
+            except Exception:
+                pass
+        lim = f" LIMIT {int(limit)}" if limit else ""
+        return con.execute(f"SELECT * FROM read_parquet({sql_lit(url)}, union_by_name=true){lim}").df()
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _smart_turf_support_tables() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Load street centroids/neighbors from Step 11. Fails soft so turf can fall back."""
+    meta = {"centroids_loaded": False, "neighbors_loaded": False, "error": ""}
+    centroids = pd.DataFrame()
+    neighbors = pd.DataFrame()
+    try:
+        centroids = _duckdb_read_remote_parquet(_smart_turf_url("street_centroids"))
+        meta["centroids_loaded"] = not centroids.empty
+    except Exception as exc:
+        meta["error"] = clean_value(exc)
+    try:
+        neighbors = _duckdb_read_remote_parquet(_smart_turf_url("street_neighbors"))
+        meta["neighbors_loaded"] = not neighbors.empty
+    except Exception as exc:
+        meta["error"] = (meta.get("error") + " | " if meta.get("error") else "") + clean_value(exc)
+    return centroids, neighbors, meta
+
+
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
+    if df is None or df.empty:
+        return ""
+    lower = {str(c).lower(): c for c in df.columns}
+    for c in candidates:
+        if c in df.columns:
+            return c
+        if c.lower() in lower:
+            return lower[c.lower()]
+    return ""
+
+
+def _normalize_centroids_table(centroids: pd.DataFrame) -> pd.DataFrame:
+    if centroids is None or centroids.empty:
+        return pd.DataFrame(columns=["_smart_street_key", "_lat", "_lon", "_street_label"])
+    df = centroids.copy()
+    key_col = _pick_col(df, ["street_key", "StreetKey", "_smart_street_key", "segment_key"])
+    county_col = _pick_col(df, ["County", "county"])
+    muni_col = _pick_col(df, ["Municipality", "municipality", "muni"])
+    precinct_col = _pick_col(df, ["Precinct", "precinct"])
+    street_col = _pick_col(df, ["Street Name", "street_name", "street", "StreetName"])
+    lat_col = _pick_col(df, ["lat", "latitude", "centroid_lat", "y"])
+    lon_col = _pick_col(df, ["lon", "lng", "longitude", "centroid_lon", "x"])
+    if key_col:
+        df["_smart_street_key"] = df[key_col].astype(str).str.upper().str.strip()
+    else:
+        for c in [county_col, muni_col, precinct_col, street_col]:
+            if not c:
+                df[c or "__missing"] = ""
+        df["_smart_street_key"] = df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), r.get(muni_col, ""), r.get(precinct_col, ""), r.get(street_col, "")), axis=1)
+    df["_lat"] = pd.to_numeric(df[lat_col], errors="coerce") if lat_col else pd.NA
+    df["_lon"] = pd.to_numeric(df[lon_col], errors="coerce") if lon_col else pd.NA
+    df["_street_label"] = df[street_col].astype(str) if street_col else ""
+    return df[["_smart_street_key", "_lat", "_lon", "_street_label"]].drop_duplicates("_smart_street_key")
+
+
+def _normalize_neighbors_table(neighbors: pd.DataFrame) -> pd.DataFrame:
+    if neighbors is None or neighbors.empty:
+        return pd.DataFrame(columns=["a", "b", "distance"])
+    df = neighbors.copy()
+    a = _pick_col(df, ["street_key", "source_key", "from_key", "a", "street_key_a"])
+    b = _pick_col(df, ["neighbor_key", "target_key", "to_key", "b", "street_key_b"])
+    d = _pick_col(df, ["distance", "distance_m", "meters", "dist", "rank"])
+    if not (a and b):
+        return pd.DataFrame(columns=["a", "b", "distance"])
+    out = pd.DataFrame({"a": df[a].astype(str).str.upper().str.strip(), "b": df[b].astype(str).str.upper().str.strip()})
+    out["distance"] = pd.to_numeric(df[d], errors="coerce") if d else 999999
+    out = out[(out["a"] != "") & (out["b"] != "") & (out["a"] != out["b"])]
+    return out.drop_duplicates(["a", "b"])
+
+
+def _order_streets_smart(street_counts: pd.DataFrame, centroids: pd.DataFrame, neighbors: pd.DataFrame) -> tuple[list[str], dict]:
+    """Order street keys by neighbor graph when possible, falling back to centroid/name sort."""
+    keys = [k for k in street_counts["_smart_street_key"].astype(str).tolist() if k]
+    key_set = set(keys)
+    meta = {"method": "street_name_fallback", "matched_centroids": 0, "matched_neighbor_edges": 0}
+    c = _normalize_centroids_table(centroids)
+    n = _normalize_neighbors_table(neighbors)
+    if not c.empty:
+        meta["matched_centroids"] = int(c["_smart_street_key"].isin(key_set).sum())
+    if not n.empty:
+        n = n[n["a"].isin(key_set) & n["b"].isin(key_set)].copy()
+        meta["matched_neighbor_edges"] = int(len(n))
+    if not n.empty:
+        adj = {k: [] for k in keys}
+        for _, r in n.sort_values("distance").iterrows():
+            adj.setdefault(r["a"], []).append((r["b"], float(r.get("distance") or 999999)))
+            adj.setdefault(r["b"], []).append((r["a"], float(r.get("distance") or 999999)))
+        remaining = set(keys)
+        # Start with the highest voter-count street; then nearest unvisited neighbor.
+        counts = dict(zip(street_counts["_smart_street_key"], street_counts["_voters"]))
+        ordered = []
+        while remaining:
+            current = max(remaining, key=lambda k: (int(counts.get(k, 0)), k))
+            while current in remaining:
+                ordered.append(current)
+                remaining.remove(current)
+                candidates = [x for x in adj.get(current, []) if x[0] in remaining]
+                if not candidates:
+                    break
+                current = sorted(candidates, key=lambda x: (x[1], -int(counts.get(x[0], 0)), x[0]))[0][0]
+        meta["method"] = "street_neighbors_graph"
+        return ordered, meta
+    if not c.empty and meta["matched_centroids"]:
+        cc = c[c["_smart_street_key"].isin(key_set)].copy()
+        cc = cc.sort_values(["_lat", "_lon", "_smart_street_key"], na_position="last")
+        ordered = cc["_smart_street_key"].tolist() + [k for k in keys if k not in set(cc["_smart_street_key"])]
+        meta["method"] = "street_centroid_order"
+        return ordered, meta
+    return sorted(keys), meta
+
+
+def _smart_split_precinct(packet_df: pd.DataFrame, max_packet_size: int) -> tuple[list[tuple[str, pd.DataFrame]], dict]:
+    """Split precinct into contiguous street-neighbor packets instead of alphabetical street buckets."""
+    if packet_df is None or packet_df.empty:
+        return [], {"method": "empty"}
+    max_packet_size = max(50, int(max_packet_size or 400))
+    df = _add_smart_street_key(packet_df)
+    street_counts = df.groupby("_smart_street_key", dropna=False).size().reset_index(name="_voters")
+    centroids, neighbors, support_meta = _smart_turf_support_tables()
+    ordered_keys, order_meta = _order_streets_smart(street_counts, centroids, neighbors)
+    chunks, frames, labels, current_count = [], [], [], 0
+    for key in ordered_keys:
+        g = df[df["_smart_street_key"] == key].copy()
+        if g.empty:
+            continue
+        label = clean_value(g["Street Name"].dropna().astype(str).iloc[0]) if "Street Name" in g.columns else "Unknown Street"
+        label = label or "Unknown Street"
+        g_count = len(g)
+        if frames and current_count + g_count > max_packet_size:
+            chunks.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+            frames, labels, current_count = [], [], 0
+        # Very large single street still gets row chunks to keep walk lists manageable.
+        if g_count > max_packet_size:
+            if frames:
+                chunks.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+                frames, labels, current_count = [], [], 0
+            for start in range(0, len(g), max_packet_size):
+                chunks.append((f"{label} #{(start // max_packet_size) + 1}", g.iloc[start:start + max_packet_size].copy()))
+            continue
+        frames.append(g)
+        labels.append(label)
+        current_count += g_count
+    if frames:
+        chunks.append((" / ".join(labels[:3]) + (" +" if len(labels) > 3 else ""), pd.concat(frames, ignore_index=True)))
+    meta = {**support_meta, **order_meta}
+    return chunks, meta
+
+
 def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> list[tuple[str, pd.DataFrame]]:
-    """Split a large precinct into practical street-name packets."""
+    """Legacy fallback splitter retained for safety."""
     if packet_df is None or packet_df.empty:
         return []
     max_packet_size = max(50, int(max_packet_size or 400))
@@ -9801,11 +10000,7 @@ def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> 
     for street, g in df.groupby(df["Street Name"].fillna("").astype(str), dropna=False):
         street_groups.append((clean_value(street) or "Unknown Street", g.copy()))
     street_groups.sort(key=lambda x: _street_sort_key(x[0]))
-
-    chunks = []
-    current_name_parts = []
-    current_frames = []
-    current_count = 0
+    chunks, current_name_parts, current_frames, current_count = [], [], [], 0
     for street, g in street_groups:
         g_count = len(g)
         if current_frames and current_count + g_count > max_packet_size:
@@ -9814,7 +10009,6 @@ def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> 
         current_name_parts.append(street)
         current_frames.append(g)
         current_count += g_count
-        # One very large street/apartment complex still needs to be chunked by row.
         if current_count >= max_packet_size * 1.5:
             combined = pd.concat(current_frames, ignore_index=True)
             for start in range(0, len(combined), max_packet_size):
@@ -9826,8 +10020,14 @@ def _split_precinct_by_street(packet_df: pd.DataFrame, max_packet_size: int) -> 
     return chunks
 
 
-def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contact_lists: list[dict], max_packet_size: int = 400) -> tuple[list[dict], dict]:
-    """Generate precinct-first walk/turf packets for one assignment."""
+def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contact_lists: list[dict], max_packet_size: int = 400, use_smart_turf: bool = True) -> tuple[list[dict], dict]:
+    """Generate v43 smart turf packets for one assignment.
+
+    v43 keeps the saved-universe/contact-list/assignment workflow but uses Step 11
+    street_neighbors.parquet and street_centroids.parquet to build more contiguous
+    walkable packets inside oversized precincts. If those files are unavailable,
+    it automatically falls back to the v42 street-name splitter.
+    """
     campaign_id = _ops_slug(campaign_id)
     assignment = assignment or {}
     cl = _contact_list_from_id(contact_lists or [], assignment.get("list_id", ""))
@@ -9837,13 +10037,14 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
         "assignment_id": clean_value(assignment.get("assignment_id", "")),
         "contact_list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
         "contact_list_name": clean_value(cl.get("name", assignment.get("contact_list_name", ""))),
-        "packet_rule": "Precinct first; oversized precincts split by Street Name.",
+        "packet_rule": "Smart Turf v43: precinct first; oversized precincts split by street-neighbor graph using street_neighbors/street_centroids.",
         "max_packet_size_target": int(max_packet_size or 400),
         "packet_count": 0,
+        "smart_turf_enabled": bool(use_smart_turf),
+        "smart_turf_method": "not_used",
     })
     if df is None or df.empty:
         return [], meta
-
     if "Precinct" not in df.columns:
         df["Precinct"] = "Unassigned Precinct"
     if "Street Name" not in df.columns:
@@ -9853,19 +10054,27 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
     precinct_groups = []
     for precinct, g in df.groupby(df["Precinct"].fillna("").astype(str), dropna=False):
         precinct_groups.append((clean_value(precinct) or "Unassigned Precinct", g.copy()))
-    # Highest-voter precincts first, then name. This matches how campaigns prioritize turf.
     precinct_groups.sort(key=lambda x: (-len(x[1]), clean_value(x[0]).upper()))
 
+    smart_methods_seen = []
     for precinct_index, (precinct, g) in enumerate(precinct_groups, start=1):
+        split_meta = {"method": "single_precinct_packet"}
         if len(g) <= int(max_packet_size or 400):
             splits = [("All Streets", g)]
+        elif use_smart_turf:
+            splits, split_meta = _smart_split_precinct(g, max_packet_size)
+            if not splits:
+                splits = _split_precinct_by_street(g, max_packet_size)
+                split_meta = {"method": "street_name_fallback"}
         else:
             splits = _split_precinct_by_street(g, max_packet_size)
+            split_meta = {"method": "street_name_fallback"}
+        smart_methods_seen.append(split_meta.get("method", "unknown"))
         for split_index, (street_label, part_df) in enumerate(splits, start=1):
             county = clean_value(part_df["County"].dropna().astype(str).iloc[0]) if "County" in part_df.columns and not part_df.empty else ""
             muni = clean_value(part_df["Municipality"].dropna().astype(str).iloc[0]) if "Municipality" in part_df.columns and not part_df.empty else ""
             packet_name = precinct if len(splits) == 1 else f"{precinct} — {street_label}"
-            packet_id = "wp-" + hashlib.md5(f"{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{street_label}".encode("utf-8")).hexdigest()[:12]
+            packet_id = "wp-" + hashlib.md5(f"v43|{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{street_label}".encode("utf-8")).hexdigest()[:12]
             rows = _mobile_rows_from_dataframe(part_df)
             packets.append({
                 "packet_id": packet_id,
@@ -9873,7 +10082,7 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
                 "contact_list_id": clean_value(cl.get("list_id", assignment.get("list_id", ""))),
                 "program_id": clean_value(cl.get("program_id", assignment.get("program_id", ""))),
                 "packet_name": packet_name,
-                "group_type": "Precinct" if len(splits) == 1 else "Precinct + Street Group",
+                "group_type": "Precinct" if len(splits) == 1 else "Smart Street Turf",
                 "precinct": precinct,
                 "street_group": "" if len(splits) == 1 else street_label,
                 "county": county,
@@ -9881,12 +10090,13 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
                 "voter_count": len(rows),
                 "status": "Ready",
                 "priority_rank": precinct_index,
+                "smart_turf_method": split_meta.get("method", "unknown"),
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "voters": rows,
             })
     meta["packet_count"] = len(packets)
+    meta["smart_turf_method"] = ", ".join(sorted(set(smart_methods_seen))) if smart_methods_seen else "none"
     return packets, meta
-
 
 def _assignment_packets(campaign_id: str, assignment_id: str) -> list[dict]:
     try:
@@ -9999,7 +10209,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.rerun()
 
         st.markdown("#### Walk Packets / Turf")
-        st.caption("Generate practical precinct-first walking packets from the saved universe. Oversized precincts are split by street group so packets are useful in the field.")
+        st.caption("Generate Smart Turf v43 walking packets from the saved universe. Oversized precincts are split using Step 11 street neighbors and centroids when available.")
         wp_existing = _assignment_packets(campaign_id, assignment_id)
         wpc1, wpc2, wpc3 = st.columns(3)
         with wpc1:
@@ -10008,8 +10218,9 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.metric("Voters in Packets", sum(int(p.get("voter_count") or len(p.get("voters") or [])) for p in wp_existing))
         with wpc3:
             max_packet_size = st.number_input("Target max voters/packet", min_value=100, max_value=1000, value=400, step=50, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
-        if st.button("Generate / Refresh Walk Packets", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
-            packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size))
+            use_smart_turf = st.checkbox("Use Smart Turf v43", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
+        if st.button("Generate / Refresh Smart Turf", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
+            packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
             if packet_meta.get("error"):
                 st.error(packet_meta.get("error"))
             elif not packets:
@@ -10020,7 +10231,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
                 wp_store["packets"] = other_packets + packets
                 ok, msg = save_walk_packets_store(campaign_id, wp_store)
                 if ok:
-                    st.success(f"Generated {len(packets):,} walk packet(s) with {sum(int(p.get('voter_count') or 0) for p in packets):,} voter(s).")
+                    st.success(f"Generated {len(packets):,} smart turf packet(s) with {sum(int(p.get('voter_count') or 0) for p in packets):,} voter(s). Method: {packet_meta.get('smart_turf_method', 'unknown')}")
                     st.rerun()
                 else:
                     st.error(f"Could not save walk packets: {msg}")
@@ -10062,8 +10273,8 @@ def render_voter_outreach_workspace():
         render_assignments_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
-        st.info("Use Contact Lists and Assignments to generate precinct-first walk packets, then download an offline mobile package for field work.")
-        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Walk Packets/Turf → Mobile Download → Offline Contacts → Sync Back.")
+        st.info("Use Contact Lists and Assignments to generate Smart Turf v43 walk packets, then download an offline mobile package for field work.")
+        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Smart Turf → Mobile Download → Offline Contacts → Sync Back.")
     with tab_phone:
         st.markdown("### Phone Bank")
         st.caption("Uses the same Contact Program / Assignment / Contact Result architecture as door-to-door.")
