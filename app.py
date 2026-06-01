@@ -1,7 +1,7 @@
 # Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v43C DEV: Smart Turf fixes county+street centroid/neighbor matching, hard packet rebalancing fallback, and suppresses stale saved-universe warnings.
+# v43D DEV: Smart Turf fixes county+street centroid/neighbor matching, hard packet rebalancing fallback, and suppresses stale saved-universe warnings.
 
 import io
 import json
@@ -10538,25 +10538,32 @@ def render_assignments_workspace(campaign_id: str | None = None):
             max_packet_size = st.number_input("Target max voters/packet", min_value=50, max_value=1000, value=100, step=25, key=f"walk_packet_target_{campaign_id}_{assignment_id}")
             use_smart_turf = st.checkbox("Use Smart Turf v43", value=True, key=f"smart_turf_enabled_{campaign_id}_{assignment_id}", help="Uses street_neighbors.parquet and street_centroids.parquet from Step 11 when available.")
         if st.button("Generate / Refresh Smart Turf", key=f"generate_walk_packets_{campaign_id}_{assignment_id}"):
-            packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
-            # If the saved universe label is stale/missing but this assignment already has packet voters,
-            # rebalance from those existing voters instead of blocking the user with a false error.
-            if packet_meta.get("error") and wp_existing:
-                packets, packet_meta = build_walk_packets_from_existing_packets(campaign_id, current, wp_existing, int(max_packet_size), bool(use_smart_turf))
-            if packet_meta.get("error"):
-                st.error(packet_meta.get("error"))
-            elif not packets:
-                st.warning("No voters were found for this saved universe or existing assignment packets.")
-            else:
-                wp_store = load_walk_packets_store(campaign_id)
-                other_packets = [p for p in (wp_store.get("packets") or []) if clean_value(p.get("assignment_id")) != clean_value(assignment_id)]
-                wp_store["packets"] = other_packets + packets
-                ok, msg = save_walk_packets_store(campaign_id, wp_store)
-                if ok:
-                    st.success(f"Generated {len(packets):,} smart turf packet(s) with {sum(int(p.get('voter_count') or 0) for p in packets):,} voter(s). Method: {packet_meta.get('smart_turf_method', 'unknown')}")
-                    st.rerun()
+            try:
+                # v43D safety: if this assignment already has voters in packets, rebalance those
+                # directly. This avoids a full saved-universe reload in Streamlit Cloud, which can
+                # exhaust memory and crash the app before a traceback is written.
+                if wp_existing:
+                    packets, packet_meta = build_walk_packets_from_existing_packets(campaign_id, current, wp_existing, int(max_packet_size), bool(use_smart_turf))
                 else:
-                    st.error(f"Could not save walk packets: {msg}")
+                    packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
+                if packet_meta.get("error"):
+                    st.error(packet_meta.get("error"))
+                elif not packets:
+                    st.warning("No voters were found for this saved universe or existing assignment packets.")
+                else:
+                    wp_store = load_walk_packets_store(campaign_id)
+                    other_packets = [p for p in (wp_store.get("packets") or []) if clean_value(p.get("assignment_id")) != clean_value(assignment_id)]
+                    wp_store["packets"] = other_packets + packets
+                    ok, msg = save_walk_packets_store(campaign_id, wp_store)
+                    if ok:
+                        st.success(f"Generated {len(packets):,} smart turf packet(s) with {sum(int(p.get('voter_count') or 0) for p in packets):,} voter(s). Method: {packet_meta.get('smart_turf_method', 'unknown')}")
+                        st.rerun()
+                    else:
+                        st.error(f"Could not save walk packets: {msg}")
+            except Exception as e:
+                st.error(f"Smart Turf generation failed: {e}")
+                with st.expander("Show technical details"):
+                    st.exception(e)
         if wp_existing:
             packet_view = _walk_packets_df(wp_existing).drop(columns=["packet_id"], errors="ignore")
             st.dataframe(packet_view, width="stretch", hide_index=True)
