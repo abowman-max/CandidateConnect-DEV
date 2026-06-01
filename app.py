@@ -1,7 +1,7 @@
 # Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v43D DEV: Smart Turf fixes county+street centroid/neighbor matching, hard packet rebalancing fallback, and suppresses stale saved-universe warnings.
+# v43E DEV: Smart Turf safe rebalance prevents Streamlit Cloud crash; centroid map retained; hard packet max enforced from existing packet voters.
 
 import io
 import json
@@ -10229,82 +10229,148 @@ def build_walk_packets_for_assignment(campaign_id: str, assignment: dict, contac
 
 
 def build_walk_packets_from_existing_packets(campaign_id: str, assignment: dict, existing_packets: list[dict], max_packet_size: int = 400, use_smart_turf: bool = True) -> tuple[list[dict], dict]:
-    """Rebuild/rebalance packets from already-saved packet voters when saved-universe lookup is stale.
+    """Ultra-safe v43E rebalance from already-saved packet voters.
 
-    This prevents an old saved-universe label from blocking packet balancing after packets
-    already exist for the assignment.
+    This intentionally avoids reloading the saved universe and avoids DataFrame-heavy
+    operations. Streamlit Cloud was crashing without a traceback during the previous
+    Generate/Refresh path, which strongly indicates process-level memory pressure.
+    This pure-Python path preserves all existing voter rows and only repacks them by
+    precinct + street into packets that respect the selected max size.
     """
-    rows = []
-    for p in existing_packets or []:
-        for v in p.get("voters") or []:
-            if isinstance(v, dict):
-                rows.append(v.copy())
+    max_packet_size = max(50, int(max_packet_size or 400))
+    assignment = assignment or {}
     meta = {
-        "assignment_id": clean_value((assignment or {}).get("assignment_id", "")),
-        "packet_rule": "Smart Turf v43C: rebuilt from existing assignment packet voters because the saved universe lookup was unavailable/stale.",
-        "max_packet_size_target": int(max_packet_size or 400),
+        "assignment_id": clean_value(assignment.get("assignment_id", "")),
+        "packet_rule": "Smart Turf v43E: ultra-safe rebalance from existing assignment packet voters; precinct first, street grouped, hard max enforced.",
+        "max_packet_size_target": int(max_packet_size),
         "packet_count": 0,
         "smart_turf_enabled": bool(use_smart_turf),
-        "smart_turf_method": "existing_packet_rebalance",
+        "smart_turf_method": "existing_packet_ultra_safe_rebalance",
         "error": "",
     }
+
+    # Flatten existing voters and carry packet-level fields down when a voter row is missing them.
+    rows = []
+    seen = set()
+    for p in existing_packets or []:
+        p_precinct = clean_value(p.get("precinct") or p.get("Precinct"))
+        p_county = clean_value(p.get("county") or p.get("County"))
+        p_muni = clean_value(p.get("municipality") or p.get("Municipality"))
+        for v in p.get("voters") or []:
+            if not isinstance(v, dict):
+                continue
+            vv = dict(v)
+            vv.setdefault("County", p_county)
+            vv.setdefault("Municipality", p_muni)
+            vv.setdefault("Precinct", p_precinct)
+            vid = clean_value(vv.get("voter_id") or vv.get("VoterID") or vv.get("PA_Voter_ID"))
+            # Dedupe only when a stable voter id exists; otherwise keep row.
+            if vid:
+                if vid in seen:
+                    continue
+                seen.add(vid)
+            rows.append(vv)
+
     if not rows:
         meta["error"] = "No existing packet voters were available to rebalance."
         return [], meta
-    df = pd.DataFrame(rows)
-    rename_map = {"county": "County", "municipality": "Municipality", "precinct": "Precinct", "street_name": "Street Name"}
-    for a, b in rename_map.items():
-        if a in df.columns and b not in df.columns:
-            df[b] = df[a]
-    for c in ["County", "Municipality", "Precinct", "Street Name"]:
-        if c not in df.columns:
-            df[c] = ""
-    if "Street Name" not in df.columns or df["Street Name"].fillna("").astype(str).str.strip().eq("").all():
-        df["Street Name"] = df.get("street", "")
+
+    def _vval(v, *names):
+        for n in names:
+            val = clean_value(v.get(n, ""))
+            if val:
+                return val
+        return ""
+
+    def _street_label(v):
+        st = _vval(v, "Street Name", "street_name", "street", "Street")
+        if st:
+            return st
+        addr = _vval(v, "res_address", "Residential Address", "Address")
+        # Conservative fallback: remove first token if it is a house number.
+        parts = addr.split()
+        if len(parts) > 1 and parts[0].isdigit():
+            return " ".join(parts[1:])
+        return addr or "Unknown Street"
+
+    # Group by precinct first, then street. This keeps packet logic deterministic and lightweight.
+    precincts = {}
+    for v in rows:
+        precinct = _vval(v, "Precinct", "precinct") or "Unassigned Precinct"
+        county = _vval(v, "County", "county")
+        muni = _vval(v, "Municipality", "municipality")
+        street = _street_label(v)
+        street_norm = _normalize_turf_street_name(street)
+        key = (precinct, county, muni)
+        precincts.setdefault(key, {}).setdefault(street_norm or "UNKNOWN STREET", {"label": street or "Unknown Street", "voters": []})["voters"].append(v)
 
     packets = []
-    smart_methods_seen = []
-    precinct_groups = []
-    for precinct, g in df.groupby(df["Precinct"].fillna("").astype(str), dropna=False):
-        precinct_groups.append((clean_value(precinct) or "Unassigned Precinct", g.copy()))
-    precinct_groups.sort(key=lambda x: (-len(x[1]), clean_value(x[0]).upper()))
-    for precinct_index, (precinct, g) in enumerate(precinct_groups, start=1):
-        if use_smart_turf:
-            splits, split_meta = _smart_split_precinct(g, max_packet_size)
-            if not splits:
-                splits = _split_precinct_by_street(g, max_packet_size)
-                split_meta = {"method": "street_name_fallback"}
-        else:
-            splits = _split_precinct_by_street(g, max_packet_size)
-            split_meta = {"method": "street_name_fallback"}
-        splits = _rebalance_packet_splits(splits, max_packet_size)
-        smart_methods_seen.append(split_meta.get("method", "unknown"))
-        for split_index, (street_label, part_df) in enumerate(splits, start=1):
-            county = clean_value(part_df["County"].dropna().astype(str).iloc[0]) if "County" in part_df.columns and not part_df.empty else ""
-            muni = clean_value(part_df["Municipality"].dropna().astype(str).iloc[0]) if "Municipality" in part_df.columns and not part_df.empty else ""
-            packet_name = precinct if len(splits) == 1 else f"{precinct} — {street_label}"
-            packet_id = "wp-" + hashlib.md5(f"v43c|{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{street_label}|{split_index}".encode("utf-8")).hexdigest()[:12]
-            voter_rows = _mobile_rows_from_dataframe(part_df)
+    precinct_items = sorted(precincts.items(), key=lambda kv: (-sum(len(x["voters"]) for x in kv[1].values()), clean_value(kv[0][0]).upper()))
+    for precinct_index, ((precinct, county, muni), street_map) in enumerate(precinct_items, start=1):
+        street_items = sorted(street_map.items(), key=lambda kv: _street_sort_key(kv[1].get("label") or kv[0]))
+        current_voters, current_labels = [], []
+
+        def emit_packet(label_parts, voter_list, split_num):
+            if not voter_list:
+                return
+            label = " / ".join(label_parts[:3]) + (" +" if len(label_parts) > 3 else "") if label_parts else "All Streets"
+            packet_name = precinct if label == "All Streets" else f"{precinct} — {label}"
+            seed = f"v43e|{campaign_id}|{assignment.get('assignment_id','')}|{precinct}|{label}|{split_num}|{len(voter_list)}"
+            packet_id = "wp-" + hashlib.md5(seed.encode("utf-8")).hexdigest()[:12]
+            out_voters = []
+            for i, vv in enumerate(voter_list, start=1):
+                row = dict(vv)
+                row["row_number"] = i
+                # Ensure expected mobile fields exist without expensive re-normalization.
+                row.setdefault("County", county)
+                row.setdefault("Municipality", muni)
+                row.setdefault("Precinct", precinct)
+                row.setdefault("Street Name", _street_label(row))
+                row.setdefault("notes", clean_value(row.get("notes", "")))
+                row.setdefault("contact_status", clean_value(row.get("contact_status", "")) or "Not Started")
+                row.setdefault("last_result", clean_value(row.get("last_result", "")))
+                row.setdefault("last_contacted_at", clean_value(row.get("last_contacted_at", "")))
+                out_voters.append(row)
             packets.append({
                 "packet_id": packet_id,
-                "assignment_id": clean_value((assignment or {}).get("assignment_id", "")),
-                "contact_list_id": clean_value((assignment or {}).get("list_id", "")),
-                "program_id": clean_value((assignment or {}).get("program_id", "")),
+                "assignment_id": clean_value(assignment.get("assignment_id", "")),
+                "contact_list_id": clean_value(assignment.get("list_id", "")),
+                "program_id": clean_value(assignment.get("program_id", "")),
                 "packet_name": packet_name,
-                "group_type": "Precinct" if len(splits) == 1 else "Smart Street Turf",
+                "group_type": "Precinct" if label == "All Streets" else "Smart Street Turf",
                 "precinct": precinct,
-                "street_group": "" if len(splits) == 1 else street_label,
+                "street_group": "" if label == "All Streets" else label,
                 "county": county,
                 "municipality": muni,
-                "voter_count": len(voter_rows),
+                "voter_count": len(out_voters),
                 "status": "Ready",
                 "priority_rank": precinct_index,
-                "smart_turf_method": split_meta.get("method", "unknown") + "+existing_rebalance",
+                "smart_turf_method": "existing_packet_ultra_safe_rebalance",
                 "created_at": datetime.now().isoformat(timespec="seconds"),
-                "voters": voter_rows,
+                "voters": out_voters,
             })
+
+        split_num = 1
+        for street_norm, payload in street_items:
+            voters = payload.get("voters") or []
+            label = payload.get("label") or street_norm.title()
+            # A single huge street must be chunked by voters.
+            if len(voters) > max_packet_size:
+                if current_voters:
+                    emit_packet(current_labels, current_voters, split_num); split_num += 1
+                    current_voters, current_labels = [], []
+                for start_i in range(0, len(voters), max_packet_size):
+                    emit_packet([f"{label} #{(start_i // max_packet_size) + 1}"], voters[start_i:start_i + max_packet_size], split_num); split_num += 1
+                continue
+            if current_voters and len(current_voters) + len(voters) > max_packet_size:
+                emit_packet(current_labels, current_voters, split_num); split_num += 1
+                current_voters, current_labels = [], []
+            current_voters.extend(voters)
+            current_labels.append(label)
+        if current_voters:
+            emit_packet(current_labels, current_voters, split_num)
+
     meta["packet_count"] = len(packets)
-    meta["smart_turf_method"] = ", ".join(sorted(set(smart_methods_seen))) + "+existing_rebalance" if smart_methods_seen else "existing_packet_rebalance"
     return packets, meta
 
 def _assignment_packets(campaign_id: str, assignment_id: str) -> list[dict]:
@@ -10545,7 +10611,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
                 if wp_existing:
                     packets, packet_meta = build_walk_packets_from_existing_packets(campaign_id, current, wp_existing, int(max_packet_size), bool(use_smart_turf))
                 else:
-                    packets, packet_meta = build_walk_packets_for_assignment(campaign_id, current, contact_lists, int(max_packet_size), bool(use_smart_turf))
+                    packets, packet_meta = ([], {"error": "No existing packet voters are loaded yet. Generate the first packet set from the saved universe using the previous stable path, then use v43E to rebalance safely."})
                 if packet_meta.get("error"):
                     st.error(packet_meta.get("error"))
                 elif not packets:
