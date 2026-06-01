@@ -1,7 +1,7 @@
 # Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
-# v43E DEV: Smart Turf safe rebalance prevents Streamlit Cloud crash; centroid map retained; hard packet max enforced from existing packet voters.
+# v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
 
 import io
 import json
@@ -9955,27 +9955,118 @@ def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
 
 
 def _normalize_centroids_table(centroids: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Step 11 centroids.
+
+    v44 pipeline files may contain multiple rows for the same county+street_norm,
+    one per connected street_instance_id. Keep those duplicates so the map can
+    choose the instance closest to the other streets in the selected packet.
+    """
+    cols = ["_smart_street_key", "_county", "_street_norm", "_instance_id", "_lat", "_lon", "_street_label", "_instance_rank"]
     if centroids is None or centroids.empty:
-        return pd.DataFrame(columns=["_smart_street_key", "_lat", "_lon", "_street_label"])
+        return pd.DataFrame(columns=cols)
     df = centroids.copy()
     key_col = _pick_col(df, ["street_key", "StreetKey", "_smart_street_key", "segment_key"])
     county_col = _pick_col(df, ["County", "county"])
     street_col = _pick_col(df, ["street_norm", "Street Name", "street_name", "street", "StreetName"])
+    inst_col = _pick_col(df, ["street_instance_id", "instance_id", "street_component_id"])
+    rank_col = _pick_col(df, ["street_instance_rank", "instance_rank", "component_rank"])
     lat_col = _pick_col(df, ["lat", "latitude", "centroid_lat", "y"])
     lon_col = _pick_col(df, ["lon", "lng", "longitude", "centroid_lon", "x"])
+    if not county_col:
+        df["__county"] = ""; county_col = "__county"
+    if not street_col:
+        df["__street"] = ""; street_col = "__street"
+    df["_county"] = df[county_col].astype(str).str.upper().str.strip()
+    df["_street_norm"] = df[street_col].map(_normalize_turf_street_name)
     if key_col:
         df["_smart_street_key"] = df[key_col].astype(str).str.upper().str.strip()
     else:
-        if not county_col:
-            df["__county"] = ""; county_col = "__county"
-        if not street_col:
-            df["__street"] = ""; street_col = "__street"
         df["_smart_street_key"] = df.apply(lambda r: _smart_street_key_from_parts(r.get(county_col, ""), "", "", r.get(street_col, "")), axis=1)
+    if inst_col:
+        df["_instance_id"] = df[inst_col].astype(str)
+    else:
+        df["_instance_id"] = df["_smart_street_key"]
     df["_lat"] = pd.to_numeric(df[lat_col], errors="coerce") if lat_col else pd.NA
     df["_lon"] = pd.to_numeric(df[lon_col], errors="coerce") if lon_col else pd.NA
-    df["_street_label"] = df[street_col].astype(str) if street_col else ""
-    return df[["_smart_street_key", "_lat", "_lon", "_street_label"]].drop_duplicates("_smart_street_key")
+    df["_street_label"] = df[street_col].astype(str) if street_col else df["_street_norm"].astype(str)
+    df["_instance_rank"] = pd.to_numeric(df[rank_col], errors="coerce") if rank_col else 1
+    return df[cols].dropna(subset=["_lat", "_lon"]).drop_duplicates(["_smart_street_key", "_instance_id", "_lat", "_lon"])
 
+
+def _resolve_packet_centroid_instances(street_counts: dict, centroid_table: pd.DataFrame) -> tuple[list[dict], int]:
+    """Resolve packet streets to the most plausible street-instance centroids.
+
+    Step 11 v44 can have several centroid rows for the same county+street name.
+    We pick instances by anchoring on streets with only one candidate, then choose
+    duplicate street-name candidates nearest that anchor. This fixes cases like
+    countywide duplicate Aspen Ln/David Dr points outside the township.
+    """
+    rows = []
+    missing = 0
+    if not street_counts or centroid_table is None or centroid_table.empty:
+        return rows, len(street_counts or {})
+    key_to_candidates = {k: centroid_table[centroid_table["_smart_street_key"] == k].copy() for k in street_counts.keys()}
+    resolved = {}
+    # First pass: exact one-candidate streets establish the packet anchor.
+    for key, cand in key_to_candidates.items():
+        if len(cand) == 1:
+            r = cand.iloc[0]
+            resolved[key] = r
+    if resolved:
+        anchor_lat = sum(float(r["_lat"]) for r in resolved.values()) / len(resolved)
+        anchor_lon = sum(float(r["_lon"]) for r in resolved.values()) / len(resolved)
+    else:
+        # If all streets are duplicated, start with the largest street's first instance.
+        largest_key = max(street_counts.keys(), key=lambda k: (int(street_counts.get(k, {}).get("voters", 0)), k))
+        cand = key_to_candidates.get(largest_key, pd.DataFrame())
+        if cand is not None and not cand.empty:
+            first = cand.sort_values(["_instance_rank", "_lat", "_lon"]).iloc[0]
+            resolved[largest_key] = first
+            anchor_lat, anchor_lon = float(first["_lat"]), float(first["_lon"])
+        else:
+            anchor_lat = anchor_lon = None
+    def dist2(row, alat, alon):
+        try:
+            return (float(row["_lat"]) - alat) ** 2 + (float(row["_lon"]) - alon) ** 2
+        except Exception:
+            return 999999
+    # Iteratively resolve duplicates nearest the current packet anchor.
+    unresolved = [k for k in street_counts.keys() if k not in resolved]
+    for _ in range(3):
+        changed = False
+        for key in list(unresolved):
+            cand = key_to_candidates.get(key, pd.DataFrame())
+            if cand is None or cand.empty:
+                continue
+            if anchor_lat is None:
+                chosen = cand.sort_values(["_instance_rank", "_lat", "_lon"]).iloc[0]
+            else:
+                cand = cand.copy()
+                cand["__d"] = cand.apply(lambda r: dist2(r, anchor_lat, anchor_lon), axis=1)
+                chosen = cand.sort_values(["__d", "_instance_rank"]).iloc[0]
+            resolved[key] = chosen
+            unresolved.remove(key)
+            changed = True
+        if resolved:
+            anchor_lat = sum(float(r["_lat"]) for r in resolved.values()) / len(resolved)
+            anchor_lon = sum(float(r["_lon"]) for r in resolved.values()) / len(resolved)
+        if not changed:
+            break
+    for key, payload in street_counts.items():
+        r = resolved.get(key)
+        if r is None:
+            missing += 1
+            continue
+        rows.append({
+            "key": key,
+            "street": payload.get("label") or str(r.get("_street_label") or key.split("|")[-1]).title(),
+            "voters": int(payload.get("voters") or 0),
+            "lat": float(r["_lat"]),
+            "lon": float(r["_lon"]),
+            "instance_id": str(r.get("_instance_id", "")),
+        })
+    missing += len([k for k in street_counts.keys() if k not in resolved])
+    return rows, missing
 
 def _normalize_neighbors_table(neighbors: pd.DataFrame) -> pd.DataFrame:
     if neighbors is None or neighbors.empty:
@@ -10396,7 +10487,7 @@ def _packet_color(packet_id: str) -> list[int]:
 
 
 def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
-    """Build street-centroid points for generated walk packets."""
+    """Build street-instance centroid points for generated walk packets."""
     meta = {"point_count": 0, "missing_centroids": 0, "error": ""}
     if not packets:
         return pd.DataFrame(), meta
@@ -10406,8 +10497,6 @@ def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
         if c.empty:
             meta["error"] = support_meta.get("error") or "street_centroids.parquet was not loaded."
             return pd.DataFrame(), meta
-        c = c.dropna(subset=["_lat", "_lon"]).copy()
-        centroid_lookup = c.set_index("_smart_street_key")[["_lat", "_lon"]].to_dict("index")
         rows = []
         missing = 0
         for p in packets:
@@ -10419,23 +10508,24 @@ def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
                 key = _smart_street_key_from_parts(v.get("County", p.get("county", "")), v.get("Municipality", p.get("municipality", "")), v.get("Precinct", p.get("precinct", "")), v.get("Street Name", ""))
                 if not key.strip("|"):
                     continue
-                street_counts[key] = street_counts.get(key, 0) + 1
-            for key, count in street_counts.items():
-                loc = centroid_lookup.get(key)
-                if not loc:
-                    missing += 1
-                    continue
-                street = key.split("|")[-1].title()
+                label = clean_value(v.get("Street Name", "")) or key.split("|")[-1].title()
+                street_counts.setdefault(key, {"label": label, "voters": 0})["voters"] += 1
+            resolved_rows, miss = _resolve_packet_centroid_instances(street_counts, c)
+            missing += int(miss)
+            for rr in resolved_rows:
+                count = int(rr.get("voters") or 0)
+                street = clean_value(rr.get("street")) or rr.get("key", "").split("|")[-1].title()
                 rows.append({
                     "packet_id": packet_id,
                     "packet_name": packet_name,
                     "street": street,
-                    "voters": int(count),
-                    "lat": float(loc["_lat"]),
-                    "lon": float(loc["_lon"]),
-                    "radius": max(40, min(240, 25 + int(count) * 4)),
+                    "voters": count,
+                    "lat": float(rr["lat"]),
+                    "lon": float(rr["lon"]),
+                    "instance_id": clean_value(rr.get("instance_id", "")),
+                    "radius": max(45, min(420, 35 + int(count) * 7)),
                     "color": color,
-                    "label": f"{street}: {int(count)}",
+                    "label": f"{street}: {count}",
                 })
         out = pd.DataFrame(rows)
         meta["point_count"] = int(len(out))
@@ -10444,7 +10534,6 @@ def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
     except Exception as exc:
         meta["error"] = clean_value(exc)
         return pd.DataFrame(), meta
-
 
 def _turf_map_view_state(points: pd.DataFrame) -> pdk.ViewState:
     """Choose a reasonable starting zoom for packet/all-packet turf maps."""
