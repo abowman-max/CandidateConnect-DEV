@@ -10726,6 +10726,177 @@ def render_turf_review_map(packets: list[dict], campaign_id: str, assignment_id:
         summary = map_points.groupby(["packet_name"], dropna=False).agg(streets=("street", "nunique"), voters=("voters", "sum")).reset_index().sort_values("voters", ascending=False)
         st.dataframe(summary, width="stretch", hide_index=True)
 
+
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: v45 Ranked Street List / Candidate Walk Builder
+# ---------------------------------------------------------------------------
+def _v45_addr_house_num(v: dict) -> str:
+    h = clean_value(v.get("House Number", ""))
+    if h:
+        return h
+    m = re.match(r"\s*(\d+[A-Z]?)\b", clean_value(v.get("res_address", "")), flags=re.I)
+    return m.group(1) if m else ""
+
+
+def _v45_house_sort_key(v: str):
+    s = clean_value(v)
+    m = re.search(r"\d+", s)
+    return (int(m.group(0)) if m else 10**9, s.upper())
+
+
+def _v45_flatten_packet_voters(packets: list[dict]) -> pd.DataFrame:
+    rows, seen = [], set()
+    for p in packets or []:
+        for v in (p.get("voters") or []):
+            if not isinstance(v, dict):
+                continue
+            vid = clean_value(v.get("voter_id", ""))
+            addr = clean_value(v.get("res_address", ""))
+            key = vid or (clean_value(v.get("FullName", "")).upper() + "|" + addr.upper())
+            if key in seen:
+                continue
+            seen.add(key)
+            street = clean_value(v.get("Street Name", ""))
+            if not street:
+                street = re.sub(r"^\s*\d+[A-Z]?\s+", "", addr, flags=re.I).strip()
+            county = clean_value(v.get("County", p.get("county", "")))
+            muni = clean_value(v.get("Municipality", p.get("municipality", "")))
+            precinct = clean_value(v.get("Precinct", p.get("precinct", "")))
+            household_key = "|".join([county.upper(), muni.upper(), precinct.upper(), addr.upper()])
+            rows.append({
+                "voter_id": vid,
+                "FullName": clean_value(v.get("FullName", "")),
+                "Age": clean_value(v.get("Age", "")),
+                "Party": clean_value(v.get("Party", "")),
+                "Gender": clean_value(v.get("Gender", "")),
+                "County": county,
+                "Municipality": muni,
+                "Precinct": precinct,
+                "Street Name": street,
+                "Street Norm": _normalize_turf_street_name(street),
+                "House Number": _v45_addr_house_num(v),
+                "Address": addr,
+                "City": clean_value(v.get("res_city", "")),
+                "State": clean_value(v.get("res_state", "")) or "PA",
+                "Zip": clean_value(v.get("res_zip", "")),
+                "Mobile": clean_value(v.get("Mobile", "")),
+                "Landline": clean_value(v.get("Landline", "")),
+                "Email": clean_value(v.get("Email", "")),
+                "Tags": clean_value(v.get("Tags", "")),
+                "Household Key": household_key,
+            })
+    return pd.DataFrame(rows)
+
+
+def _v45_rank_precincts(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    g = df.groupby(["County", "Municipality", "Precinct"], dropna=False).agg(
+        target_voters=("voter_id", "count"), households=("Household Key", "nunique"), streets=("Street Norm", "nunique")
+    ).reset_index()
+    g["voters_per_street"] = (g["target_voters"] / g["streets"].replace(0, pd.NA)).fillna(0).round(1)
+    g["voters_per_household"] = (g["target_voters"] / g["households"].replace(0, pd.NA)).fillna(0).round(2)
+    g["priority_score"] = (g["target_voters"] + g["voters_per_street"] * 8 + g["voters_per_household"] * 15).round(1)
+    g = g.sort_values(["priority_score", "target_voters", "voters_per_street"], ascending=[False, False, False]).reset_index(drop=True)
+    g.insert(0, "rank", range(1, len(g)+1))
+    return g
+
+
+def _v45_rank_streets(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    g = df.groupby(["County", "Municipality", "Precinct", "Street Name", "Street Norm"], dropna=False).agg(
+        target_voters=("voter_id", "count"), households=("Household Key", "nunique")
+    ).reset_index()
+    g["voters_per_household"] = (g["target_voters"] / g["households"].replace(0, pd.NA)).fillna(0).round(2)
+    g["priority_score"] = (g["target_voters"] + g["households"] * 1.5 + g["voters_per_household"] * 10).round(1)
+    g = g.sort_values(["priority_score", "target_voters", "households", "Street Norm"], ascending=[False, False, False, True]).reset_index(drop=True)
+    g.insert(0, "rank", range(1, len(g)+1))
+    return g
+
+
+def _v45_households(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    recs=[]
+    for hk,hdf in df.groupby("Household Key", dropna=False):
+        first=hdf.iloc[0].to_dict()
+        recs.append({
+            "House Number": clean_value(first.get("House Number", "")),
+            "Address": clean_value(first.get("Address", "")),
+            "City": clean_value(first.get("City", "")),
+            "Voters": int(len(hdf)),
+            "Names": "; ".join([clean_value(x) for x in hdf.get("FullName", pd.Series([], dtype=str)).tolist() if clean_value(x)]),
+            "Party": ", ".join(sorted(set([clean_value(x) for x in hdf.get("Party", pd.Series([], dtype=str)).tolist() if clean_value(x)]))),
+            "Ages": ", ".join([clean_value(x) for x in hdf.get("Age", pd.Series([], dtype=str)).tolist() if clean_value(x)]),
+            "Household Key": hk,
+        })
+    out=pd.DataFrame(recs)
+    if not out.empty:
+        out["_sort"] = out["House Number"].map(_v45_house_sort_key)
+        out = out.sort_values(["_sort", "Address"]).drop(columns=["_sort"], errors="ignore").reset_index(drop=True)
+        out.insert(0,"Knock Order",range(1,len(out)+1))
+    return out
+
+
+def render_candidate_walk_builder_v45(campaign_id: str, assignment: dict, contact_lists: list[dict], packets: list[dict]) -> None:
+    st.markdown("#### v45 Ranked Street List / Candidate Walk Builder")
+    st.caption("Candidate flow: universe → ranked precincts → ranked streets → household list → voter card. Voter count is a reference, not the turf driver.")
+    if not packets:
+        st.info("No assignment voters are loaded yet. Generate or load the assignment package first, then use Candidate Walk Builder.")
+        return
+    load = st.checkbox("Load Candidate Walk Builder", value=False, key=f"v45_load_{campaign_id}_{assignment.get('assignment_id','')}")
+    if not load:
+        st.info("Paused until checked so the assignment page stays fast.")
+        return
+    df = _v45_flatten_packet_voters(packets)
+    if df.empty:
+        st.warning("No voters found in the current assignment packets.")
+        return
+    pc = _v45_rank_precincts(df)
+    a,b,c,d = st.columns(4)
+    with a: st.metric("Universe voters", f"{len(df):,}")
+    with b: st.metric("Households", f"{df['Household Key'].nunique():,}")
+    with c: st.metric("Precincts", f"{len(pc):,}")
+    with d: st.metric("Streets", f"{df['Street Norm'].nunique():,}")
+    st.markdown("##### Ranked Precincts")
+    pc_show = pc.rename(columns={"rank":"Rank","target_voters":"Target Voters","households":"Households","streets":"Streets","voters_per_street":"Voters / Street","priority_score":"Priority Score"})
+    st.dataframe(pc_show[["Rank","County","Municipality","Precinct","Target Voters","Households","Streets","Voters / Street","Priority Score"]], width="stretch", hide_index=True)
+    streets_all = _v45_rank_streets(df)
+    st.download_button("Download Ranked Street List CSV", streets_all.to_csv(index=False).encode("utf-8"), file_name=f"{_ops_slug(assignment.get('name') or 'candidate-walk')}_ranked_streets.csv", mime="text/csv", key=f"v45_csv_{campaign_id}_{assignment.get('assignment_id','')}")
+    opts=[f"#{int(r['rank'])} — {r['Precinct']} — {int(r['target_voters']):,} voters / {int(r['households']):,} HH" for r in pc.to_dict('records')]
+    if not opts: return
+    pc_label=st.selectbox("Open precinct", opts, key=f"v45_pc_{campaign_id}_{assignment.get('assignment_id','')}")
+    pr=pc.to_dict('records')[opts.index(pc_label)]
+    pdf=df[(df['County'].str.upper()==clean_value(pr.get('County','')).upper()) & (df['Municipality'].str.upper()==clean_value(pr.get('Municipality','')).upper()) & (df['Precinct'].str.upper()==clean_value(pr.get('Precinct','')).upper())].copy()
+    st.markdown("##### Ranked Streets in Selected Precinct")
+    st_df=_v45_rank_streets(pdf)
+    st_show=st_df.rename(columns={"rank":"Rank","target_voters":"Target Voters","households":"Households","voters_per_household":"Voters / HH","priority_score":"Priority Score"})
+    st.dataframe(st_show[["Rank","Street Name","Target Voters","Households","Voters / HH","Priority Score"]], width="stretch", hide_index=True)
+    st_opts=[f"#{int(r['rank'])} — {r['Street Name']} — {int(r['target_voters']):,} voters / {int(r['households']):,} HH" for r in st_df.to_dict('records')]
+    if not st_opts: return
+    st_label=st.selectbox("Open street", st_opts, key=f"v45_st_{campaign_id}_{assignment.get('assignment_id','')}")
+    sr=st_df.to_dict('records')[st_opts.index(st_label)]
+    sdf=pdf[pdf['Street Norm'].str.upper()==clean_value(sr.get('Street Norm','')).upper()].copy()
+    hh=_v45_households(sdf)
+    st.markdown("##### Households on Selected Street")
+    st.dataframe(hh.drop(columns=["Household Key"], errors="ignore"), width="stretch", hide_index=True)
+    hh_opts=[f"#{int(r['Knock Order'])} — {r['Address']} — {int(r['Voters'])} voter(s)" for r in hh.to_dict('records')]
+    if hh_opts:
+        hh_label=st.selectbox("Open household", hh_opts, key=f"v45_hh_{campaign_id}_{assignment.get('assignment_id','')}")
+        hr=hh.to_dict('records')[hh_opts.index(hh_label)]
+        hdf=sdf[sdf['Household Key']==hr.get('Household Key','')]
+        st.markdown("##### Voter Card Preview")
+        cols=[c for c in ["FullName","Age","Party","Gender","Address","Mobile","Landline","Email","Tags"] if c in hdf.columns]
+        st.dataframe(hdf[cols], width="stretch", hide_index=True)
+    scope=st.radio("Mobile package scope", ["Selected street", "Entire selected precinct"], horizontal=True, key=f"v45_scope_{campaign_id}_{assignment.get('assignment_id','')}")
+    pkg_voters = sdf if scope == "Selected street" else pdf
+    pkg_households = hh if scope == "Selected street" else _v45_households(pdf)
+    cl = _contact_list_from_id(contact_lists or [], assignment.get("list_id", ""))
+    pkg={"version":1,"package_type":"candidate_connect_candidate_walk_package","generated_at":datetime.now().isoformat(timespec="seconds"),"campaign_id":_ops_slug(campaign_id),"assignment":{"assignment_id":clean_value(assignment.get('assignment_id','')),"name":clean_value(assignment.get('name',''))},"source_saved_universe":clean_value((cl or {}).get('source_saved_universe','')),"mode":"Candidate Walk Mode","selected_precinct":pr,"scope":scope,"households":pkg_households.to_dict('records'),"voters":pkg_voters.to_dict('records')}
+    st.download_button("Download Candidate Walk Package JSON", json.dumps(pkg, ensure_ascii=False, indent=2).encode("utf-8"), file_name=f"{_ops_slug(assignment.get('name') or 'candidate-walk')}_{_ops_slug(scope)}.json", mime="application/json", key=f"v45_pkg_{campaign_id}_{assignment.get('assignment_id','')}")
+
 def render_assignments_workspace(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
     store = load_outreach_assignments_store(campaign_id)
@@ -10820,9 +10991,10 @@ def render_assignments_workspace(campaign_id: str | None = None):
             st.success("Assignment deleted.") if ok else st.error(msg)
             st.rerun()
 
-        st.markdown("#### Walk Packets / Turf")
-        st.caption("Generate Smart Turf v44E walking packets from the saved universe. Oversized precincts are split using Step 11 street neighbors and centroids when available.")
         wp_existing = _assignment_packets(campaign_id, assignment_id)
+        render_candidate_walk_builder_v45(campaign_id, current, contact_lists, wp_existing)
+        st.markdown("#### v46 Canvasser Turf Builder (experimental)")
+        st.caption("Volunteer mode is for assigning compact grouped streets. Candidate mode above is the primary precinct → street → household workflow.")
         wpc1, wpc2, wpc3 = st.columns(3)
         with wpc1:
             st.metric("Packets", len(wp_existing))
