@@ -10446,57 +10446,151 @@ def _packet_map_points(packets: list[dict]) -> tuple[pd.DataFrame, dict]:
         return pd.DataFrame(), meta
 
 
+def _turf_map_view_state(points: pd.DataFrame) -> pdk.ViewState:
+    """Choose a reasonable starting zoom for packet/all-packet turf maps."""
+    center_lat = float(points["lat"].mean())
+    center_lon = float(points["lon"].mean())
+    try:
+        lat_span = float(points["lat"].max() - points["lat"].min())
+        lon_span = float(points["lon"].max() - points["lon"].min())
+        span = max(lat_span, lon_span)
+    except Exception:
+        span = 0.02
+    if span <= 0.01:
+        zoom = 14
+    elif span <= 0.03:
+        zoom = 13
+    elif span <= 0.08:
+        zoom = 12
+    elif span <= 0.18:
+        zoom = 11
+    else:
+        zoom = 10
+    return pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=zoom, pitch=0)
+
+
+def _osm_tile_layer():
+    """OpenStreetMap raster tiles so the turf review map has real road labels without a Mapbox token."""
+    return pdk.Layer(
+        "TileLayer",
+        data="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        min_zoom=0,
+        max_zoom=19,
+        tile_size=256,
+        render_sub_layers={
+            "@@type": "BitmapLayer",
+            "data": None,
+            "image": "@@=data",
+            "bounds": "@@=bbox",
+        },
+    )
+
+
 def render_turf_review_map(packets: list[dict], campaign_id: str, assignment_id: str):
     st.markdown("#### Turf Review Map")
-    st.caption("Street centroid map for reviewing whether generated packets stay geographically compact. This is a review map, not a turn-by-turn walking route yet.")
+    st.caption("Actual road-map review for checking whether generated packets stay geographically compact. This is still a review map, not a turn-by-turn walking route.")
     if pdk is None:
         st.warning("Map library is not available in this deployment. The packets still generated correctly, but the review map cannot render.")
         return
     if not packets:
         st.info("Generate Smart Turf first, then the review map will appear here.")
         return
+
     packet_options = ["All packets"] + [f"{p.get('packet_name','Packet')} ({int(p.get('voter_count') or 0):,})" for p in packets]
     choice = st.selectbox("Map packet", packet_options, key=f"turf_map_packet_{campaign_id}_{assignment_id}")
     selected = packets if choice == "All packets" else [packets[packet_options.index(choice) - 1]]
+
     points, meta = _packet_map_points(selected)
     if points.empty:
         st.warning(meta.get("error") or "No street centroids matched these packets yet.")
         if meta.get("missing_centroids"):
             st.caption(f"Missing centroid matches: {meta.get('missing_centroids'):,}")
         return
+
     st.caption(f"Mapped {len(points):,} street centroid(s). Missing centroid matches: {int(meta.get('missing_centroids') or 0):,}.")
-    center_lat = float(points["lat"].mean())
-    center_lon = float(points["lon"].mean())
-    layer = pdk.Layer(
+
+    # Controls for usability. Single-packet mode defaults to street labels; all-packet mode defaults to no labels.
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        show_labels = st.checkbox("Show street labels", value=(choice != "All packets" and len(points) <= 35), key=f"turf_map_labels_{campaign_id}_{assignment_id}")
+    with c2:
+        show_all_packet_labels = st.checkbox("Show packet names", value=False, key=f"turf_map_packet_labels_{campaign_id}_{assignment_id}")
+    with c3:
+        point_scale = st.slider("Dot size", min_value=1, max_value=5, value=3, key=f"turf_map_dot_scale_{campaign_id}_{assignment_id}")
+
+    map_points = points.copy()
+    map_points["radius"] = map_points["radius"].astype(float) * (0.55 + point_scale * 0.25)
+
+    layers = [_osm_tile_layer()]
+
+    # Light halo under dots to make selected streets readable on OSM tiles.
+    halo = pdk.Layer(
         "ScatterplotLayer",
-        data=points,
+        data=map_points,
+        get_position="[lon, lat]",
+        get_fill_color=[255, 255, 255, 150],
+        get_radius="radius * 1.25",
+        pickable=False,
+    )
+    street_points = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_points,
         get_position="[lon, lat]",
         get_fill_color="color",
         get_radius="radius",
         pickable=True,
         auto_highlight=True,
     )
-    text_layer = pdk.Layer(
-        "TextLayer",
-        data=points if len(points) <= 80 else points.sort_values("voters", ascending=False).head(80),
-        get_position="[lon, lat]",
-        get_text="label",
-        get_size=12,
-        get_color=[7, 29, 58, 220],
-        get_angle=0,
-        get_text_anchor="middle",
-        get_alignment_baseline="bottom",
-        pickable=False,
-    )
+    layers.extend([halo, street_points])
+
+    if show_labels:
+        label_points = map_points if len(map_points) <= 80 else map_points.sort_values("voters", ascending=False).head(80)
+        layers.append(pdk.Layer(
+            "TextLayer",
+            data=label_points,
+            get_position="[lon, lat]",
+            get_text="street",
+            get_size=13,
+            get_color=[7, 29, 58, 245],
+            get_angle=0,
+            get_text_anchor="middle",
+            get_alignment_baseline="bottom",
+            get_pixel_offset=[0, -8],
+            pickable=False,
+        ))
+
+    if show_all_packet_labels:
+        packet_labels = map_points.groupby(["packet_id", "packet_name"], dropna=False).agg(lat=("lat", "mean"), lon=("lon", "mean"), voters=("voters", "sum")).reset_index()
+        packet_labels["packet_label"] = packet_labels["packet_name"].astype(str).str.slice(0, 52) + " (" + packet_labels["voters"].astype(int).astype(str) + ")"
+        layers.append(pdk.Layer(
+            "TextLayer",
+            data=packet_labels,
+            get_position="[lon, lat]",
+            get_text="packet_label",
+            get_size=14,
+            get_color=[130, 18, 31, 250],
+            get_text_anchor="middle",
+            get_alignment_baseline="center",
+            get_pixel_offset=[0, 18],
+            pickable=False,
+        ))
+
     deck = pdk.Deck(
-        map_style="mapbox://styles/mapbox/light-v9",
-        initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=12, pitch=0),
-        layers=[layer, text_layer],
+        map_style=None,
+        initial_view_state=_turf_map_view_state(map_points),
+        layers=layers,
         tooltip={"html": "<b>{packet_name}</b><br/>{street}<br/>{voters} voters", "style": {"backgroundColor": "#071d3a", "color": "white"}},
     )
     st.pydeck_chart(deck, use_container_width=True)
-    summary = points.groupby(["packet_name"], dropna=False).agg(streets=("street", "nunique"), voters=("voters", "sum")).reset_index().sort_values("voters", ascending=False)
-    st.dataframe(summary, width="stretch", hide_index=True)
+
+    if choice != "All packets":
+        selected_packet = selected[0]
+        st.markdown("##### Selected Packet Streets")
+        streets_df = map_points[["street", "voters"]].sort_values(["voters", "street"], ascending=[False, True]).reset_index(drop=True)
+        st.dataframe(streets_df, width="stretch", hide_index=True)
+    else:
+        summary = map_points.groupby(["packet_name"], dropna=False).agg(streets=("street", "nunique"), voters=("voters", "sum")).reset_index().sort_values("voters", ascending=False)
+        st.dataframe(summary, width="stretch", hide_index=True)
 
 def render_assignments_workspace(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
