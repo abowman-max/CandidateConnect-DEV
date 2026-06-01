@@ -10332,11 +10332,11 @@ def build_walk_packets_from_existing_packets(campaign_id: str, assignment: dict,
     assignment = assignment or {}
     meta = {
         "assignment_id": clean_value(assignment.get("assignment_id", "")),
-        "packet_rule": "Smart Turf v43E: ultra-safe rebalance from existing assignment packet voters; precinct first, street grouped, hard max enforced.",
+        "packet_rule": "Smart Turf v44C: safe rebalance from existing assignment packet voters; precinct first, streets ordered by Step 11 component centroids, hard max enforced.",
         "max_packet_size_target": int(max_packet_size),
         "packet_count": 0,
         "smart_turf_enabled": bool(use_smart_turf),
-        "smart_turf_method": "existing_packet_ultra_safe_rebalance",
+        "smart_turf_method": "existing_packet_geo_centroid_rebalance",
         "error": "",
     }
 
@@ -10398,7 +10398,55 @@ def build_walk_packets_from_existing_packets(campaign_id: str, assignment: dict,
     packets = []
     precinct_items = sorted(precincts.items(), key=lambda kv: (-sum(len(x["voters"]) for x in kv[1].values()), clean_value(kv[0][0]).upper()))
     for precinct_index, ((precinct, county, muni), street_map) in enumerate(precinct_items, start=1):
-        street_items = sorted(street_map.items(), key=lambda kv: _street_sort_key(kv[1].get("label") or kv[0]))
+        # v44C: order streets geographically when Step 11 centroids are available.
+        # This keeps connected neighborhood streets together instead of alphabetical packing.
+        def _geo_order_street_items(_street_map):
+            try:
+                centroids, _neighbors, _support_meta = _smart_turf_support_tables()
+                ctab = _normalize_centroids_table(centroids)
+                if ctab is None or ctab.empty:
+                    raise ValueError("no centroid table")
+                street_counts = {}
+                norm_to_key = {}
+                for sn, payload in _street_map.items():
+                    label0 = payload.get("label") or sn.title()
+                    key0 = _smart_street_key_from_parts(county, muni, precinct, label0)
+                    norm_to_key[sn] = key0
+                    street_counts[key0] = {"label": label0, "voters": len(payload.get("voters") or [])}
+                resolved_rows, _miss = _resolve_packet_centroid_instances(street_counts, ctab)
+                key_to_xy = {r.get("key"): (float(r.get("lat")), float(r.get("lon"))) for r in resolved_rows if r.get("key")}
+                remaining = list(_street_map.items())
+                if len(key_to_xy) < 2:
+                    return sorted(remaining, key=lambda kv: _street_sort_key(kv[1].get("label") or kv[0]))
+                def _score_start(item):
+                    sn, payload = item
+                    return (-len(payload.get("voters") or []), _street_sort_key(payload.get("label") or sn))
+                ordered = []
+                current = sorted(remaining, key=_score_start)[0]
+                while remaining:
+                    if current not in remaining:
+                        current = remaining[0]
+                    ordered.append(current)
+                    remaining.remove(current)
+                    if not remaining:
+                        break
+                    ck = norm_to_key.get(current[0], "")
+                    cxy = key_to_xy.get(ck)
+                    if not cxy:
+                        current = sorted(remaining, key=_score_start)[0]
+                        continue
+                    def _dist_item(item):
+                        sn, payload = item
+                        xy = key_to_xy.get(norm_to_key.get(sn, ""))
+                        if not xy:
+                            return (999999.0, _street_sort_key(payload.get("label") or sn))
+                        return ((xy[0]-cxy[0])**2 + (xy[1]-cxy[1])**2, _street_sort_key(payload.get("label") or sn))
+                    current = sorted(remaining, key=_dist_item)[0]
+                return ordered
+            except Exception:
+                return sorted(_street_map.items(), key=lambda kv: _street_sort_key(kv[1].get("label") or kv[0]))
+
+        street_items = _geo_order_street_items(street_map)
         current_voters, current_labels = [], []
 
         def emit_packet(label_parts, voter_list, split_num):
@@ -10436,7 +10484,7 @@ def build_walk_packets_from_existing_packets(campaign_id: str, assignment: dict,
                 "voter_count": len(out_voters),
                 "status": "Ready",
                 "priority_rank": precinct_index,
-                "smart_turf_method": "existing_packet_ultra_safe_rebalance",
+                "smart_turf_method": "existing_packet_geo_centroid_rebalance",
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "voters": out_voters,
             })
