@@ -12578,8 +12578,8 @@ def render_mobile_shell_c1() -> None:
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.4 Mobile Field Shell")
-    st.caption("Compact field flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results queue locally until sync is built.")
+    st.markdown("## C2.5 Mobile Field Shell")
+    st.caption("Tight field flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results queue locally until sync is built.")
 
     st.markdown("""
     <style>
@@ -12600,7 +12600,7 @@ def render_mobile_shell_c1() -> None:
     .cc-mobile-row {
         background: rgba(255,255,255,.18);
         border-bottom: 1px solid rgba(7,29,58,.10);
-        padding: 1px 0;
+        padding: 0;
         margin: 0;
     }
     .cc-mobile-row div[data-testid="stMarkdownContainer"] p {
@@ -12625,19 +12625,19 @@ def render_mobile_shell_c1() -> None:
     div[data-testid="stCheckbox"] label { min-height: 26px !important; }
     div[data-testid="stCheckbox"] p { font-size: .86rem !important; }
 
-    /* C2.4 compact mobile tap-list: make row buttons behave like left-pane buttons, not giant red action buttons. */
+    /* C2.5 compact mobile tap-list: make row buttons behave like left-pane buttons, not giant red action buttons. */
     [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
-        background: rgba(248,244,234,.78) !important;
-        background-color: rgba(248,244,234,.78) !important;
+        background: #f8f4ea !important;
+        background-color: #f8f4ea !important;
         color: #071d3a !important;
         -webkit-text-fill-color: #071d3a !important;
-        border: 1px solid rgba(159,21,28,.24) !important;
+        border: 1px solid rgba(159,21,28,.32) !important;
         border-radius: 8px !important;
         box-shadow: none !important;
         font-weight: 850 !important;
-        min-height: 26px !important;
-        height: 26px !important;
-        padding: 3px 9px !important;
+        min-height: 24px !important;
+        height: 24px !important;
+        padding: 2px 9px !important;
         margin: 0 !important;
         line-height: 1.0 !important;
         justify-content: flex-start !important;
@@ -12645,16 +12645,25 @@ def render_mobile_shell_c1() -> None:
         width: auto !important;
         max-width: 100% !important;
     }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
-        background: #f8f4ea !important;
-        background-color: #f8f4ea !important;
-        border-color: rgba(159,21,28,.55) !important;
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
+        color: #071d3a !important;
+        -webkit-text-fill-color: #071d3a !important;
+        opacity: 1 !important;
+        font-weight: 850 !important;
+        line-height: 1.0 !important;
     }
-    [data-testid="stMain"] div[data-testid="stButton"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .25rem !important; margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
+        background: #fffaf0 !important;
+        background-color: #fffaf0 !important;
+        border-color: rgba(159,21,28,.65) !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] { margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
+    [data-testid="stMain"] div[data-testid="element-container"] { margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .25rem !important; margin: 0 !important; padding: 0 !important; align-items: center !important; }
     [data-testid="stMain"] div[data-testid="column"] { padding-top: 0 !important; padding-bottom: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 0 !important; line-height: 1.05 !important; }
-    [data-testid="stMain"] hr { margin: .15rem 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin: 0 !important; line-height: 1.0 !important; }
+    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] { margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] hr { margin: .05rem 0 !important; }
 
     @media (max-width: 700px) {
         .block-container { padding-left: .55rem !important; padding-right: .55rem !important; }
