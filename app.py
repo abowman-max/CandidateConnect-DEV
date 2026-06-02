@@ -11833,7 +11833,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
 
     with assign_tab:
         st.markdown("##### Assign Door-to-Door Work")
-        st.caption("Saved walk packages become the work items that the mobile app will show under My Assignments.")
+        st.caption("Saved walk packages become simple work items. Pick what to assign, who should work it, and when it is due.")
         store = load_program_candidate_walk_packages_store(campaign_id)
         saved = [x for x in (store.get("packages") or []) if clean_value(x.get("program_id")) == pid]
         assignee_labels = _a3_program_assigned_user_labels(program, user_id_to_label)
@@ -11845,65 +11845,87 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         with a3:
             st.metric("Program Users", f"{len(assignee_labels):,}")
         if not saved:
-            st.info("No saved packages to assign yet. Build and save a candidate walk package first.")
+            st.info("No saved work items yet. Build and save a candidate walk package first.")
         elif not assignee_labels:
-            st.info("Add program users on the Users tab before assigning walk packages.")
+            st.info("Add program users on the Users tab before assigning door-to-door work.")
         else:
+            def _a331_area_label(x):
+                street = clean_value(x.get("selected_street"))
+                precinct = clean_value(x.get("selected_precinct"))
+                scope = clean_value(x.get("scope"))
+                if street:
+                    return street
+                if precinct:
+                    return "Entire selected precinct"
+                return scope or "Selected work item"
+
             assign_rows = [{
                 "Work Item": clean_value(x.get("name")),
                 "Assigned To": clean_value(x.get("assigned_to")) or "Unassigned",
-                "Type": clean_value(x.get("assignment_type")) or "Candidate Walk",
-                "Target": clean_value(x.get("assignment_target")) or clean_value(x.get("scope")),
+                "Street / Area": clean_value(x.get("assignment_target")) or _a331_area_label(x),
                 "Status": clean_value(x.get("status")) or "Ready",
                 "Households": int(x.get("household_count") or 0),
                 "Voters": int(x.get("voter_count") or 0),
+                "Due Date": clean_value(x.get("due_date")),
             } for x in saved]
             st.dataframe(pd.DataFrame(assign_rows), width="stretch", hide_index=True)
             labels = [f"{clean_value(x.get('name'))} — {int(x.get('household_count') or 0):,} HH / {int(x.get('voter_count') or 0):,} voters — {clean_value(x.get('assigned_to')) or 'Unassigned'}" for x in saved]
             choice = st.selectbox("Work item", labels, key=f"a33_assign_pkg_{campaign_id}_{pid}")
             idx = labels.index(choice)
             chosen = saved[idx]
+            selected_id = clean_value(chosen.get("package_id"))
+            area_label = clean_value(chosen.get("assignment_target")) or _a331_area_label(chosen)
+            st.markdown(f"**Street / Area:** {area_label}")
             c1, c2 = st.columns(2)
             with c1:
-                assignment_type = st.selectbox("Assignment type", ["Candidate Walk", "Volunteer Walk", "Volunteer Team", "Precinct Walk", "Street Walk"], index=0, key=f"a33_assign_type_{campaign_id}_{pid}")
                 new_assignee = st.selectbox("Assign to", assignee_labels, key=f"a33_assign_user_{campaign_id}_{pid}")
                 status = st.selectbox("Status", ["Ready", "Assigned", "In Progress", "Completed", "Paused"], index=1, key=f"a33_assign_status_{campaign_id}_{pid}")
             with c2:
-                target_default = clean_value(chosen.get("selected_street")) or clean_value(chosen.get("selected_precinct")) or clean_value(chosen.get("scope"))
-                assignment_target = st.text_input("Assignment target", value=target_default, key=f"a33_assignment_target_{campaign_id}_{pid}")
                 due_date = st.text_input("Due date", value=clean_value(chosen.get("due_date")), placeholder="YYYY-MM-DD", key=f"a33_due_date_{campaign_id}_{pid}")
                 notes = st.text_area("Assignment notes", value=clean_value(chosen.get("assignment_notes")), height=80, key=f"a33_notes_{campaign_id}_{pid}")
-            if st.button("Save Door-to-Door Assignment", type="primary", key=f"a33_save_assignment_{campaign_id}_{pid}"):
-                selected_id = clean_value(chosen.get("package_id"))
-                all_pkgs = store.get("packages") or []
-                now = datetime.now().isoformat(timespec="seconds")
-                for item in all_pkgs:
-                    if clean_value(item.get("package_id")) == selected_id:
-                        item["assigned_to"] = new_assignee
-                        item["assignment_type"] = assignment_type
-                        item["assignment_target"] = clean_value(assignment_target)
-                        item["due_date"] = clean_value(due_date)
-                        item["assignment_notes"] = clean_value(notes)
-                        item["status"] = status
-                        item["assigned_at"] = item.get("assigned_at") or now
-                        item["updated_at"] = now
-                        if isinstance(item.get("package"), dict):
-                            item["package"].setdefault("program", {})["assigned_to"] = new_assignee
-                            item["package"]["assignment"] = {
-                                "assigned_to": new_assignee,
-                                "assignment_type": assignment_type,
-                                "assignment_target": clean_value(assignment_target),
-                                "due_date": clean_value(due_date),
-                                "status": status,
-                                "notes": clean_value(notes),
-                            }
-                store["packages"] = all_pkgs
-                ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
-                if ok:
-                    st.success("Door-to-door assignment saved. This is the work item the mobile app will later show to the assigned user.")
-                    st.rerun()
-                else:
-                    st.error(msg)
+            save_col, delete_col = st.columns([1, 1])
+            with save_col:
+                if st.button("Save Assignment", type="primary", key=f"a331_save_assignment_{campaign_id}_{pid}"):
+                    all_pkgs = store.get("packages") or []
+                    now = datetime.now().isoformat(timespec="seconds")
+                    for item in all_pkgs:
+                        if clean_value(item.get("package_id")) == selected_id:
+                            item["assigned_to"] = new_assignee
+                            item["assignment_type"] = clean_value(item.get("assignment_type")) or "Door-to-Door Work"
+                            item["assignment_target"] = area_label
+                            item["due_date"] = clean_value(due_date)
+                            item["assignment_notes"] = clean_value(notes)
+                            item["status"] = status
+                            item["assigned_at"] = item.get("assigned_at") or now
+                            item["updated_at"] = now
+                            if isinstance(item.get("package"), dict):
+                                item["package"].setdefault("program", {})["assigned_to"] = new_assignee
+                                item["package"]["assignment"] = {
+                                    "assigned_to": new_assignee,
+                                    "assignment_type": "Door-to-Door Work",
+                                    "assignment_target": area_label,
+                                    "due_date": clean_value(due_date),
+                                    "status": status,
+                                    "notes": clean_value(notes),
+                                }
+                    store["packages"] = all_pkgs
+                    ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
+                    if ok:
+                        st.success("Assignment saved. This work item will later appear in the assigned user's mobile app.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with delete_col:
+                confirm_delete = st.checkbox("Confirm delete selected work item", key=f"a331_confirm_delete_work_{campaign_id}_{pid}")
+                if st.button("Delete Work Item", key=f"a331_delete_work_{campaign_id}_{pid}", disabled=not confirm_delete):
+                    all_pkgs = store.get("packages") or []
+                    store["packages"] = [item for item in all_pkgs if clean_value(item.get("package_id")) != selected_id]
+                    ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
+                    if ok:
+                        st.success("Work item deleted. Campaign users were not deleted.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
     with track_tab:
         st.markdown("##### Door-to-Door Progress")
@@ -11927,7 +11949,16 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 st.metric("Remaining HH", f"{remaining_hh:,}")
             progress = (completed_hh / total_hh) if total_hh else 0
             st.progress(min(max(progress, 0), 1), text=f"{progress:.1%} complete")
-            track_rows = [{k: x.get(k) for k in ["name","assigned_to","assignment_type","assignment_target","status","household_count","voter_count","due_date","created_at"]} for x in saved]
+            track_rows = [{
+                "Work Item": clean_value(x.get("name")),
+                "Assigned To": clean_value(x.get("assigned_to")) or "Unassigned",
+                "Street / Area": clean_value(x.get("assignment_target")) or clean_value(x.get("selected_street")) or clean_value(x.get("selected_precinct")) or clean_value(x.get("scope")),
+                "Status": clean_value(x.get("status")) or "Ready",
+                "Households": int(x.get("household_count") or 0),
+                "Voters": int(x.get("voter_count") or 0),
+                "Due Date": clean_value(x.get("due_date")),
+                "Created": clean_value(x.get("created_at")),
+            } for x in saved]
             st.dataframe(pd.DataFrame(track_rows), width="stretch", hide_index=True)
 
 def render_program_manager_a2(campaign_id: str | None = None):
@@ -12201,14 +12232,14 @@ def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results now live inside each program.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_dash, tab_programs, tab_results, tab_legacy = st.tabs(["Dashboard", "Programs", "Results", "Legacy Setup"])
+    tab_dash, tab_programs, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Reporting", "Legacy Setup"])
     with tab_dash:
         render_outreach_dashboard_v1(campaign_id)
     with tab_programs:
         render_program_manager_a2(campaign_id)
-    with tab_results:
-        st.markdown("### Results")
-        st.caption("Unified outreach results across active programs. Program-specific results stay inside each Program workspace.")
+    with tab_reporting:
+        st.markdown("### Campaign Reporting")
+        st.caption("Campaign-wide outreach reporting across active programs. Program-specific results stay inside each Program workspace.")
         render_outreach_dashboard_v1(campaign_id)
     with tab_legacy:
         st.markdown("### Legacy Setup")
