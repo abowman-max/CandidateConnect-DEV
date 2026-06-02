@@ -11206,9 +11206,9 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
     with c1:
         st.metric("Active Programs", f"{len(active_programs):,}")
     with c2:
-        st.metric("Active Assignments", f"{len(assignments):,}")
+        st.metric("Assigned Users", f"{len({uid for p in active_programs for uid in _program_user_ids(p)}):,}")
     with c3:
-        st.metric("Voters Loaded", f"{total_voters:,}")
+        st.metric("Assigned Voters", f"{total_voters:,}")
     with c4:
         st.metric("Progress", f"{pct_complete:.1f}%")
 
@@ -11241,9 +11241,8 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
                 "Program": clean_value(pr.get("name")) or "Unnamed Program",
                 "Channels": ", ".join([clean_value(c) for c in channels if clean_value(c)]) or clean_value(pr.get("program_type")),
                 "Status": clean_value(pr.get("status")) or "Planning",
-                "Lists": len(list_by_program.get(pid, [])),
-                "Assignments": len(pr_assignments),
-                "Loaded Voters": tv,
+                "Users": len(_program_user_ids(pr)),
+                "Assigned Voters": tv,
                 "Complete": cv,
                 "Remaining": max(tv-cv, 0),
                 "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
@@ -11281,7 +11280,7 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
                 "Assignment": clean_value(a.get("name")) or "Unnamed Assignment",
                 "Assigned To": people_lookup.get(clean_value(a.get("person_id")), clean_value(a.get("team_member_name")) or "Unassigned"),
                 "Status": clean_value(a.get("status")) or "Assigned",
-                "Loaded Voters": tv,
+                "Assigned Voters": tv,
                 "Complete": cv,
                 "Remaining": max(tv-cv, 0),
                 "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
@@ -11487,7 +11486,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
     c1, c2, c3, c4 = st.columns(4)
     with c1: st.metric("Programs", f"{len(programs):,}")
     with c2: st.metric("Active", f"{sum(1 for p in programs if clean_value(p.get('status')).lower() == 'active'):,}")
-    with c3: st.metric("Team Users", f"{len(people):,}")
+    with c3: st.metric("Campaign Users", f"{len(people):,}")
     with c4: st.metric("Saved Universes", f"{len(saved_universes):,}")
 
     create_tab, manage_tab = st.tabs(["Create Program", "Manage Programs"])
@@ -11526,14 +11525,15 @@ def render_program_manager_a2(campaign_id: str | None = None):
                     "start_date": clean_value(start_date),
                     "end_date": clean_value(end_date),
                     "notes": clean_value(notes),
-                    "program_model": "a2_1_program_centered",
+                    "program_model": "a2_2_program_centered",
                     "created_at": now,
                     "updated_at": now,
                 }
                 store["programs"] = programs + [rec]
                 ok, msg = save_outreach_programs_store(campaign_id, store)
                 if ok:
-                    st.success("Program created.")
+                    st.session_state[f"pm_a22_open_program_id_{campaign_id}"] = pid
+                    st.success("Program created. Open Manage Programs to review details, users, channels, and workflow tabs.")
                     st.rerun()
                 else:
                     st.error(msg)
@@ -11545,11 +11545,20 @@ def render_program_manager_a2(campaign_id: str | None = None):
         rows = [_program_summary_row(p, user_id_to_label) for p in programs]
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         labels = [f"{clean_value(p.get('name')) or 'Unnamed'} — {clean_value(p.get('status')) or 'Planning'}" for p in programs]
-        selected = st.selectbox("Open program", labels, key=f"pm_a21_open_{campaign_id}")
+        wanted_pid = clean_value(st.session_state.get(f"pm_a22_open_program_id_{campaign_id}", ""))
+        default_index = 0
+        if wanted_pid:
+            for i, p in enumerate(programs):
+                if clean_value(p.get("program_id")) == wanted_pid:
+                    default_index = i
+                    break
+        selected = st.selectbox("Open program", labels, index=default_index, key=f"pm_a21_open_{campaign_id}")
         current = programs[labels.index(selected)]
         pid = clean_value(current.get("program_id"))
+        st.session_state[f"pm_a22_open_program_id_{campaign_id}"] = pid
         st.markdown("#### Program Details")
-        detail_overview, detail_access, detail_channels, detail_danger = st.tabs(["Overview", "Users & Assignees", "Channels", "Archive/Delete"])
+        st.caption("Program owns: Universe → Users → Channels → Assignments → Results.")
+        detail_overview, detail_access, detail_door, detail_phone, detail_text, detail_mail, detail_results, detail_danger = st.tabs(["Overview", "Users", "Door-to-Door", "Phone", "Text", "Mail", "Results", "Archive/Delete"])
 
         current_channels = _program_channels(current)
         current_user_ids = _program_user_ids(current)
@@ -11583,7 +11592,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                     "end_date": clean_value(e_end),
                     "notes": clean_value(e_notes),
                     "updated_at": datetime.now().isoformat(timespec="seconds"),
-                    "program_model": "a2_1_program_centered",
+                    "program_model": "a2_2_program_centered",
                 })
                 store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
                 ok, msg = save_outreach_programs_store(campaign_id, store)
@@ -11602,7 +11611,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 updated = dict(current)
                 updated["user_ids"] = [label_to_user_id[x] for x in e_users if x in label_to_user_id]
                 updated["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                updated["program_model"] = "a2_1_program_centered"
+                updated["program_model"] = "a2_2_program_centered"
                 store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
                 ok, msg = save_outreach_programs_store(campaign_id, store)
                 if ok:
@@ -11654,7 +11663,22 @@ def render_program_manager_a2(campaign_id: str | None = None):
             else:
                 st.caption("Assign at least one program user before replacing or removing assignees.")
 
-        with detail_channels:
+        with detail_door:
+            st.info("Phase B will move ranked precincts, ranked streets, candidate walks, and canvasser turf assignments here for this program.")
+
+        with detail_phone:
+            st.info("Phone Bank workflow will use this program's universe, users, and results here.")
+
+        with detail_text:
+            st.info("Texting workflow will use this program's universe, users, and results here.")
+
+        with detail_mail:
+            st.info("Mail workflow will use this program's universe, users, and results here.")
+
+        with detail_results:
+            st.info("Unified results for this program will appear here as contact attempts sync back from web and mobile.")
+
+        with detail_overview:
             st.caption("Channels determine which workflow pages can use this program.")
             with st.form(f"program_manager_a21_edit_channels_{campaign_id}_{pid}"):
                 e_channels = st.multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key=f"pm_a21_edit_channels_{pid}")
@@ -11664,7 +11688,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 updated["channels"] = [clean_value(c) for c in e_channels if clean_value(c)]
                 updated["program_type"] = updated["channels"][0] if updated["channels"] else clean_value(current.get("program_type"))
                 updated["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                updated["program_model"] = "a2_1_program_centered"
+                updated["program_model"] = "a2_2_program_centered"
                 store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
                 ok, msg = save_outreach_programs_store(campaign_id, store)
                 if ok:
@@ -11715,7 +11739,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
-    st.caption("Dashboard first; programs now own universe, channels, and user access so workflow pages stay clean.")
+    st.caption("Dashboard first; programs own universe, users, channels, assignments, and results so workflow pages stay clean.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
     tab_dash, tab_programs, tab_door, tab_phone, tab_text, tab_mail, tab_results, tab_legacy = st.tabs(["Dashboard", "Programs", "Door-to-Door", "Phone Bank", "Texting", "Mail", "Results", "Legacy Setup"])
     with tab_dash:
