@@ -12578,17 +12578,45 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
 
 
 def render_mobile_shell_c1() -> None:
-    """C2.8 Field Indicators: compact field UI with Follow Up label and MB-perm icon."""
+    """C3 Mobile-Only Display Mode: isolated phone UI with compact field flow."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.8 Mobile Field Shell")
-    st.caption("Ultra-dense field flow with saved checkbox state and field indicators: Lists → Streets → Houses → Household. Results queue locally until sync is built.")
+    st.markdown("""
+    <div class="cc-mobile-topbar">
+      <div class="cc-mobile-brand">Candidate Connect Field</div>
+      <div class="cc-mobile-sub">Offline-ready field mode</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("## C3 Mobile Field Shell")
+    st.caption("Mobile-only display mode: Lists → Streets → Houses → Household. Results queue locally until sync is built.")
 
     st.markdown("""
     <style>
-    /* C2.8 ultra dense field UI */
+    /* C3 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
+    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
+    .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
+    .block-container, [data-testid="stMain"] .block-container {
+        padding: .35rem .45rem .8rem .45rem !important;
+        max-width: 100vw !important;
+        width: 100% !important;
+        margin: 0 !important;
+    }
+    [data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
+    [data-testid="stAppViewContainer"] > .main { margin-left: 0 !important; padding-left: 0 !important; }
+    header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; height: 0 !important; }
+    .cc-mobile-topbar {
+        position: sticky; top: 0; z-index: 999;
+        background: #efe8d8; border-bottom: 1px solid #9f151c;
+        padding: 4px 6px 5px 6px; margin: -4px -6px 5px -6px;
+        display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    }
+    .cc-mobile-brand { color:#071d3a; font-weight:950; font-size: .98rem; line-height:1; }
+    .cc-mobile-sub { color:#5f6b7a; font-weight:700; font-size:.68rem; white-space: nowrap; }
+    h2 { font-size: 1.05rem !important; margin: 0 0 2px 0 !important; line-height: 1.05 !important; }
+    [data-testid="stCaptionContainer"] { font-size: .68rem !important; line-height: 1.05 !important; }
+    /* C3/C2.8 ultra dense field UI */
     .cc-mobile-step {
         background: #f8f4ea;
         border: 1px solid rgba(159,21,28,.22);
@@ -13095,11 +13123,15 @@ def render_election_day_workspace():
     st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
 
 # Full-width branded header fixed across both the sidebar and main workspace.
+# C3: when the mobile field shell is active, suppress the desktop header/sidebar
+# so the phone gets a true full-width field UI without damaging the web app.
+_CC_MOBILE_FIELD_MODE = st.session_state.get("left_section") == "mobile_shell_c1"
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
 _tss_logo_uri = img_data_uri(LOGO_TPTC)
 _cc_logo_html = f'<img class="cc-global-logo-center" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
 _tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
-st.markdown(f'''<div class="cc-global-header">
+if not _CC_MOBILE_FIELD_MODE:
+    st.markdown(f'''<div class="cc-global-header">
   <div class="cc-global-sidebar-fill"></div>
   <div class="cc-global-header-inner">
     <div class="cc-global-redbar"></div>
@@ -13251,7 +13283,7 @@ with st.sidebar:
     if st.button("📣 Voter Outreach", width="stretch", key="nav_voter_outreach_main"):
         st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
-    if st.button("📱 C1 Mobile Shell", width="stretch", key="nav_mobile_shell_c1"):
+    if st.button("📱 Mobile Field", width="stretch", key="nav_mobile_shell_c1"):
         st.session_state["left_section"]="mobile_shell_c1"; st.session_state["view"]="mobile"; st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
