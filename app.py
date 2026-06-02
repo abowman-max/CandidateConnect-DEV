@@ -12481,11 +12481,13 @@ def _c1_household_voters_from_package(hh: dict, voter_map: dict[str, list[dict]]
     out: list[dict] = []
     for idx, v in enumerate(mapped, start=1):
         nm = clean_value(v.get("FullName") or v.get("Name") or v.get("Names") or v.get("Voter Name"))
+        mb_perm_raw = clean_value(v.get("MB_PERM") or v.get("MB Perm") or v.get("MBPerm") or v.get("PermanentMB") or v.get("Permanent MB"))
         out.append({
             "voter_id": clean_value(v.get("voter_id") or v.get("Voter ID") or v.get("PA_VOTER_ID")),
             "name": nm or f"Voter {idx}",
             "party": clean_value(v.get("Party") or v.get("CalculatedParty")),
             "age": clean_value(v.get("Age") or v.get("AGE")),
+            "mb_perm": mb_perm_raw,
         })
     if out:
         return out
@@ -12495,6 +12497,7 @@ def _c1_household_voters_from_package(hh: dict, voter_map: dict[str, list[dict]]
             "name": nm or f"Voter {idx}",
             "party": clean_value(hh.get("Party")),
             "age": "",
+            "mb_perm": clean_value(hh.get("MB_PERM") or hh.get("MB Perm") or hh.get("MBPerm") or hh.get("PermanentMB") or hh.get("Permanent MB")),
         })
     return out
 
@@ -12575,17 +12578,17 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
 
 
 def render_mobile_shell_c1() -> None:
-    """C2.6 Ultra Dense Field UI: phone-first tap rows, no wasted vertical space."""
+    """C2.8 Field Indicators: compact field UI with Follow Up label and MB-perm icon."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.7 Mobile Field Shell")
-    st.caption("Ultra-dense field flow with saved checkbox state: Lists → Streets → Houses → Household. Rows are tappable; results queue locally until sync is built.")
+    st.markdown("## C2.8 Mobile Field Shell")
+    st.caption("Ultra-dense field flow with saved checkbox state and field indicators: Lists → Streets → Houses → Household. Results queue locally until sync is built.")
 
     st.markdown("""
     <style>
-    /* C2.6 ultra dense field UI */
+    /* C2.8 ultra dense field UI */
     .cc-mobile-step {
         background: #f8f4ea;
         border: 1px solid rgba(159,21,28,.22);
@@ -12671,9 +12674,9 @@ def render_mobile_shell_c1() -> None:
     [data-testid="stMain"] div[data-testid="stMetric"] label { margin-bottom: 0 !important; }
     [data-testid="stMain"] div[data-testid="stMetric"] [data-testid="stMetricValue"] { font-size: 1.35rem !important; line-height: 1 !important; }
     [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
-        min-height: 24px !important;
-        height: 24px !important;
-        padding: 2px 12px !important;
+        min-height: 22px !important;
+        height: 22px !important;
+        padding: 1px 10px !important;
         border-radius: 6px !important;
         width: auto !important;
         max-width: max-content !important;
@@ -12962,22 +12965,25 @@ def render_mobile_shell_c1() -> None:
         if meta_bits:
             st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
 
-        widths = [3.4, .48, .48, .48, .55, .55, .75]
+        widths = [3.35, .44, .44, .44, .52, .52, .90]
         hdr = st.columns(widths)
-        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "FU"]):
+        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
             hc.markdown(f"**{label}**")
         _row_sep()
 
         voter_rows: list[tuple[dict, list[str]]] = []
-        checks = [("Favorable", "F"), ("Undecided", "U"), ("Against", "A"), ("Not Home", "NH"), ("Yard Sign", "YS"), ("Needs Follow-up", "FU")]
+        checks = [("Favorable", "F"), ("Undecided", "U"), ("Against", "A"), ("Not Home", "NH"), ("Yard Sign", "YS"), ("Needs Follow-up", "Follow Up")]
         for idx, voter in enumerate(hh_voters, start=1):
             voter_name = clean_value(voter.get("name")) or f"Voter {idx}"
             voter_id = clean_value(voter.get("voter_id"))
             party = clean_value(voter.get("party"))
             age = clean_value(voter.get("age"))
+            mb_perm = clean_value(voter.get("mb_perm")).upper()
+            is_mb_perm = mb_perm in {"Y", "YES", "TRUE", "1", "PERM", "PERMANENT", "P"}
+            display_name = ("✉ " if is_mb_perm else "") + voter_name
             row = st.columns(widths)
             meta = " ".join([x for x in [party, f"Age {age}" if age else ""] if x])
-            row[0].markdown(f'<div class="cc-voter-name">{voter_name}</div>' + (f'<div class="cc-voter-meta">{meta}</div>' if meta else ''), unsafe_allow_html=True)
+            row[0].markdown(f'<div class="cc-voter-name">{display_name}</div>' + (f'<div class="cc-voter-meta">{meta}</div>' if meta else ''), unsafe_allow_html=True)
             selections = []
             default_results = set()
             if voter_id and voter_id in prior_voter_results:
@@ -12991,7 +12997,7 @@ def render_mobile_shell_c1() -> None:
                         st.session_state[cb_key] = full in default_results
                     if st.checkbox(short, key=cb_key, label_visibility="collapsed"):
                         selections.append(full)
-            voter_rows.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age}, selections))
+            voter_rows.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age, "mb_perm": mb_perm}, selections))
             _row_sep()
 
         notes_key = f"c26_household_notes_{mobile_id}_{_ops_slug(hk)}"
@@ -13054,6 +13060,7 @@ def render_mobile_shell_c1() -> None:
             if st.button("Back", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
+        st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
         return
 
     st.session_state[screen_key] = "login"
