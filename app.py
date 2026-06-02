@@ -11238,17 +11238,269 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
         st.caption("No assignments yet.")
 
 
+
+
+def _program_channel_options() -> list[str]:
+    return ["Door-to-Door", "Phone Bank", "Texting", "Mail", "Email", "Mail Ballot Chase", "Other"]
+
+
+def _program_status_options() -> list[str]:
+    return ["Draft", "Planning", "Active", "Paused", "Completed", "Archived"]
+
+
+def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[str, str], dict[str, str]]:
+    try:
+        people = load_team_people_store(campaign_id).get("people", []) or []
+    except Exception:
+        people = []
+    active = [p for p in people if str(p.get("status", "Active")).lower() in {"active", "prospect", ""}]
+    labels = []
+    label_to_id = {}
+    id_to_label = {}
+    for person in active:
+        pid = clean_value(person.get("person_id"))
+        if not pid:
+            continue
+        name = clean_value(person.get("name")) or "Unnamed"
+        role = clean_value(person.get("role")) or "Team"
+        label = f"{name} — {role}"
+        labels.append(label)
+        label_to_id[label] = pid
+        id_to_label[pid] = label
+    return active, labels, label_to_id, id_to_label
+
+
+def _program_summary_row(program: dict, user_lookup: dict[str, str] | None = None) -> dict:
+    user_lookup = user_lookup or {}
+    user_ids = program.get("user_ids") or program.get("assigned_user_ids") or []
+    if not isinstance(user_ids, list):
+        user_ids = []
+    channels = program.get("channels") or []
+    if not isinstance(channels, list):
+        channels = [clean_value(channels)] if clean_value(channels) else []
+    return {
+        "Program": clean_value(program.get("name")) or "Unnamed Program",
+        "Status": clean_value(program.get("status")) or "Planning",
+        "Universe": clean_value(program.get("source_saved_universe") or program.get("universe") or ""),
+        "Channels": ", ".join([clean_value(c) for c in channels if clean_value(c)]) or clean_value(program.get("program_type")),
+        "Users": len(user_ids),
+        "Start": clean_value(program.get("start_date")),
+        "End": clean_value(program.get("end_date")),
+    }
+
+
+def render_program_manager_a2(campaign_id: str | None = None):
+    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
+    store = load_outreach_programs_store(campaign_id)
+    programs = store.get("programs") or []
+    saved_universes = _saved_universe_names_for_contact_lists()
+    people, user_labels, label_to_user_id, user_id_to_label = _program_user_labels(campaign_id)
+    channel_options = _program_channel_options()
+    status_options = _program_status_options()
+
+    st.markdown("### Programs")
+    st.caption("Create the outreach program once, attach the saved universe, choose channels, and assign which users can access it.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Programs", f"{len(programs):,}")
+    with c2:
+        st.metric("Active", f"{sum(1 for p in programs if clean_value(p.get('status')).lower() == 'active'):,}")
+    with c3:
+        st.metric("Team Users", f"{len(people):,}")
+    with c4:
+        st.metric("Saved Universes", f"{len(saved_universes):,}")
+
+    create_tab, manage_tab = st.tabs(["Create Program", "Manage Programs"])
+
+    with create_tab:
+        with st.form(f"program_manager_a2_create_{campaign_id}"):
+            a, b = st.columns(2)
+            with a:
+                name = st.text_input("Program name", placeholder="2026 General Election Doors", key=f"pm_a2_name_{campaign_id}")
+                status = st.selectbox("Status", status_options, index=status_options.index("Planning"), key=f"pm_a2_status_{campaign_id}")
+                source_universe = st.selectbox("Saved universe", saved_universes if saved_universes else [""], disabled=not bool(saved_universes), key=f"pm_a2_universe_{campaign_id}")
+                channels = st.multiselect("Channels", channel_options, default=["Door-to-Door"], key=f"pm_a2_channels_{campaign_id}")
+            with b:
+                assigned_users = st.multiselect("Program access / assigned users", user_labels, key=f"pm_a2_users_{campaign_id}")
+                start_date = st.text_input("Start date", placeholder="2026-06-01", key=f"pm_a2_start_{campaign_id}")
+                end_date = st.text_input("End date", placeholder="2026-11-03", key=f"pm_a2_end_{campaign_id}")
+                goal = st.text_input("Goal", placeholder="Candidate doors in top-priority precincts", key=f"pm_a2_goal_{campaign_id}")
+            notes = st.text_area("Notes", height=90, placeholder="Strategy, script notes, or field instructions", key=f"pm_a2_notes_{campaign_id}")
+            submitted = st.form_submit_button("Create Program", type="primary")
+        if submitted:
+            if not clean_value(name):
+                st.error("Program name is required.")
+            elif not clean_value(source_universe):
+                st.error("Choose a saved universe before creating the program.")
+            elif not channels:
+                st.error("Choose at least one channel.")
+            else:
+                program = _normalize_contact_program({
+                    "name": name,
+                    "program_type": channels[0] if channels else "Door-to-Door",
+                    "status": status,
+                    "goal": goal,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "notes": notes,
+                }, campaign_id)
+                program.update({
+                    "source_saved_universe": clean_value(source_universe),
+                    "channels": [clean_value(c) for c in channels if clean_value(c)],
+                    "user_ids": [label_to_user_id[x] for x in assigned_users if x in label_to_user_id],
+                    "program_model": "a2_program_centered",
+                })
+                store["programs"] = programs + [program]
+                ok, msg = save_outreach_programs_store(campaign_id, store)
+                if ok:
+                    st.success("Program created.")
+                    st.rerun()
+                else:
+                    st.error(f"Could not save program: {msg}")
+
+    with manage_tab:
+        if not programs:
+            st.info("No programs yet. Create one to begin organizing voter outreach.")
+            return
+        rows = [_program_summary_row(p, user_id_to_label) for p in programs]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+        labels = []
+        label_to_index = {}
+        for i, p in enumerate(programs):
+            label = f"{clean_value(p.get('name')) or 'Unnamed Program'} — {clean_value(p.get('status')) or 'Planning'} — {clean_value(p.get('program_id'))}"
+            labels.append(label)
+            label_to_index[label] = i
+        selected = st.selectbox("Open program", labels, key=f"pm_a2_open_{campaign_id}")
+        current = programs[label_to_index[selected]]
+        pid = clean_value(current.get("program_id"))
+        st.markdown("#### Program Details")
+        detail_overview, detail_access, detail_channels, detail_danger = st.tabs(["Overview", "Users", "Channels", "Archive/Delete"])
+
+        current_channels = current.get("channels") if isinstance(current.get("channels"), list) else []
+        if not current_channels and clean_value(current.get("program_type")):
+            current_channels = [clean_value(current.get("program_type"))]
+        current_user_ids = current.get("user_ids") if isinstance(current.get("user_ids"), list) else []
+        current_user_labels = [user_id_to_label[uid] for uid in current_user_ids if uid in user_id_to_label]
+        current_universe = clean_value(current.get("source_saved_universe") or current.get("universe") or "")
+
+        with detail_overview:
+            with st.form(f"program_manager_a2_edit_overview_{campaign_id}_{pid}"):
+                a, b = st.columns(2)
+                with a:
+                    e_name = st.text_input("Program name", value=clean_value(current.get("name")), key=f"pm_a2_edit_name_{pid}")
+                    e_status = st.selectbox("Status", status_options, index=status_options.index(clean_value(current.get("status"))) if clean_value(current.get("status")) in status_options else 1, key=f"pm_a2_edit_status_{pid}")
+                    universe_options = saved_universes if saved_universes else [current_universe]
+                    if current_universe and current_universe not in universe_options:
+                        universe_options = [current_universe] + universe_options
+                    e_universe = st.selectbox("Saved universe", universe_options if universe_options else [""], index=(universe_options.index(current_universe) if current_universe in universe_options else 0), key=f"pm_a2_edit_universe_{pid}")
+                with b:
+                    e_start = st.text_input("Start date", value=clean_value(current.get("start_date")), key=f"pm_a2_edit_start_{pid}")
+                    e_end = st.text_input("End date", value=clean_value(current.get("end_date")), key=f"pm_a2_edit_end_{pid}")
+                    e_goal = st.text_input("Goal", value=clean_value(current.get("goal")), key=f"pm_a2_edit_goal_{pid}")
+                e_notes = st.text_area("Notes", value=clean_value(current.get("notes")), height=90, key=f"pm_a2_edit_notes_{pid}")
+                save_overview = st.form_submit_button("Save Overview", type="primary")
+            if save_overview:
+                updated = dict(current)
+                updated.update({
+                    "name": clean_value(e_name),
+                    "status": clean_value(e_status),
+                    "source_saved_universe": clean_value(e_universe),
+                    "goal": clean_value(e_goal),
+                    "start_date": clean_value(e_start),
+                    "end_date": clean_value(e_end),
+                    "notes": clean_value(e_notes),
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                    "program_model": "a2_program_centered",
+                })
+                store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
+                ok, msg = save_outreach_programs_store(campaign_id, store)
+                if ok:
+                    st.success("Program overview saved.")
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        with detail_access:
+            st.caption("These users can see or receive work from this program. A user may belong to multiple programs.")
+            with st.form(f"program_manager_a2_edit_users_{campaign_id}_{pid}"):
+                e_users = st.multiselect("Program users", user_labels, default=current_user_labels, key=f"pm_a2_edit_users_{pid}")
+                save_users = st.form_submit_button("Save Users", type="primary")
+            if save_users:
+                updated = dict(current)
+                updated["user_ids"] = [label_to_user_id[x] for x in e_users if x in label_to_user_id]
+                updated["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                updated["program_model"] = "a2_program_centered"
+                store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
+                ok, msg = save_outreach_programs_store(campaign_id, store)
+                if ok:
+                    st.success("Program users saved.")
+                    st.rerun()
+                else:
+                    st.error(msg)
+            if current_user_ids:
+                assigned_rows = []
+                for uid in current_user_ids:
+                    assigned_rows.append({"User": user_id_to_label.get(uid, uid), "User ID": uid})
+                st.dataframe(pd.DataFrame(assigned_rows), width="stretch", hide_index=True)
+            else:
+                st.info("No users assigned yet.")
+
+        with detail_channels:
+            st.caption("Channels determine which workflow pages can use this program.")
+            with st.form(f"program_manager_a2_edit_channels_{campaign_id}_{pid}"):
+                e_channels = st.multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key=f"pm_a2_edit_channels_{pid}")
+                save_channels = st.form_submit_button("Save Channels", type="primary")
+            if save_channels:
+                updated = dict(current)
+                updated["channels"] = [clean_value(c) for c in e_channels if clean_value(c)]
+                updated["program_type"] = updated["channels"][0] if updated["channels"] else clean_value(current.get("program_type"))
+                updated["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                updated["program_model"] = "a2_program_centered"
+                store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
+                ok, msg = save_outreach_programs_store(campaign_id, store)
+                if ok:
+                    st.success("Program channels saved.")
+                    st.rerun()
+                else:
+                    st.error(msg)
+            st.write("Current channels:", ", ".join(current_channels) if current_channels else "None")
+
+        with detail_danger:
+            st.warning("Archive keeps the program for reporting. Delete removes it from the outreach program store.")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Archive Program", key=f"pm_a2_archive_{campaign_id}_{pid}"):
+                    updated = dict(current)
+                    updated["status"] = "Archived"
+                    updated["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                    store["programs"] = [updated if clean_value(p.get("program_id")) == pid else p for p in programs]
+                    ok, msg = save_outreach_programs_store(campaign_id, store)
+                    if ok:
+                        st.success("Program archived.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with col_b:
+                confirm = st.checkbox("Confirm delete", key=f"pm_a2_delete_confirm_{campaign_id}_{pid}")
+                if st.button("Delete Program", key=f"pm_a2_delete_{campaign_id}_{pid}", disabled=not confirm):
+                    store["programs"] = [p for p in programs if clean_value(p.get("program_id")) != pid]
+                    ok, msg = save_outreach_programs_store(campaign_id, store)
+                    if ok:
+                        st.success("Program deleted.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
-    st.caption("Dashboard first; builders are separated by workflow so campaign managers are not dropped into a giant setup page.")
+    st.caption("Dashboard first; programs now own universe, channels, and user access so workflow pages stay clean.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
     tab_dash, tab_programs, tab_door, tab_phone, tab_text, tab_mail, tab_results, tab_legacy = st.tabs(["Dashboard", "Programs", "Door-to-Door", "Phone Bank", "Texting", "Mail", "Results", "Legacy Setup"])
     with tab_dash:
         render_outreach_dashboard_v1(campaign_id)
     with tab_programs:
-        st.markdown("### Programs")
-        st.caption("Phase A2 will merge program, universe, user access, and channel setup here. For now, the existing Contact Programs screen is preserved below.")
-        render_contact_programs_workspace(campaign_id)
+        render_program_manager_a2(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
         st.caption("Phase B home for ranked precincts, ranked streets, candidate walk packages, and canvasser turf assignments.")
