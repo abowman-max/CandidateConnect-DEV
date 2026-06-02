@@ -12578,8 +12578,8 @@ def render_mobile_shell_c1() -> None:
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.3 Mobile Field Shell")
-    st.caption("Dense phone flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results queue locally until sync is built.")
+    st.markdown("## C2.4 Mobile Field Shell")
+    st.caption("Compact field flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results queue locally until sync is built.")
 
     st.markdown("""
     <style>
@@ -12587,8 +12587,8 @@ def render_mobile_shell_c1() -> None:
         background: #f8f4ea;
         border: 1px solid rgba(159,21,28,.25);
         border-radius: 10px;
-        padding: 8px 10px;
-        margin: 6px 0 10px 0;
+        padding: 6px 9px;
+        margin: 4px 0 6px 0;
         color: #071d3a;
         font-weight: 950;
     }
@@ -12607,23 +12607,6 @@ def render_mobile_shell_c1() -> None:
         margin-bottom: 0 !important;
         line-height: 1.05 !important;
     }
-    .cc-mobile-row div[data-testid="stButton"] button {
-        background: transparent !important;
-        border: 0 !important;
-        box-shadow: none !important;
-        color: #071d3a !important;
-        -webkit-text-fill-color: #071d3a !important;
-        padding: 0 !important;
-        min-height: 22px !important;
-        height: 22px !important;
-        justify-content: flex-start !important;
-        text-align: left !important;
-        font-weight: 950 !important;
-    }
-    .cc-mobile-row div[data-testid="stButton"] button:hover {
-        text-decoration: underline !important;
-        background: rgba(255,255,255,.22) !important;
-    }
     .cc-mobile-done {
         color: #1f6b3a;
         font-weight: 950;
@@ -12641,6 +12624,38 @@ def render_mobile_shell_c1() -> None:
     }
     div[data-testid="stCheckbox"] label { min-height: 26px !important; }
     div[data-testid="stCheckbox"] p { font-size: .86rem !important; }
+
+    /* C2.4 compact mobile tap-list: make row buttons behave like left-pane buttons, not giant red action buttons. */
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
+        background: rgba(248,244,234,.78) !important;
+        background-color: rgba(248,244,234,.78) !important;
+        color: #071d3a !important;
+        -webkit-text-fill-color: #071d3a !important;
+        border: 1px solid rgba(159,21,28,.24) !important;
+        border-radius: 8px !important;
+        box-shadow: none !important;
+        font-weight: 850 !important;
+        min-height: 26px !important;
+        height: 26px !important;
+        padding: 3px 9px !important;
+        margin: 0 !important;
+        line-height: 1.0 !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        width: auto !important;
+        max-width: 100% !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
+        background: #f8f4ea !important;
+        background-color: #f8f4ea !important;
+        border-color: rgba(159,21,28,.55) !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] { margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .25rem !important; margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="column"] { padding-top: 0 !important; padding-bottom: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 0 !important; line-height: 1.05 !important; }
+    [data-testid="stMain"] hr { margin: .15rem 0 !important; }
+
     @media (max-width: 700px) {
         .block-container { padding-left: .55rem !important; padding-right: .55rem !important; }
         h2 { font-size: 1.35rem !important; }
