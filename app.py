@@ -12580,8 +12580,8 @@ def render_mobile_shell_c1() -> None:
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.6 Mobile Field Shell")
-    st.caption("Ultra-dense field flow: Lists → Streets → Houses → Household. Rows are tappable; results queue locally until sync is built.")
+    st.markdown("## C2.7 Mobile Field Shell")
+    st.caption("Ultra-dense field flow with saved checkbox state: Lists → Streets → Houses → Household. Rows are tappable; results queue locally until sync is built.")
 
     st.markdown("""
     <style>
@@ -12606,7 +12606,7 @@ def render_mobile_shell_c1() -> None:
     }
     .cc-field-row-sep {
         border-bottom: 1px solid rgba(7,29,58,.08);
-        margin: 1px 0 !important;
+        margin: 0 !important;
         height: 1px;
     }
     .cc-mobile-done { color: #1f6b3a; font-weight: 950; }
@@ -12627,15 +12627,16 @@ def render_mobile_shell_c1() -> None:
         border-radius: 4px !important;
         box-shadow: none !important;
         font-weight: 900 !important;
-        min-height: 18px !important;
-        height: 18px !important;
-        padding: 0 2px !important;
+        min-height: 14px !important;
+        height: 14px !important;
+        padding: 0 1px !important;
         margin: 0 !important;
-        line-height: 1.0 !important;
+        line-height: .95 !important;
         justify-content: flex-start !important;
         text-align: left !important;
         width: 100% !important;
         max-width: 100% !important;
+        font-size: .82rem !important;
     }
     [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
         background: rgba(159,21,28,.08) !important;
@@ -12661,6 +12662,28 @@ def render_mobile_shell_c1() -> None:
     div[data-testid="stCheckbox"] label { min-height: 18px !important; padding: 0 !important; margin: 0 !important; }
     div[data-testid="stCheckbox"] p { font-size: .72rem !important; line-height: 1 !important; margin: 0 !important; }
     textarea { min-height: 46px !important; }
+
+
+    [data-testid="stMain"] div[data-testid="stVerticalBlock"] { gap: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stVerticalBlockBorderWrapper"] { margin: 0 !important; padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] h3 { margin: 2px 0 3px 0 !important; line-height: 1.0 !important; }
+    [data-testid="stMain"] div[data-testid="stMetric"] { padding: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMetric"] label { margin-bottom: 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMetric"] [data-testid="stMetricValue"] { font-size: 1.35rem !important; line-height: 1 !important; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
+        min-height: 24px !important;
+        height: 24px !important;
+        padding: 2px 12px !important;
+        border-radius: 6px !important;
+        width: auto !important;
+        max-width: max-content !important;
+        line-height: 1 !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] * {
+        line-height: 1 !important;
+        font-size: .82rem !important;
+        font-weight: 900 !important;
+    }
 
     @media (max-width: 700px) {
         .block-container { padding-left: .35rem !important; padding-right: .35rem !important; padding-top: .35rem !important; }
@@ -12909,6 +12932,30 @@ def render_mobile_shell_c1() -> None:
         precinct = clean_value(assignment.get("selected_precinct") or assignment.get("street_area"))
         hh_voters = _c1_household_voters_from_package(hh, voter_map)
 
+        # Rehydrate previously saved selections from the local offline queue so a canvasser can
+        # reopen a household and see exactly what was already checked before sync.
+        prior_voter_results: dict[str, set[str]] = {}
+        prior_household_note = ""
+        for rec in queue:
+            if clean_value(rec.get("mobile_assignment_id")) != mobile_id:
+                continue
+            if clean_value(rec.get("household_key")) != hk:
+                continue
+            if clean_value(rec.get("notes")):
+                prior_household_note = clean_value(rec.get("notes"))
+            if clean_value(rec.get("result_scope")) != "voter":
+                continue
+            rec_voter_id = clean_value(rec.get("voter_id"))
+            rec_voter_name = clean_value(rec.get("voter_name"))
+            rec_key = rec_voter_id or rec_voter_name
+            raw_results = rec.get("results")
+            if isinstance(raw_results, list):
+                parsed_results = [clean_value(x) for x in raw_results if clean_value(x)]
+            else:
+                parsed_results = [clean_value(x) for x in clean_value(rec.get("result")).split(";") if clean_value(x)]
+            if rec_key:
+                prior_voter_results.setdefault(rec_key, set()).update(parsed_results)
+
         st.markdown('<div class="cc-mobile-step">Screen 4: Household</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="cc-house-title">{address}</div>', unsafe_allow_html=True)
         meta_bits = [x for x in [city.title() if city else "", precinct.title() if precinct else ""] if x]
@@ -12932,17 +12979,28 @@ def render_mobile_shell_c1() -> None:
             meta = " ".join([x for x in [party, f"Age {age}" if age else ""] if x])
             row[0].markdown(f'<div class="cc-voter-name">{voter_name}</div>' + (f'<div class="cc-voter-meta">{meta}</div>' if meta else ''), unsafe_allow_html=True)
             selections = []
+            default_results = set()
+            if voter_id and voter_id in prior_voter_results:
+                default_results.update(prior_voter_results.get(voter_id, set()))
+            if voter_name in prior_voter_results:
+                default_results.update(prior_voter_results.get(voter_name, set()))
             for j, (full, short) in enumerate(checks, start=1):
                 with row[j]:
-                    if st.checkbox(short, key=f"c26_v_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(short)}", label_visibility="collapsed"):
+                    cb_key = f"c26_v_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(short)}"
+                    if cb_key not in st.session_state:
+                        st.session_state[cb_key] = full in default_results
+                    if st.checkbox(short, key=cb_key, label_visibility="collapsed"):
                         selections.append(full)
             voter_rows.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age}, selections))
             _row_sep()
 
-        household_notes = st.text_area("Notes", height=50, key=f"c26_household_notes_{mobile_id}_{_ops_slug(hk)}", placeholder="Short household note")
-        d1, d2 = st.columns([2.5, 1])
+        notes_key = f"c26_household_notes_{mobile_id}_{_ops_slug(hk)}"
+        if notes_key not in st.session_state and prior_household_note:
+            st.session_state[notes_key] = prior_household_note
+        household_notes = st.text_area("Notes", height=44, key=notes_key, placeholder="Short household note")
+        d1, d2, d3 = st.columns([1.0, .7, 4.2])
         with d1:
-            if st.button("Save / Done", type="primary", width="stretch", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Save / Done", type="primary", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
                 saved_count = 0
                 now = datetime.now().isoformat(timespec="seconds")
                 for voter, selected_results in voter_rows:
@@ -12993,7 +13051,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         with d2:
-            if st.button("Back", width="stretch", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Back", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         return
