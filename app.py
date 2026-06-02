@@ -12573,103 +12573,100 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
     return selected
 
 
+
 def render_mobile_shell_c1() -> None:
+    """C2.6 Ultra Dense Field UI: phone-first tap rows, no wasted vertical space."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("## C2.5 Mobile Field Shell")
-    st.caption("Tight field flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results queue locally until sync is built.")
+    st.markdown("## C2.6 Mobile Field Shell")
+    st.caption("Ultra-dense field flow: Lists → Streets → Houses → Household. Rows are tappable; results queue locally until sync is built.")
 
     st.markdown("""
     <style>
+    /* C2.6 ultra dense field UI */
     .cc-mobile-step {
         background: #f8f4ea;
-        border: 1px solid rgba(159,21,28,.25);
-        border-radius: 10px;
-        padding: 6px 9px;
-        margin: 4px 0 6px 0;
+        border: 1px solid rgba(159,21,28,.22);
+        border-radius: 7px;
+        padding: 4px 7px;
+        margin: 2px 0 5px 0;
         color: #071d3a;
         font-weight: 950;
+        font-size: .92rem;
     }
-    .cc-mobile-smallhint {
-        color: #5f6b7a;
-        font-size: .86rem;
-        margin: 0 0 8px 0;
-    }
-    .cc-mobile-row {
-        background: rgba(255,255,255,.18);
-        border-bottom: 1px solid rgba(7,29,58,.10);
-        padding: 0;
-        margin: 0;
-    }
-    .cc-mobile-row div[data-testid="stMarkdownContainer"] p {
-        margin-bottom: 0 !important;
-        line-height: 1.05 !important;
-    }
-    .cc-mobile-done {
-        color: #1f6b3a;
+    .cc-field-header {
+        border-bottom: 1px solid rgba(7,29,58,.20);
+        margin: 0 0 2px 0;
+        padding: 0 0 2px 0;
         font-weight: 950;
+        color: #071d3a;
+        font-size: .88rem;
     }
-    .cc-mobile-pending {
-        color: #8a6d00;
-        font-weight: 850;
+    .cc-field-row-sep {
+        border-bottom: 1px solid rgba(7,29,58,.08);
+        margin: 1px 0 !important;
+        height: 1px;
     }
-    .cc-mobile-house-card {
-        background: rgba(255,255,255,.35);
-        border: 1px solid rgba(7,29,58,.10);
-        border-radius: 8px;
-        padding: 8px 10px;
-        margin: 6px 0 8px 0;
-    }
-    div[data-testid="stCheckbox"] label { min-height: 26px !important; }
-    div[data-testid="stCheckbox"] p { font-size: .86rem !important; }
+    .cc-mobile-done { color: #1f6b3a; font-weight: 950; }
+    .cc-mobile-pending { color: #637083; font-weight: 850; }
+    .cc-mobile-partial { color: #8a6d00; font-weight: 950; }
+    .cc-house-title { font-size: 1.22rem; font-weight: 950; margin: 1px 0 1px 0; color: #071d3a; }
+    .cc-house-meta { color: #9f151c; font-weight: 850; margin: 0 0 5px 0; line-height: 1.05; }
+    .cc-voter-name { font-weight: 900; color: #071d3a; line-height: 1.05; }
+    .cc-voter-meta { color: #5f6b7a; font-size: .78rem; line-height: 1.0; }
 
-    /* C2.5 compact mobile tap-list: make row buttons behave like left-pane buttons, not giant red action buttons. */
+    /* Dense row buttons: look like compact text links, not action buttons. */
     [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
-        background: #f8f4ea !important;
-        background-color: #f8f4ea !important;
+        background: transparent !important;
+        background-color: transparent !important;
         color: #071d3a !important;
         -webkit-text-fill-color: #071d3a !important;
-        border: 1px solid rgba(159,21,28,.32) !important;
-        border-radius: 8px !important;
+        border: 0 !important;
+        border-radius: 4px !important;
         box-shadow: none !important;
-        font-weight: 850 !important;
-        min-height: 24px !important;
-        height: 24px !important;
-        padding: 2px 9px !important;
+        font-weight: 900 !important;
+        min-height: 18px !important;
+        height: 18px !important;
+        padding: 0 2px !important;
         margin: 0 !important;
         line-height: 1.0 !important;
         justify-content: flex-start !important;
         text-align: left !important;
-        width: auto !important;
+        width: 100% !important;
         max-width: 100% !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
+        background: rgba(159,21,28,.08) !important;
+        background-color: rgba(159,21,28,.08) !important;
+        color: #071d3a !important;
+        -webkit-text-fill-color: #071d3a !important;
     }
     [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
         color: #071d3a !important;
         -webkit-text-fill-color: #071d3a !important;
         opacity: 1 !important;
-        font-weight: 850 !important;
+        font-weight: 900 !important;
         line-height: 1.0 !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
-        background: #fffaf0 !important;
-        background-color: #fffaf0 !important;
-        border-color: rgba(159,21,28,.65) !important;
     }
     [data-testid="stMain"] div[data-testid="stButton"] { margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
     [data-testid="stMain"] div[data-testid="element-container"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .25rem !important; margin: 0 !important; padding: 0 !important; align-items: center !important; }
+    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .15rem !important; margin: 0 !important; padding: 0 !important; align-items: center !important; }
     [data-testid="stMain"] div[data-testid="column"] { padding-top: 0 !important; padding-bottom: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin: 0 !important; line-height: 1.0 !important; }
     [data-testid="stMain"] div[data-testid="stMarkdownContainer"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] hr { margin: .05rem 0 !important; }
+    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin: 0 !important; line-height: 1.0 !important; }
+    [data-testid="stMain"] hr { margin: 1px 0 !important; }
+    div[data-testid="stCheckbox"] { margin: 0 !important; padding: 0 !important; }
+    div[data-testid="stCheckbox"] label { min-height: 18px !important; padding: 0 !important; margin: 0 !important; }
+    div[data-testid="stCheckbox"] p { font-size: .72rem !important; line-height: 1 !important; margin: 0 !important; }
+    textarea { min-height: 46px !important; }
 
     @media (max-width: 700px) {
-        .block-container { padding-left: .55rem !important; padding-right: .55rem !important; }
-        h2 { font-size: 1.35rem !important; }
-        h3 { font-size: 1.12rem !important; margin-bottom: .25rem !important; }
-        div[data-testid="column"] { padding-left: .15rem !important; padding-right: .15rem !important; }
+        .block-container { padding-left: .35rem !important; padding-right: .35rem !important; padding-top: .35rem !important; }
+        h2 { font-size: 1.15rem !important; margin-bottom: .1rem !important; }
+        h3 { font-size: 1.0rem !important; margin: .1rem 0 !important; }
+        div[data-testid="column"] { padding-left: .05rem !important; padding-right: .05rem !important; }
         div[data-testid="stMetric"] { padding: 0 !important; }
     }
     </style>
@@ -12681,11 +12678,12 @@ def render_mobile_shell_c1() -> None:
     hh_key = _c21_mobile_state_key(campaign_id, username, "household")
     completed_key = _c21_mobile_state_key(campaign_id, username, "completed_households")
     queue_key = _c1_mobile_queue_key(campaign_id, username)
+    uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
+
     st.session_state.setdefault(screen_key, "login")
     queue = st.session_state.setdefault(queue_key, [])
     completed = st.session_state.setdefault(completed_key, {})
 
-    uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
     saved_packages = _c1_saved_mobile_packages_for_user(campaign_id, programs)
     uploaded_pkg = st.session_state.get(uploaded_pkg_key)
     packages = ([uploaded_pkg] if isinstance(uploaded_pkg, dict) else []) + saved_packages
@@ -12693,6 +12691,8 @@ def render_mobile_shell_c1() -> None:
     deduped = []
     seen = set()
     for pkg0 in packages:
+        if not isinstance(pkg0, dict):
+            continue
         a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
         mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or _c21_package_label(pkg0))
         if mid0 in seen:
@@ -12700,58 +12700,69 @@ def render_mobile_shell_c1() -> None:
         seen.add(mid0)
         deduped.append(pkg0)
     packages = deduped
+
     package_by_id = {}
-    for pkg0 in packages:
+    for i, pkg0 in enumerate(packages, start=1):
         a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
-        mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or _c21_package_label(pkg0))
+        mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
         package_by_id[mid0] = pkg0
-
-    top1, top2, top3 = st.columns(3)
-    with top1: st.metric("Queued", f"{len(queue):,}")
-    with top2: st.metric("Lists", f"{len(packages):,}")
-    with top3: st.metric("User", username or "—")
-
-    with st.expander("Offline Queue / DEV tools", expanded=False):
-        st.caption("This is still a browser/session queue. C3 will move this into persistent device storage.")
-        up = st.file_uploader("Load Assignment Package JSON for DEV test", type=["json"], key="c22_mobile_assignment_upload")
-        if up is not None:
-            try:
-                st.session_state[uploaded_pkg_key] = json.loads(up.getvalue().decode("utf-8"))
-                st.success("Assignment package loaded. Go to My Lists.")
-                if st.button("Go to My Lists", key="c22_go_lists_after_upload"):
-                    st.session_state[screen_key] = "lists"
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Could not read assignment JSON: {e}")
-        if queue:
-            st.dataframe(pd.DataFrame(queue), width="stretch", hide_index=True)
-            st.download_button(
-                "Export Local Sync Queue JSON",
-                json.dumps(queue, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name=f"{campaign_id}_mobile_offline_results_queue.json",
-                mime="application/json",
-                key="c22_export_queue",
-            )
-            q1, q2 = st.columns(2)
-            with q1:
-                if st.button("Clear Local Queue", key="c22_clear_queue"):
-                    st.session_state[queue_key] = []
-                    st.rerun()
-            with q2:
-                if st.button("Clear Completed Indicators", key="c22_clear_done"):
-                    st.session_state[completed_key] = {}
-                    st.rerun()
-        else:
-            st.info("No queued results yet.")
 
     screen = st.session_state.get(screen_key, "login")
 
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Queued", len(queue))
+    m2.metric("Lists", len(packages))
+    m3.metric("User", username)
+
+    with st.expander("Offline Queue / DEV tools", expanded=False):
+        st.caption("C2.6 is still local/session-first. Use this area for testing package load/export only.")
+        upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
+        if upload is not None:
+            try:
+                pkg_loaded = json.loads(upload.getvalue().decode("utf-8"))
+                if isinstance(pkg_loaded, dict) and pkg_loaded.get("package_type") == "candidate_connect_mobile_assignment_package":
+                    st.session_state[uploaded_pkg_key] = pkg_loaded
+                    st.success("Assignment package loaded.")
+                    st.session_state[screen_key] = "lists"
+                    st.rerun()
+                else:
+                    st.error("That JSON is not a Candidate Connect mobile assignment package.")
+            except Exception as e:
+                st.error("Could not read JSON package."); st.exception(e)
+        if queue:
+            st.download_button(
+                "Export Local Sync Queue JSON",
+                data=json.dumps(queue, indent=2),
+                file_name=f"{campaign_id}_mobile_offline_results_queue.json",
+                mime="application/json",
+                key="c26_export_queue",
+            )
+            if st.button("Clear Local Queue", key="c26_clear_queue"):
+                st.session_state[queue_key] = []
+                st.session_state[completed_key] = {}
+                st.rerun()
+        else:
+            st.caption("Queue is empty.")
+
+    def _row_sep():
+        st.markdown('<div class="cc-field-row-sep"></div>', unsafe_allow_html=True)
+
+    def _is_house_done(hk: str, voter_count: int = 0) -> tuple[str, str]:
+        recs = [r for r in queue if isinstance(r, dict) and clean_value(r.get("household_key")) == hk]
+        if bool(completed.get(hk)):
+            return "✓", "cc-mobile-done"
+        if recs:
+            # If some voter-level records exist but not every voter has a result, call it partial.
+            voter_recs = [r for r in recs if clean_value(r.get("result_scope")) == "voter"]
+            if voter_count and voter_recs and len({clean_value(r.get("voter_name")) or clean_value(r.get("voter_id")) for r in voter_recs}) < voter_count:
+                return "◐", "cc-mobile-partial"
+            return "✓", "cc-mobile-done"
+        return "○", "cc-mobile-pending"
+
     if screen == "login":
         st.markdown('<div class="cc-mobile-step">Screen 0: Login</div>', unsafe_allow_html=True)
-        st.markdown("### Candidate Connect Field")
-        st.write(f"Signed in as **{username}**")
-        st.caption(f"Role: {current_role()} · Campaign: {campaign_id}")
-        if st.button("Continue to My Lists", type="primary", width="stretch", key="c22_continue_to_lists"):
+        st.caption("For DEV, mobile inherits the current Candidate Connect login.")
+        if st.button("Continue to Lists", key="c26_continue_lists"):
             st.session_state[screen_key] = "lists"
             st.rerun()
         return
@@ -12759,13 +12770,14 @@ def render_mobile_shell_c1() -> None:
     if screen == "lists":
         st.markdown('<div class="cc-mobile-step">Screen 1: Lists</div>', unsafe_allow_html=True)
         if not packages:
-            st.warning("No mobile lists are available. Use DEV tools above to load a sample package, or generate a Mobile Assignment Package from Voter Outreach.")
-            if st.button("Back to Login", key="c23_back_login_no_lists"):
+            st.warning("No mobile lists are available. Use DEV tools above to load a package or generate one from Voter Outreach.")
+            if st.button("Back to Login", key="c26_back_login_no_lists"):
                 st.session_state[screen_key] = "login"
                 st.rerun()
             return
-        h1, h2, h3 = st.columns([4.4, 1, 1.25])
-        h1.markdown("**List**"); h2.markdown("**Voters**"); h3.markdown("**Households**")
+        h1, h2 = st.columns([5.2, 1.4])
+        h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header">Voters | HH</div>', unsafe_allow_html=True)
         for i, pkg0 in enumerate(packages, start=1):
             a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
             mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
@@ -12774,19 +12786,17 @@ def render_mobile_shell_c1() -> None:
             v_count = int(a0.get("voter_count") or 0)
             if not v_count:
                 v_count = sum(int(h.get("Voters") or 0) for h in (pkg0.get("households") or []))
-            st.markdown('<div class="cc-mobile-row">', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns([4.4, 1, 1.25])
+            c1, c2 = st.columns([5.2, 1.4])
             with c1:
-                if st.button(title, key=f"c23_open_list_{mid0}"):
+                if st.button(title.upper(), key=f"c26_open_list_{mid0}"):
                     st.session_state[assignment_key] = mid0
                     st.session_state[street_key] = ""
                     st.session_state[hh_key] = ""
                     st.session_state[screen_key] = "streets"
                     st.rerun()
-            c2.markdown(f"{v_count:,}")
-            c3.markdown(f"{hh_count:,}")
-            st.markdown('</div>', unsafe_allow_html=True)
-        if st.button("Back to Login", key="c23_back_login_from_lists"):
+            c2.markdown(f"**{v_count:,} | {hh_count:,}**")
+            _row_sep()
+        if st.button("← Login", key="c26_back_login_from_lists"):
             st.session_state[screen_key] = "login"
             st.rerun()
         return
@@ -12806,29 +12816,34 @@ def render_mobile_shell_c1() -> None:
     if screen == "streets":
         st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
         st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
-        h1, h2, h3 = st.columns([4.25, 1.15, 1])
-        h1.markdown("**Street**"); h2.markdown("**Households**"); h3.markdown("**Voters**")
+        h1, h2 = st.columns([5.2, 1.4])
+        h1.markdown('<div class="cc-field-header">Street</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header">Done | Houses</div>', unsafe_allow_html=True)
         for street in street_names:
-            hhs = street_map.get(street) or []
-            voters_count = sum(int(h.get("Voters") or 0) for h in hhs)
-            st.markdown('<div class="cc-mobile-row">', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns([4.25, 1.15, 1])
+            hhs = sorted(street_map.get(street) or [], key=_c21_house_sort_value)
+            done_count = 0
+            for h in hhs:
+                hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
+                vct = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
+                status, _cls = _is_house_done(hk, vct)
+                if status == "✓":
+                    done_count += 1
+            c1, c2 = st.columns([5.2, 1.4])
             with c1:
-                if st.button(street, key=f"c23_street_{mobile_id}_{_ops_slug(street)}"):
+                if st.button(street.upper(), key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
                     st.session_state[street_key] = street
                     st.session_state[hh_key] = ""
                     st.session_state[screen_key] = "houses"
                     st.rerun()
-            c2.markdown(f"{len(hhs):,}")
-            c3.markdown(f"{voters_count:,}")
-            st.markdown('</div>', unsafe_allow_html=True)
+            c2.markdown(f"**{done_count:,}/{len(hhs):,}**")
+            _row_sep()
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("New List", key="c23_new_list_from_streets", width="stretch"):
+            if st.button("← Lists", key="c26_new_list_from_streets"):
                 st.session_state[screen_key] = "lists"
                 st.rerun()
         with b2:
-            if st.button("Login", key="c23_login_from_streets", width="stretch"):
+            if st.button("Login", key="c26_login_from_streets"):
                 st.session_state[screen_key] = "login"
                 st.rerun()
         return
@@ -12837,34 +12852,39 @@ def render_mobile_shell_c1() -> None:
     street_households = sorted(street_map.get(selected_street) or [], key=_c21_house_sort_value)
 
     if screen == "houses":
-        st.markdown('<div class="cc-mobile-step">Screen 3: House Numbers</div>', unsafe_allow_html=True)
-        st.markdown(f"### {selected_street or 'Selected Street'}")
-        h1, h2, h3 = st.columns([4.35, 1, 1.15])
-        h1.markdown("**House / Address**"); h2.markdown("**Voters**"); h3.markdown("**Status**")
+        st.markdown('<div class="cc-mobile-step">Screen 3: Houses</div>', unsafe_allow_html=True)
+        done_total = 0
+        for h in street_households:
+            hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
+            vct = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
+            if _is_house_done(hk, vct)[0] == "✓":
+                done_total += 1
+        st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
+        h1, h2 = st.columns([5.2, 1.4])
+        h1.markdown('<div class="cc-field-header">House</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header">Voters</div>', unsafe_allow_html=True)
         if not street_households:
             st.warning("No households found for this street.")
         for h in street_households:
             hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
             addr = clean_value(h.get("Address"))
             voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
-            done = bool(completed.get(hk)) or any(clean_value(r.get("household_key")) == hk for r in queue if isinstance(r, dict))
-            st.markdown('<div class="cc-mobile-row">', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns([4.35, 1, 1.15])
+            marker, marker_cls = _is_house_done(hk, voters_n)
+            c1, c2 = st.columns([5.2, 1.4])
             with c1:
-                if st.button(addr, key=f"c23_house_{mobile_id}_{_ops_slug(hk)}"):
+                if st.button(f"{marker} {addr}".upper(), key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
                     st.session_state[hh_key] = hk
                     st.session_state[screen_key] = "household"
                     st.rerun()
-            c2.markdown(f"{voters_n:,}")
-            c3.markdown('<span class="cc-mobile-done">✓ Done</span>' if done else '<span class="cc-mobile-pending">Open</span>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            c2.markdown(f"**{voters_n:,}**")
+            _row_sep()
         b1, b2 = st.columns(2)
         with b1:
-            if st.button("New Street", key="c23_new_street_from_houses", width="stretch"):
+            if st.button("← Streets", key="c26_new_street_from_houses"):
                 st.session_state[screen_key] = "streets"
                 st.rerun()
         with b2:
-            if st.button("New List", key="c23_new_list_from_houses", width="stretch"):
+            if st.button("Lists", key="c26_new_list_from_houses"):
                 st.session_state[screen_key] = "lists"
                 st.rerun()
         return
@@ -12890,52 +12910,39 @@ def render_mobile_shell_c1() -> None:
         hh_voters = _c1_household_voters_from_package(hh, voter_map)
 
         st.markdown('<div class="cc-mobile-step">Screen 4: Household</div>', unsafe_allow_html=True)
-        st.markdown(f"### {address}")
-        if city: st.markdown(f"**{city.title()}**")
-        if precinct: st.caption(precinct.title())
+        st.markdown(f'<div class="cc-house-title">{address}</div>', unsafe_allow_html=True)
+        meta_bits = [x for x in [city.title() if city else "", precinct.title() if precinct else ""] if x]
+        if meta_bits:
+            st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="cc-mobile-house-card">', unsafe_allow_html=True)
-        st.caption("Tap boxes, add a short note if needed, then Save. The saved house will show ✓ Done on the house list.")
-
-        col_headers = ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]
-        widths = [3.2, .55, .55, .55, .65, .65, 1.15]
+        widths = [3.4, .48, .48, .48, .55, .55, .75]
         hdr = st.columns(widths)
-        for hc, label in zip(hdr, col_headers):
+        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "FU"]):
             hc.markdown(f"**{label}**")
+        _row_sep()
 
         voter_rows: list[tuple[dict, list[str]]] = []
+        checks = [("Favorable", "F"), ("Undecided", "U"), ("Against", "A"), ("Not Home", "NH"), ("Yard Sign", "YS"), ("Needs Follow-up", "FU")]
         for idx, voter in enumerate(hh_voters, start=1):
             voter_name = clean_value(voter.get("name")) or f"Voter {idx}"
             voter_id = clean_value(voter.get("voter_id"))
             party = clean_value(voter.get("party"))
             age = clean_value(voter.get("age"))
             row = st.columns(widths)
-            name_line = voter_name
             meta = " ".join([x for x in [party, f"Age {age}" if age else ""] if x])
-            row[0].markdown(f"**{name_line}**")
-            if meta:
-                row[0].caption(meta)
+            row[0].markdown(f'<div class="cc-voter-name">{voter_name}</div>' + (f'<div class="cc-voter-meta">{meta}</div>' if meta else ''), unsafe_allow_html=True)
             selections = []
-            checks = [
-                ("Favorable", "F"),
-                ("Undecided", "U"),
-                ("Against", "A"),
-                ("Not Home", "NH"),
-                ("Yard Sign", "YS"),
-                ("Needs Follow-up", "FU"),
-            ]
             for j, (full, short) in enumerate(checks, start=1):
                 with row[j]:
-                    if st.checkbox(short, key=f"c22_v_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(short)}", label_visibility="collapsed"):
+                    if st.checkbox(short, key=f"c26_v_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(short)}", label_visibility="collapsed"):
                         selections.append(full)
             voter_rows.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age}, selections))
+            _row_sep()
 
-        household_notes = st.text_area("Notes", height=70, key=f"c22_household_notes_{mobile_id}_{_ops_slug(hk)}", placeholder="Short household note")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        d1, d2 = st.columns([2, 1])
+        household_notes = st.text_area("Notes", height=50, key=f"c26_household_notes_{mobile_id}_{_ops_slug(hk)}", placeholder="Short household note")
+        d1, d2 = st.columns([2.5, 1])
         with d1:
-            if st.button("Save / Done", type="primary", width="stretch", key=f"c22_done_household_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Save / Done", type="primary", width="stretch", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
                 saved_count = 0
                 now = datetime.now().isoformat(timespec="seconds")
                 for voter, selected_results in voter_rows:
@@ -12986,7 +12993,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         with d2:
-            if st.button("Back", width="stretch", key=f"c22_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Back", width="stretch", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         return
