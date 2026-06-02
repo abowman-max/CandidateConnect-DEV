@@ -12487,10 +12487,19 @@ def _c1_render_household_knock(pkg: dict, campaign_id: str, username: str) -> No
         voter_labels.append(label)
         voter_lookup[label] = clean_value(v.get("voter_id") or v.get("Voter ID") or v.get("PA_VOTER_ID"))
     target = st.selectbox("Apply result to", voter_labels, key=f"c1_result_target_{mobile_id}_{hk}")
-    result = st.selectbox("Result", result_options, key=f"c1_result_{mobile_id}_{hk}")
+    selected_results = st.multiselect(
+        "Result(s)",
+        result_options,
+        default=[],
+        help="Select every outcome that applies, for example Favorable + Yard Sign.",
+        key=f"c1_results_{mobile_id}_{hk}",
+    )
     tags_added = st.text_input("Tags added", placeholder="comma separated", key=f"c1_tags_{mobile_id}_{hk}")
     notes = st.text_area("Notes", height=80, key=f"c1_notes_{mobile_id}_{hk}")
     if st.button("Save Result Offline", type="primary", key=f"c1_save_result_{mobile_id}_{hk}"):
+        if not selected_results:
+            st.warning("Select at least one result before saving.")
+            return
         qkey = _c1_mobile_queue_key(campaign_id, username)
         queue = st.session_state.setdefault(qkey, [])
         queue.append({
@@ -12498,7 +12507,8 @@ def _c1_render_household_knock(pkg: dict, campaign_id: str, username: str) -> No
             "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
             "voter_id": voter_lookup.get(target, ""),
             "household_key": hk,
-            "result": clean_value(result),
+            "results": [clean_value(x) for x in selected_results if clean_value(x)],
+            "result": "; ".join(clean_value(x) for x in selected_results if clean_value(x)),
             "tags_added": clean_value(tags_added),
             "notes": clean_value(notes),
             "contacted_at": datetime.now().isoformat(timespec="seconds"),
@@ -12506,7 +12516,7 @@ def _c1_render_household_knock(pkg: dict, campaign_id: str, username: str) -> No
             "sync_status": "queued_offline",
         })
         st.session_state[qkey] = queue
-        st.success("Saved offline. It is now waiting in the local sync queue.")
+        st.success("Saved offline. Open the Offline Queue tab to review or export it.")
 
 
 def render_mobile_shell_c1() -> None:
@@ -12574,13 +12584,14 @@ def render_mobile_shell_c1() -> None:
 
     with queue_tab:
         st.markdown("### Offline Sync Queue")
+        st.caption("This is the local device/session queue. In C1 it lives in this browser session; C2 will persist it on the phone/browser so it survives refreshes and no-signal field work.")
         qkey = _c1_mobile_queue_key(campaign_id, username)
         queue = st.session_state.setdefault(qkey, [])
         st.metric("Queued Results", f"{len(queue):,}")
         if queue:
             st.dataframe(pd.DataFrame(queue), width="stretch", hide_index=True)
             st.download_button(
-                "Export Queued Results JSON",
+                "Export Local Sync Queue JSON",
                 json.dumps(queue, ensure_ascii=False, indent=2).encode("utf-8"),
                 file_name=f"{campaign_id}_mobile_offline_results_queue.json",
                 mime="application/json",
@@ -12590,7 +12601,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[qkey] = []
                 st.rerun()
         else:
-            st.info("No offline results queued yet.")
+            st.info("No offline results queued yet. Save a household result from My Assignments, then return to this tab.")
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
