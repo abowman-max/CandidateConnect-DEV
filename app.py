@@ -11473,7 +11473,7 @@ def _unassign_program_user_assignments_a21(campaign_id: str, program_id: str, us
 
 
 # ---------------------------------------------------------------------------
-# Voter Outreach: A3 Program Door-to-Door workflow
+# Voter Outreach: A3.1 Program Door-to-Door workflow — performance cleanup
 # ---------------------------------------------------------------------------
 def _program_candidate_walk_packages_key(campaign_id: str) -> str:
     return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/candidate_walk_packages.json"
@@ -11507,6 +11507,7 @@ def save_program_candidate_walk_packages_store(campaign_id: str, store: dict) ->
     return ok, msg
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _a3_program_voters_dataframe(source_universe: str, max_rows: int = 75000) -> tuple[pd.DataFrame, dict]:
     """Load a program universe into the v45 candidate-walk dataframe shape."""
     raw, meta = _mobile_voters_dataframe_from_saved_universe(source_universe, max_rows=max_rows)
@@ -11520,6 +11521,7 @@ def _a3_program_voters_dataframe(source_universe: str, max_rows: int = 75000) ->
     }
     out = _v45_flatten_packet_voters([fake_packet])
     meta["candidate_walk_rows"] = int(len(out)) if out is not None else 0
+    meta["a31_cached"] = True
     return out, meta
 
 
@@ -11603,7 +11605,18 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         st.info("Paused until checked so Program Details stays fast.")
         return
 
-    with st.spinner("Loading program universe for Door-to-Door..."):
+    perf_cols = st.columns([1, 1, 3])
+    with perf_cols[0]:
+        if st.button("Refresh cached universe", key=f"a31_refresh_cache_{campaign_id}_{pid}"):
+            try:
+                _a3_program_voters_dataframe.clear()
+            except Exception:
+                pass
+            st.rerun()
+    with perf_cols[1]:
+        st.caption("A3.1 cache: universe/precinct data is reused while you drill into streets and households.")
+
+    with st.spinner("Loading program universe for Door-to-Door... first load may take a moment; drill-down is cached after that."):
         df, meta = _a3_program_voters_dataframe(source_universe, max_rows=75000)
     if meta.get("error"):
         st.error(meta.get("error"))
@@ -11630,14 +11643,19 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
     keep_cols = [c for c in ["Rank","County","Municipality","Precinct","Target Voters","Households","Streets","Voters / Street","Voters / HH","Priority Score"] if c in pc_show.columns]
     st.dataframe(pc_show[keep_cols], width="stretch", hide_index=True)
 
-    streets_all = _v45_rank_streets(df)
-    st.download_button(
-        "Download Full Ranked Street List CSV",
-        streets_all.to_csv(index=False).encode("utf-8"),
-        file_name=f"{_ops_slug(program.get('name') or 'program')}_ranked_streets.csv",
-        mime="text/csv",
-        key=f"a3_ranked_streets_csv_{campaign_id}_{pid}",
-    )
+    prepare_full_csv = st.checkbox("Prepare full ranked street CSV", value=False, key=f"a31_prepare_full_csv_{campaign_id}_{pid}")
+    if prepare_full_csv:
+        with st.spinner("Preparing full ranked street CSV..."):
+            streets_all = _v45_rank_streets(df)
+        st.download_button(
+            "Download Full Ranked Street List CSV",
+            streets_all.to_csv(index=False).encode("utf-8"),
+            file_name=f"{_ops_slug(program.get('name') or 'program')}_ranked_streets.csv",
+            mime="text/csv",
+            key=f"a3_ranked_streets_csv_{campaign_id}_{pid}",
+        )
+    else:
+        st.caption("Full CSV is not prepared until requested, which keeps precinct/street drill-down faster.")
 
     pc_records = pc.to_dict("records")
     pc_opts = [f"#{int(r.get('rank', 0))} — {clean_value(r.get('Precinct'))} — {int(r.get('target_voters') or 0):,} voters / {int(r.get('households') or 0):,} HH" for r in pc_records]
@@ -11652,7 +11670,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
     ].copy()
 
     st.markdown("##### Ranked Streets in Selected Precinct")
-    st_df = _v45_rank_streets(pdf)
+    with st.spinner("Ranking streets inside selected precinct..."):
+        st_df = _v45_rank_streets(pdf)
     st_show = st_df.rename(columns={"rank":"Rank","target_voters":"Target Voters","households":"Households","voters_per_household":"Voters / HH","priority_score":"Priority Score"})
     st_cols = [c for c in ["Rank","Street Name","Target Voters","Households","Voters / HH","Priority Score"] if c in st_show.columns]
     st.dataframe(st_show[st_cols], width="stretch", hide_index=True)
