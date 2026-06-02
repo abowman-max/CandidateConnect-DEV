@@ -11635,6 +11635,97 @@ def _a32_render_candidate_walk_preview(pkg: dict, max_households: int = 40) -> N
             st.caption("Mobile actions: Favorable · Undecided · Against · Yard Sign · Not Home · Needs Follow-up")
 
 
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: A3.4 mobile assignment package prep
+# ---------------------------------------------------------------------------
+def _a34_mobile_assignment_package_key(campaign_id: str, mobile_assignment_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/mobile_assignment_packages/{clean_value(mobile_assignment_id)}.json"
+
+
+def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_item: dict) -> dict:
+    """Build the mobile-ready payload consumed by the future field app.
+
+    This intentionally uses the already-saved work item/package, not the full
+    voter universe, so generating the mobile handoff is fast and safe.
+    """
+    work_item = work_item or {}
+    program = program or {}
+    embedded = work_item.get("package") if isinstance(work_item.get("package"), dict) else {}
+    households = embedded.get("households") if isinstance(embedded.get("households"), list) else []
+    voters = embedded.get("voters") if isinstance(embedded.get("voters"), list) else []
+    package_id = clean_value(work_item.get("package_id") or embedded.get("package_id"))
+    mobile_assignment_id = "ma-" + hashlib.md5(f"a34|{campaign_id}|{clean_value(program.get('program_id'))}|{package_id}".encode("utf-8")).hexdigest()[:12]
+    street_area = clean_value(work_item.get("assignment_target") or work_item.get("selected_street") or work_item.get("selected_precinct") or work_item.get("scope")) or "Assigned Area"
+    embedded_program = embedded.get("program") if isinstance(embedded.get("program"), dict) else {}
+    assignee = clean_value(work_item.get("assigned_to") or embedded_program.get("assigned_to"))
+    result_options = [
+        "Favorable",
+        "Undecided",
+        "Against",
+        "Yard Sign",
+        "Not Home",
+        "Refused",
+        "Moved",
+        "Needs Follow-up",
+    ]
+    return {
+        "version": 1,
+        "package_type": "candidate_connect_mobile_assignment_package",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "campaign_id": _ops_slug(campaign_id),
+        "program": {
+            "program_id": clean_value(program.get("program_id")),
+            "name": clean_value(program.get("name")),
+            "status": clean_value(program.get("status")),
+            "source_saved_universe": clean_value(program.get("source_saved_universe")),
+            "channels": _program_channels(program),
+        },
+        "assignment": {
+            "mobile_assignment_id": mobile_assignment_id,
+            "source_work_item_id": package_id,
+            "name": clean_value(work_item.get("name")) or street_area,
+            "assigned_to": assignee,
+            "street_area": street_area,
+            "selected_precinct": clean_value(work_item.get("selected_precinct") or embedded.get("selected_precinct")),
+            "selected_street": clean_value(work_item.get("selected_street") or embedded.get("selected_street")),
+            "scope": clean_value(work_item.get("scope") or embedded.get("scope")),
+            "status": clean_value(work_item.get("status")) or "Assigned",
+            "due_date": clean_value(work_item.get("due_date")),
+            "notes": clean_value(work_item.get("assignment_notes")),
+            "household_count": int(work_item.get("household_count") or len(households) or 0),
+            "voter_count": int(work_item.get("voter_count") or len(voters) or 0),
+        },
+        "mobile_schema": {
+            "offline_first": True,
+            "sync_mode": "upload_contact_results_only",
+            "entry_flow": ["assignment", "street_or_area", "household", "voter", "result", "done"],
+            "result_options": result_options,
+            "offline_sync_fields": [
+                "mobile_assignment_id",
+                "source_work_item_id",
+                "voter_id",
+                "household_key",
+                "result",
+                "tags_added",
+                "notes",
+                "contacted_at",
+                "device_id",
+                "sync_status",
+            ],
+        },
+        "households": households,
+        "voters": voters,
+        "offline_sync_queue": [],
+    }
+
+
+def _a34_save_mobile_assignment_package(campaign_id: str, package: dict) -> tuple[bool, str]:
+    mobile_id = clean_value(((package or {}).get("assignment") or {}).get("mobile_assignment_id"))
+    if not mobile_id:
+        return False, "No mobile assignment id was generated."
+    return _put_json_to_r2_key(_a34_mobile_assignment_package_key(campaign_id, mobile_id), package)
+
 def render_program_door_to_door_a3(campaign_id: str, program: dict, people_lookup: dict | None = None, user_id_to_label: dict | None = None) -> None:
     """Program-owned Door-to-Door workspace split into Build / Review / Assign / Track."""
     campaign_id = _ops_slug(campaign_id or _active_campaign_id())
@@ -11926,6 +12017,28 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                         st.rerun()
                     else:
                         st.error(msg)
+
+            st.markdown("##### Mobile Assignment Package")
+            st.caption("This creates the exact offline-first package the mobile app will consume under My Assignments.")
+            mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
+            m1, m2 = st.columns(2)
+            with m1:
+                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}"):
+                    ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
+                    if ok:
+                        st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}"] = mobile_pkg
+                        st.success("Mobile assignment package generated and saved. Tomorrow the mobile app will load this under My Assignments.")
+                    else:
+                        st.error(msg)
+            with m2:
+                ready_pkg = st.session_state.get(f"a34_mobile_pkg_ready_{campaign_id}_{pid}") or mobile_pkg
+                st.download_button(
+                    "Download Mobile Assignment JSON",
+                    json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
+                    mime="application/json",
+                    key=f"a34_download_mobile_assignment_{campaign_id}_{pid}",
+                )
 
     with track_tab:
         st.markdown("##### Door-to-Door Progress")
@@ -12407,9 +12520,11 @@ with st.sidebar:
         if st.button("👥 Team / Volunteers", width="stretch"):
             st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
 
-    with st.expander("📣 Voter Outreach", expanded=_current_section in {"voter_outreach"}):
-        if st.button("📣 Voter Outreach", width="stretch"):
-            st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
+    # A3.4 navigation cleanup: Voter Outreach is now a direct nav button.
+    # The duplicate inner Voter Outreach button was removed because the section
+    # itself should open the Outreach Dashboard by default.
+    if st.button("📣 Voter Outreach", width="stretch", key="nav_voter_outreach_main"):
+        st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
         if st.button("🗳️ Election Day Operations", width="stretch"):
