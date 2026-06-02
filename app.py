@@ -11572,6 +11572,68 @@ def _a3_candidate_walk_package(campaign_id: str, program: dict, scope: str, prec
     }
 
 
+
+def _a32_render_candidate_walk_preview(pkg: dict, max_households: int = 40) -> None:
+    """Browser preview of the exact mobile-style Candidate Walk package."""
+    households = pkg.get("households") or []
+    voters = pkg.get("voters") or []
+    if not households:
+        st.info("No households are available for this walk package preview.")
+        return
+
+    st.markdown("##### Candidate Walk Preview")
+    pcols = st.columns(4)
+    with pcols[0]:
+        st.metric("Precinct", clean_value(pkg.get("selected_precinct")) or "—")
+    with pcols[1]:
+        st.metric("Street", clean_value(pkg.get("selected_street")) or "Entire precinct")
+    with pcols[2]:
+        st.metric("Households", f"{int(pkg.get('household_count') or len(households)):,}")
+    with pcols[3]:
+        st.metric("Voters", f"{int(pkg.get('voter_count') or len(voters)):,}")
+
+    voter_map = {}
+    for v in voters:
+        hk = clean_value(v.get("Household Key"))
+        voter_map.setdefault(hk, []).append(v)
+
+    show_cards = st.checkbox("Show mobile-style household cards", value=True, key=f"a32_preview_cards_{clean_value(pkg.get('package_id'))}")
+    if not show_cards:
+        preview_df = pd.DataFrame(households)
+        cols = [c for c in ["Knock Order", "Address", "City", "Voters", "Names", "Party", "Ages"] if c in preview_df.columns]
+        st.dataframe(preview_df[cols], width="stretch", hide_index=True)
+        return
+
+    if len(households) > max_households:
+        st.caption(f"Showing first {max_households:,} households of {len(households):,}. Download/save package includes the full list.")
+    for hh_row in households[:max_households]:
+        hk = clean_value(hh_row.get("Household Key"))
+        address = clean_value(hh_row.get("Address"))
+        city = clean_value(hh_row.get("City"))
+        knock = clean_value(hh_row.get("Knock Order"))
+        hh_voters = voter_map.get(hk, [])
+        names = clean_value(hh_row.get("Names"))
+        sub = f"{city} • {int(hh_row.get('Voters') or len(hh_voters) or 0)} voter(s)"
+        with st.container(border=True):
+            st.markdown(f"**#{knock} — {address}**")
+            st.caption(sub)
+            if names:
+                st.write(names)
+            if hh_voters:
+                voter_rows = []
+                for v in hh_voters:
+                    voter_rows.append({
+                        "Voter": clean_value(v.get("FullName")),
+                        "Age": clean_value(v.get("Age")),
+                        "Party": clean_value(v.get("Party")),
+                        "Phone": clean_value(v.get("Mobile")) or clean_value(v.get("Landline")),
+                        "Tags": clean_value(v.get("Tags")),
+                    })
+                st.dataframe(pd.DataFrame(voter_rows), width="stretch", hide_index=True)
+            else:
+                st.caption("No voter rows found for this household.")
+            st.caption("Mobile actions: Favorable · Undecided · Against · Yard Sign · Not Home · Needs Follow-up")
+
 def render_program_door_to_door_a3(campaign_id: str, program: dict, people_lookup: dict | None = None, user_id_to_label: dict | None = None) -> None:
     """Program-owned Door-to-Door workspace: ranked precincts → streets → households."""
     campaign_id = _ops_slug(campaign_id or _active_campaign_id())
@@ -11614,7 +11676,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 pass
             st.rerun()
     with perf_cols[1]:
-        st.caption("A3.1 cache: universe/precinct data is reused while you drill into streets and households.")
+        st.caption("A3.2 preview: universe/precinct data is cached; candidate walk preview mirrors the future mobile flow.")
 
     with st.spinner("Loading program universe for Door-to-Door... first load may take a moment; drill-down is cached after that."):
         df, meta = _a3_program_voters_dataframe(source_universe, max_rows=75000)
@@ -11709,6 +11771,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         pkg_households = hh.copy()
         pkg_street_row = street_row
     pkg = _a3_candidate_walk_package(campaign_id, program, scope, precinct_row, pkg_street_row, pkg_households, pkg_voters, assignee)
+
+    _a32_render_candidate_walk_preview(pkg)
 
     save_col, dl_col = st.columns(2)
     with save_col:
