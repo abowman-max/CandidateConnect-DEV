@@ -12506,210 +12506,380 @@ def _c1_queue_mobile_result(campaign_id: str, username: str, assignment: dict, h
     st.session_state[qkey] = queue
 
 
-def _c1_render_household_knock(pkg: dict, campaign_id: str, username: str) -> None:
+
+def _c21_house_sort_value(hh: dict) -> tuple[int, int, str]:
+    """Sort Screen 3 like a printed street list: knock order first, then house number/address."""
+    ko = clean_value(hh.get("Knock Order") or hh.get("knock_order"))
+    try:
+        knock = int(float(ko)) if ko else 999999
+    except Exception:
+        knock = 999999
+    hn = clean_value(hh.get("House Number") or hh.get("house_number"))
+    try:
+        house_no = int(float(hn)) if hn else 999999
+    except Exception:
+        # fall back to leading address number
+        addr = clean_value(hh.get("Address") or "")
+        first = addr.split()[0] if addr.split() else ""
+        try:
+            house_no = int(float(first))
+        except Exception:
+            house_no = 999999
+    return (knock, house_no, clean_value(hh.get("Address")))
+
+
+def _c21_mobile_state_key(campaign_id: str, username: str, suffix: str) -> str:
+    return f"c21_{suffix}_{_ops_slug(campaign_id)}_{_ops_slug(username)}"
+
+
+def _c21_mobile_card_button(label: str, key: str, help_text: str = "", button_type: str = "secondary") -> bool:
+    """Large tap target used for phone-like navigation screens."""
+    return st.button(label, key=key, help=help_text or None, type=button_type, width="stretch")
+
+
+def _c21_package_label(pkg: dict) -> str:
+    a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+    p = pkg.get("program") if isinstance(pkg.get("program"), dict) else {}
+    title = clean_value(a.get("name") or a.get("street_area") or a.get("selected_precinct") or "Mobile List")
+    program = clean_value(p.get("name") or "Program")
+    hh_count = int(a.get("household_count") or len(pkg.get("households") or []) or 0)
+    v_count = int(a.get("voter_count") or len(pkg.get("voters") or []) or 0)
+    return f"{title}\n\n{program} · {hh_count:,} households · {v_count:,} voters"
+
+
+def _c21_prepare_mobile_package_maps(pkg: dict) -> tuple[list[dict], list[dict], dict[str, list[dict]], dict[str, list[dict]], list[str]]:
     households = pkg.get("households") if isinstance(pkg.get("households"), list) else []
     voters = pkg.get("voters") if isinstance(pkg.get("voters"), list) else []
-    assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
-    mobile_id = clean_value(assignment.get("mobile_assignment_id"))
-    if not households:
-        st.info("This package has no households.")
-        return
-
-    result_options = ((pkg.get("mobile_schema") or {}).get("result_options") or pkg.get("result_options") or ["Favorable", "Undecided", "Against", "Yard Sign", "Not Home", "Refused", "Moved", "Needs Follow-up"])
-
     voter_map: dict[str, list[dict]] = {}
     for v in voters:
         voter_map.setdefault(clean_value(v.get("Household Key") or v.get("household_key")), []).append(v)
-
-    # Assignment → Street → Household → Voter/result.
     street_map: dict[str, list[dict]] = {}
     for h in households:
         street = clean_value(h.get("Street") or h.get("Street Name") or _c1_street_name_from_address(h.get("Address", "")))
-        street_map.setdefault(street, []).append(h)
-
+        street_map.setdefault(street or "Unknown Street", []).append(h)
     street_names = sorted(street_map.keys(), key=lambda x: (x == "Unknown Street", x))
-    st.markdown("### Field Test: Street → Household → Voter")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Streets", f"{len(street_names):,}")
-    with c2:
-        st.metric("Households", f"{len(households):,}")
-    with c3:
-        st.metric("Queued", f"{len(st.session_state.get(_c1_mobile_queue_key(campaign_id, username), []) or []):,}")
+    return households, voters, voter_map, street_map, street_names
 
-    selected_street = st.selectbox("Street / area", street_names, key=f"c2_street_select_{mobile_id}")
-    street_households = sorted(street_map.get(selected_street) or [], key=lambda h: (int(clean_value(h.get("Knock Order") or "0") or 0), clean_value(h.get("Address"))))
-    hh_labels = [f"#{clean_value(h.get('Knock Order'))} — {clean_value(h.get('Address'))} — {clean_value(h.get('City'))}" for h in street_households]
-    selected_hh_label = st.selectbox("Household", hh_labels, key=f"c2_household_select_{mobile_id}_{_ops_slug(selected_street)}")
-    hh = street_households[hh_labels.index(selected_hh_label)]
-    hk = clean_value(hh.get("Household Key") or hh.get("household_key"))
-    hh_voters = _c1_household_voters_from_package(hh, voter_map)
 
-    with st.container(border=True):
-        st.markdown(f"### {clean_value(hh.get('Address'))}")
-        st.caption(f"{clean_value(hh.get('City'))} · {int(hh.get('Voters') or len(hh_voters) or 0):,} voter(s) · Knock #{clean_value(hh.get('Knock Order'))}")
-        st.write(clean_value(hh.get("Names")))
+def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: list[str] | None = None) -> list[str]:
+    """Phone-friendly checkboxes instead of dropdowns/multiselects."""
+    defaults = defaults or []
+    selected: list[str] = []
+    cols = st.columns(2)
+    for i, opt in enumerate(options):
+        with cols[i % 2]:
+            if st.checkbox(opt, value=(opt in defaults), key=f"{key_prefix}_{_ops_slug(opt)}"):
+                selected.append(opt)
+    return selected
 
-    mode = st.radio(
-        "Capture level",
-        ["Voter-level results", "Household result"],
-        horizontal=True,
-        key=f"c2_capture_level_{mobile_id}_{hk}",
-    )
-
-    if mode == "Household result":
-        selected_results = st.multiselect("Results", result_options, key=f"c2_hh_results_{mobile_id}_{hk}")
-        tags_added = st.text_input("Tags added", placeholder="comma separated", key=f"c2_hh_tags_{mobile_id}_{hk}")
-        notes = st.text_area("Notes", height=80, key=f"c2_hh_notes_{mobile_id}_{hk}")
-        if st.button("Save Household Result Offline", type="primary", key=f"c2_save_hh_{mobile_id}_{hk}"):
-            if not selected_results:
-                st.warning("Select at least one result before saving.")
-            else:
-                record = {
-                    "mobile_assignment_id": mobile_id,
-                    "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
-                    "result_scope": "household",
-                    "voter_id": "",
-                    "voter_name": "",
-                    "household_key": hk,
-                    "address": clean_value(hh.get("Address")),
-                    "street": selected_street,
-                    "results": selected_results,
-                    "result": "; ".join(selected_results),
-                    "tags_added": clean_value(tags_added),
-                    "notes": clean_value(notes),
-                    "contacted_at": datetime.now().isoformat(timespec="seconds"),
-                    "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
-                    "sync_status": "queued_offline",
-                }
-                _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
-                st.success("Household result saved offline. It is now waiting in the Offline Queue.")
-        return
-
-    st.caption("Use this when different voters in the same household need different results.")
-    saved_any = False
-    for idx, voter in enumerate(hh_voters, start=1):
-        voter_name = clean_value(voter.get("name")) or f"Voter {idx}"
-        voter_id = clean_value(voter.get("voter_id"))
-        party = clean_value(voter.get("party"))
-        age = clean_value(voter.get("age"))
-        with st.container(border=True):
-            st.markdown(f"**{voter_name}**")
-            meta = " · ".join([x for x in [party, f"Age {age}" if age else ""] if x])
-            if meta:
-                st.caption(meta)
-            selected_results = st.multiselect("Results", result_options, key=f"c2_voter_results_{mobile_id}_{hk}_{idx}_{_ops_slug(voter_name)}")
-            tags_added = st.text_input("Tags added", placeholder="comma separated", key=f"c2_voter_tags_{mobile_id}_{hk}_{idx}_{_ops_slug(voter_name)}")
-            notes = st.text_area("Notes", height=70, key=f"c2_voter_notes_{mobile_id}_{hk}_{idx}_{_ops_slug(voter_name)}")
-            if st.button("Save Voter Result Offline", type="primary", key=f"c2_save_voter_{mobile_id}_{hk}_{idx}_{_ops_slug(voter_name)}"):
-                if not selected_results:
-                    st.warning("Select at least one result before saving.")
-                else:
-                    record = {
-                        "mobile_assignment_id": mobile_id,
-                        "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
-                        "result_scope": "voter",
-                        "voter_id": voter_id,
-                        "voter_name": voter_name,
-                        "household_key": hk,
-                        "address": clean_value(hh.get("Address")),
-                        "street": selected_street,
-                        "results": selected_results,
-                        "result": "; ".join(selected_results),
-                        "tags_added": clean_value(tags_added),
-                        "notes": clean_value(notes),
-                        "contacted_at": datetime.now().isoformat(timespec="seconds"),
-                        "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
-                        "sync_status": "queued_offline",
-                    }
-                    _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
-                    saved_any = True
-                    st.success(f"Saved offline for {voter_name}. Check Offline Queue.")
-    if not hh_voters:
-        st.info("No voter names were available for this household, so use Household result mode.")
 
 def render_mobile_shell_c1() -> None:
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
-    st.markdown("## C1 Mobile Shell")
-    st.caption("Offline-first field shell: Login → My Programs → My Assignments. In C1, login is inherited from Candidate Connect while the mobile workflow is isolated and session-local.")
-
-    login_tab, programs_tab, assignments_tab, queue_tab = st.tabs(["Login", "My Programs", "My Assignments", "Offline Queue"])
     programs = _c1_programs_for_mobile(campaign_id)
 
-    with login_tab:
-        st.markdown("### Mobile Login")
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Signed In", username or "—")
-        with c2: st.metric("Role", current_role())
-        with c3: st.metric("Campaign", campaign_id)
-        st.info("C1 uses the existing Candidate Connect login gate. Native/PWA credential storage can be added after this shell proves the field flow.")
-        st.caption("Offline mode: assignments are downloaded to the device, results are queued locally, and sync sends result records only.")
+    st.markdown("## C2.1 Mobile Field Shell")
+    st.caption("Phone-style flow: Login → Lists → Streets → House Numbers → Household Card. DEV-only shell; results still queue locally until sync is built.")
 
-    with programs_tab:
-        st.markdown("### My Programs")
-        if not programs:
-            st.info("No mobile-visible programs found for this login. Add this person to a Program under Voter Outreach → Programs.")
-        else:
-            rows = []
-            for p in programs:
-                rows.append({
-                    "Program": clean_value(p.get("name")),
-                    "Status": clean_value(p.get("status")) or "Planning",
-                    "Universe": clean_value(p.get("source_saved_universe") or p.get("universe")),
-                    "Channels": ", ".join(_program_channels(p)),
-                    "Users": len(_program_user_ids(p)),
-                })
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.markdown("""
+    <style>
+    .cc-mobile-step {
+        background: #f8f4ea;
+        border: 1px solid rgba(159,21,28,.25);
+        border-radius: 14px;
+        padding: 10px 12px;
+        margin: 8px 0 12px 0;
+        color: #071d3a;
+        font-weight: 900;
+    }
+    .cc-mobile-hint {
+        background: rgba(248,244,234,.72);
+        border-left: 5px solid #9f151c;
+        padding: 9px 11px;
+        margin: 6px 0 12px 0;
+        color: #071d3a;
+        border-radius: 8px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    with assignments_tab:
-        st.markdown("### My Assignments")
-        uploaded = st.file_uploader("Load sample/mobile assignment JSON", type=["json"], key="c1_mobile_assignment_upload")
-        uploaded_pkg = None
-        if uploaded is not None:
+    screen_key = _c21_mobile_state_key(campaign_id, username, "screen")
+    assignment_key = _c21_mobile_state_key(campaign_id, username, "assignment")
+    street_key = _c21_mobile_state_key(campaign_id, username, "street")
+    hh_key = _c21_mobile_state_key(campaign_id, username, "household")
+    queue_key = _c1_mobile_queue_key(campaign_id, username)
+    st.session_state.setdefault(screen_key, "login")
+    queue = st.session_state.setdefault(queue_key, [])
+
+    # Load available packages. Uploaded package is optional and stays session-local for DEV testing.
+    uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
+    saved_packages = _c1_saved_mobile_packages_for_user(campaign_id, programs)
+    uploaded_pkg = st.session_state.get(uploaded_pkg_key)
+    packages = ([uploaded_pkg] if isinstance(uploaded_pkg, dict) else []) + saved_packages
+    # De-duplicate by mobile assignment id.
+    deduped = []
+    seen = set()
+    for pkg in packages:
+        a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+        mid = clean_value(a.get("mobile_assignment_id") or a.get("source_work_item_id") or _c21_package_label(pkg))
+        if mid in seen:
+            continue
+        seen.add(mid)
+        deduped.append(pkg)
+    packages = deduped
+    package_by_id = {}
+    for pkg in packages:
+        a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+        mid = clean_value(a.get("mobile_assignment_id") or a.get("source_work_item_id") or _c21_package_label(pkg))
+        package_by_id[mid] = pkg
+
+    # Slim top status bar for testing.
+    s1, s2, s3 = st.columns(3)
+    with s1: st.metric("Queued", f"{len(queue):,}")
+    with s2: st.metric("Lists", f"{len(packages):,}")
+    with s3: st.metric("User", username or "—")
+
+    with st.expander("Offline Queue / DEV tools", expanded=False):
+        st.caption("This is still a browser/session queue. C3 will move this into persistent device storage.")
+        up = st.file_uploader("Load Assignment Package JSON for DEV test", type=["json"], key="c21_mobile_assignment_upload")
+        if up is not None:
             try:
-                uploaded_pkg = json.loads(uploaded.getvalue().decode("utf-8"))
-                st.success("Sample mobile assignment loaded into the shell.")
+                st.session_state[uploaded_pkg_key] = json.loads(up.getvalue().decode("utf-8"))
+                st.success("Assignment package loaded. Go to Screen 1: My Lists.")
+                if st.button("Go to My Lists", key="c21_go_lists_after_upload"):
+                    st.session_state[screen_key] = "lists"
+                    st.rerun()
             except Exception as e:
                 st.error(f"Could not read assignment JSON: {e}")
-        packages = _c1_saved_mobile_packages_for_user(campaign_id, programs)
-        if uploaded_pkg:
-            packages = [uploaded_pkg] + packages
-        if not packages:
-            st.info("No mobile assignments are available yet. Generate one from Program → Door-to-Door → Assign.")
-        else:
-            for pkg in packages:
-                _c1_package_card(pkg, campaign_id, username)
-            st.divider()
-            downloaded = st.session_state.get(_c1_mobile_downloads_key(campaign_id, username), {}) or {}
-            available = list(downloaded.values()) or packages
-            pick_labels = []
-            for pkg in available:
-                a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
-                pick_labels.append(f"{clean_value(a.get('name')) or clean_value(a.get('street_area'))} — {clean_value(a.get('mobile_assignment_id'))}")
-            st.markdown("### Field Test: Knock a Household")
-            picked = st.selectbox("Assignment", pick_labels, key="c1_knock_assignment")
-            _c1_render_household_knock(available[pick_labels.index(picked)], campaign_id, username)
-
-    with queue_tab:
-        st.markdown("### Offline Sync Queue")
-        qkey = _c1_mobile_queue_key(campaign_id, username)
-        queue = st.session_state.setdefault(qkey, [])
-        st.metric("Queued Results", f"{len(queue):,}")
         if queue:
             st.dataframe(pd.DataFrame(queue), width="stretch", hide_index=True)
             st.download_button(
-                "Export Queued Results JSON",
+                "Export Local Sync Queue JSON",
                 json.dumps(queue, ensure_ascii=False, indent=2).encode("utf-8"),
                 file_name=f"{campaign_id}_mobile_offline_results_queue.json",
                 mime="application/json",
-                key="c1_export_queue",
+                key="c21_export_queue",
             )
-            if st.button("Clear Local Queue", key="c1_clear_queue"):
-                st.session_state[qkey] = []
+            if st.button("Clear Local Queue", key="c21_clear_queue"):
+                st.session_state[queue_key] = []
                 st.rerun()
         else:
-            st.info("No offline results queued yet.")
+            st.info("No queued results yet.")
+
+    screen = st.session_state.get(screen_key, "login")
+
+    # Screen 0: Login.
+    if screen == "login":
+        st.markdown('<div class="cc-mobile-step">Screen 0: Login</div>', unsafe_allow_html=True)
+        st.markdown("### Candidate Connect Field")
+        st.write(f"Signed in as **{username}**")
+        st.caption(f"Role: {current_role()} · Campaign: {campaign_id}")
+        st.info("For C2.1, login is inherited from Candidate Connect. The field app screen flow starts after this.")
+        if _c21_mobile_card_button("Continue to My Lists", "c21_continue_to_lists", button_type="primary"):
+            st.session_state[screen_key] = "lists"
+            st.rerun()
+        return
+
+    # Screen 1: List of Lists / Assignments.
+    if screen == "lists":
+        st.markdown('<div class="cc-mobile-step">Screen 1: My Lists</div>', unsafe_allow_html=True)
+        st.markdown("### Tap the list you are walking")
+        if not packages:
+            st.warning("No mobile lists are available for this login yet. Use the DEV tools expander above to load a sample package, or generate a Mobile Assignment Package from Voter Outreach.")
+            if st.button("Back to Login", key="c21_back_login_no_lists"):
+                st.session_state[screen_key] = "login"
+                st.rerun()
+            return
+        for i, pkg in enumerate(packages):
+            a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+            mid = clean_value(a.get("mobile_assignment_id") or a.get("source_work_item_id") or f"pkg_{i}")
+            with st.container(border=True):
+                st.markdown(f"**{clean_value(a.get('name') or a.get('street_area') or 'Mobile List')}**")
+                st.caption(f"{clean_value(a.get('assigned_to')) or 'Assigned'} · {clean_value(a.get('scope')) or 'Assignment'}")
+                c1, c2 = st.columns(2)
+                with c1: st.metric("Households", f"{int(a.get('household_count') or len(pkg.get('households') or []) or 0):,}")
+                with c2: st.metric("Voters", f"{int(a.get('voter_count') or len(pkg.get('voters') or []) or 0):,}")
+                if _c21_mobile_card_button("Tap to Open List", f"c21_open_list_{mid}", button_type="primary"):
+                    st.session_state[assignment_key] = mid
+                    st.session_state[street_key] = ""
+                    st.session_state[hh_key] = ""
+                    st.session_state[screen_key] = "streets"
+                    st.rerun()
+        if st.button("Back to Login", key="c21_back_login_from_lists"):
+            st.session_state[screen_key] = "login"
+            st.rerun()
+        return
+
+    selected_assignment_id = clean_value(st.session_state.get(assignment_key))
+    pkg = package_by_id.get(selected_assignment_id)
+    if not pkg:
+        st.warning("Selected list is no longer available. Returning to My Lists.")
+        st.session_state[screen_key] = "lists"
+        st.rerun()
+        return
+
+    assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+    mobile_id = clean_value(assignment.get("mobile_assignment_id") or selected_assignment_id)
+    result_options = ((pkg.get("mobile_schema") or {}).get("result_options") or pkg.get("result_options") or ["Favorable", "Undecided", "Against", "Yard Sign", "Not Home", "Refused", "Moved", "Needs Follow-up"])
+    households, voters, voter_map, street_map, street_names = _c21_prepare_mobile_package_maps(pkg)
+
+    # Screen 2: Streets.
+    if screen == "streets":
+        st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
+        st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
+        st.markdown('<div class="cc-mobile-hint">Tap the street you are about to walk. No dropdowns here.</div>', unsafe_allow_html=True)
+        for street in street_names:
+            hhs = street_map.get(street) or []
+            voters_count = sum(int(h.get("Voters") or 0) for h in hhs)
+            label = f"{street}\n\n{len(hhs):,} households · {voters_count:,} voters"
+            if _c21_mobile_card_button(label, f"c21_street_{mobile_id}_{_ops_slug(street)}"):
+                st.session_state[street_key] = street
+                st.session_state[hh_key] = ""
+                st.session_state[screen_key] = "houses"
+                st.rerun()
+        if st.button("New List", key="c21_new_list_from_streets"):
+            st.session_state[screen_key] = "lists"
+            st.rerun()
+        return
+
+    selected_street = clean_value(st.session_state.get(street_key))
+    street_households = sorted(street_map.get(selected_street) or [], key=_c21_house_sort_value)
+
+    # Screen 3: House / street numbers.
+    if screen == "houses":
+        st.markdown('<div class="cc-mobile-step">Screen 3: House Numbers</div>', unsafe_allow_html=True)
+        st.markdown(f"### {selected_street or 'Selected Street'}")
+        st.markdown('<div class="cc-mobile-hint">As you approach the door, tap the house/street number.</div>', unsafe_allow_html=True)
+        if not street_households:
+            st.warning("No households found for this street.")
+        for h in street_households:
+            hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
+            addr = clean_value(h.get("Address"))
+            house = clean_value(h.get("House Number") or (addr.split()[0] if addr.split() else addr))
+            voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
+            names = clean_value(h.get("Names"))
+            label = f"{house} — {addr}\n\n{voters_n:,} voter(s)" + (f" · {names[:55]}{'…' if len(names) > 55 else ''}" if names else "")
+            if _c21_mobile_card_button(label, f"c21_house_{mobile_id}_{_ops_slug(hk)}"):
+                st.session_state[hh_key] = hk
+                st.session_state[screen_key] = "household"
+                st.rerun()
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("New Street", key="c21_new_street_from_houses"):
+                st.session_state[screen_key] = "streets"
+                st.rerun()
+        with b2:
+            if st.button("New List", key="c21_new_list_from_houses"):
+                st.session_state[screen_key] = "lists"
+                st.rerun()
+        return
+
+    # Screen 4: Household card.
+    if screen == "household":
+        selected_hk = clean_value(st.session_state.get(hh_key))
+        hh = None
+        for h in street_households:
+            hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
+            if hk == selected_hk:
+                hh = h
+                break
+        if not hh:
+            st.warning("Selected household is no longer available. Returning to house list.")
+            st.session_state[screen_key] = "houses"
+            st.rerun()
+            return
+
+        hk = clean_value(hh.get("Household Key") or hh.get("household_key") or selected_hk)
+        address = clean_value(hh.get("Address"))
+        city = clean_value(hh.get("City"))
+        hh_voters = _c1_household_voters_from_package(hh, voter_map)
+        st.markdown('<div class="cc-mobile-step">Screen 4: Household</div>', unsafe_allow_html=True)
+        st.markdown(f"### {address}")
+        st.caption(f"{city} · {selected_street} · {len(hh_voters):,} voter(s)")
+        st.markdown('<div class="cc-mobile-hint">Tap checkboxes as you talk to voters. Add a short household note if needed, then tap Done.</div>', unsafe_allow_html=True)
+
+        household_flags = _c21_result_checkbox_grid(
+            ["Not Home", "Refused", "Moved", "Needs Follow-up"],
+            f"c21_hh_flags_{mobile_id}_{_ops_slug(hk)}",
+        )
+        household_notes = st.text_area("Basic notes", height=90, key=f"c21_household_notes_{mobile_id}_{_ops_slug(hk)}", placeholder="Short note for this household")
+
+        voter_selections: list[tuple[dict, list[str]]] = []
+        for idx, voter in enumerate(hh_voters, start=1):
+            voter_name = clean_value(voter.get("name")) or f"Voter {idx}"
+            voter_id = clean_value(voter.get("voter_id"))
+            party = clean_value(voter.get("party"))
+            age = clean_value(voter.get("age"))
+            with st.container(border=True):
+                st.markdown(f"**{voter_name}**")
+                meta = " · ".join([x for x in [party, f"Age {age}" if age else ""] if x])
+                if meta:
+                    st.caption(meta)
+                selected_results = _c21_result_checkbox_grid(
+                    ["Favorable", "Undecided", "Against", "Yard Sign", "Needs Follow-up"],
+                    f"c21_voter_flags_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(voter_name)}",
+                )
+                voter_selections.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age}, selected_results))
+
+        d1, d2 = st.columns([2, 1])
+        with d1:
+            if st.button("Done — Save and Return to House Numbers", type="primary", width="stretch", key=f"c21_done_household_{mobile_id}_{_ops_slug(hk)}"):
+                saved_count = 0
+                now = datetime.now().isoformat(timespec="seconds")
+                if household_flags:
+                    record = {
+                        "mobile_assignment_id": mobile_id,
+                        "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
+                        "result_scope": "household",
+                        "voter_id": "",
+                        "voter_name": "",
+                        "household_key": hk,
+                        "address": address,
+                        "street": selected_street,
+                        "results": household_flags,
+                        "result": "; ".join(household_flags),
+                        "tags_added": "",
+                        "notes": clean_value(household_notes),
+                        "contacted_at": now,
+                        "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
+                        "sync_status": "queued_offline",
+                    }
+                    _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
+                    saved_count += 1
+                for voter, selected_results in voter_selections:
+                    if not selected_results:
+                        continue
+                    record = {
+                        "mobile_assignment_id": mobile_id,
+                        "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
+                        "result_scope": "voter",
+                        "voter_id": clean_value(voter.get("voter_id")),
+                        "voter_name": clean_value(voter.get("voter_name")),
+                        "household_key": hk,
+                        "address": address,
+                        "street": selected_street,
+                        "results": selected_results,
+                        "result": "; ".join(selected_results),
+                        "tags_added": "",
+                        "notes": clean_value(household_notes),
+                        "contacted_at": now,
+                        "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
+                        "sync_status": "queued_offline",
+                    }
+                    _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
+                    saved_count += 1
+                st.session_state[screen_key] = "houses"
+                st.session_state[hh_key] = ""
+                st.success(f"Done. Saved {saved_count:,} queued result record(s).")
+                st.rerun()
+        with d2:
+            if st.button("Back", width="stretch", key=f"c21_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
+                st.session_state[screen_key] = "houses"
+                st.rerun()
+        return
+
+    st.session_state[screen_key] = "login"
+    st.rerun()
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
