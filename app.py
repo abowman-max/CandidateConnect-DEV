@@ -11064,30 +11064,217 @@ def render_assignments_workspace(campaign_id: str | None = None):
         else:
             st.info("Mobile package is paused until you check the box above.")
 
+
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: Phase A1 Dashboard
+# ---------------------------------------------------------------------------
+def _safe_count(items) -> int:
+    try:
+        return len(items or [])
+    except Exception:
+        return 0
+
+
+def _assignment_status_counts(assignments: list[dict]) -> dict:
+    out = {"Assigned": 0, "In Progress": 0, "Complete": 0, "Planning": 0, "Other": 0}
+    for a in assignments or []:
+        s = clean_value(a.get("status") or a.get("Status") or "Assigned")
+        if s in out:
+            out[s] += 1
+        elif s.lower() in {"completed", "done"}:
+            out["Complete"] += 1
+        elif s.lower() in {"active", "working"}:
+            out["In Progress"] += 1
+        else:
+            out["Other"] += 1
+    return out
+
+
+def _packet_progress_for_assignments(packets: list[dict]) -> tuple[int, int, dict]:
+    total_voters = 0
+    completed_voters = 0
+    results = {"F": 0, "U": 0, "A": 0, "YS": 0, "NH": 0, "Other": 0}
+    for p in packets or []:
+        voters = p.get("voters") or []
+        if not isinstance(voters, list):
+            voters = []
+        total_voters += int(p.get("voter_count") or len(voters) or 0)
+        for v in voters:
+            status = clean_value(v.get("contact_status") or "")
+            result = clean_value(v.get("last_result") or v.get("result") or "")
+            # Existing packages use Not Started by default. Anything else counts as touched.
+            if status and status.lower() not in {"not started", "new", ""}:
+                completed_voters += 1
+            r = result.upper().replace(" ", "")
+            if r in results:
+                results[r] += 1
+            elif r in {"FRIENDLY", "FAVORABLE", "SUPPORT", "SUPPORTER"}:
+                results["F"] += 1
+            elif r in {"UNDECIDED", "UNKNOWN"}:
+                results["U"] += 1
+            elif r in {"AGAINST", "OPPOSE", "OPPOSED"}:
+                results["A"] += 1
+            elif r in {"YARDSIGN", "YARD_SIGN", "YARDSIGNYES"}:
+                results["YS"] += 1
+            elif r in {"NOTHOME", "NOANSWER"}:
+                results["NH"] += 1
+            elif r:
+                results["Other"] += 1
+    return total_voters, completed_voters, results
+
+
+def render_outreach_dashboard_v1(campaign_id: str) -> None:
+    st.markdown("### Outreach Dashboard")
+    st.caption("High-level status for voter contact programs, assignments, and field progress. Builders live on the other outreach pages.")
+
+    try:
+        programs = load_outreach_programs_store(campaign_id).get("programs", []) or []
+    except Exception:
+        programs = []
+    try:
+        contact_lists = load_contact_lists_store(campaign_id).get("contact_lists", []) or []
+    except Exception:
+        contact_lists = []
+    try:
+        assignments = load_outreach_assignments_store(campaign_id).get("assignments", []) or []
+    except Exception:
+        assignments = []
+    try:
+        packets = load_walk_packets_store(campaign_id).get("packets", []) or []
+    except Exception:
+        packets = []
+
+    active_programs = [p for p in programs if clean_value(p.get("status") or "Planning").lower() in {"active", "planning", "draft"}]
+    status_counts = _assignment_status_counts(assignments)
+    total_voters, completed_voters, contact_results = _packet_progress_for_assignments(packets)
+    remaining_voters = max(total_voters - completed_voters, 0)
+    pct_complete = (completed_voters / total_voters * 100.0) if total_voters else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Active Programs", f"{len(active_programs):,}")
+    with c2:
+        st.metric("Assignments", f"{len(assignments):,}")
+    with c3:
+        st.metric("Voters Loaded", f"{total_voters:,}")
+    with c4:
+        st.metric("Progress", f"{pct_complete:.1f}%")
+
+    st.markdown("#### Contact Results")
+    r1, r2, r3, r4, r5 = st.columns(5)
+    with r1: st.metric("F", f"{contact_results.get('F',0):,}", help="Friendly / favorable / support")
+    with r2: st.metric("U", f"{contact_results.get('U',0):,}", help="Undecided / unknown")
+    with r3: st.metric("A", f"{contact_results.get('A',0):,}", help="Against / oppose")
+    with r4: st.metric("YS", f"{contact_results.get('YS',0):,}", help="Yard sign")
+    with r5: st.metric("NH", f"{contact_results.get('NH',0):,}", help="Not home")
+
+    st.markdown("#### Program Progress")
+    if programs:
+        rows = []
+        list_by_program = {}
+        for cl in contact_lists:
+            list_by_program.setdefault(clean_value(cl.get("program_id")), []).append(cl)
+        assign_by_program = {}
+        list_program_lookup = {clean_value(cl.get("list_id")): clean_value(cl.get("program_id")) for cl in contact_lists}
+        for a in assignments:
+            pid = clean_value(a.get("program_id") or list_program_lookup.get(clean_value(a.get("contact_list_id")), ""))
+            assign_by_program.setdefault(pid, []).append(a)
+        packet_by_assignment = {}
+        for p in packets:
+            packet_by_assignment.setdefault(clean_value(p.get("assignment_id")), []).append(p)
+        for pr in programs:
+            pid = clean_value(pr.get("program_id"))
+            pr_assignments = assign_by_program.get(pid, [])
+            pr_packets = []
+            for a in pr_assignments:
+                pr_packets.extend(packet_by_assignment.get(clean_value(a.get("assignment_id")), []))
+            tv, cv, _res = _packet_progress_for_assignments(pr_packets)
+            rows.append({
+                "Program": clean_value(pr.get("name")) or "Unnamed Program",
+                "Type": clean_value(pr.get("program_type")) or "",
+                "Status": clean_value(pr.get("status")) or "Planning",
+                "Lists": len(list_by_program.get(pid, [])),
+                "Assignments": len(pr_assignments),
+                "Loaded Voters": tv,
+                "Complete": cv,
+                "Remaining": max(tv-cv, 0),
+                "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
+            })
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.info("No contact programs yet. Use the Programs page to create your first outreach program.")
+
+    st.markdown("#### Assignment Status")
+    a1, a2, a3, a4 = st.columns(4)
+    with a1: st.metric("Assigned", f"{status_counts.get('Assigned',0):,}")
+    with a2: st.metric("In Progress", f"{status_counts.get('In Progress',0):,}")
+    with a3: st.metric("Complete", f"{status_counts.get('Complete',0):,}")
+    with a4: st.metric("Remaining Voters", f"{remaining_voters:,}")
+
+    if assignments:
+        people_store = load_team_people_store(campaign_id) if 'load_team_people_store' in globals() else {"people": []}
+        people = people_store.get("people", []) if isinstance(people_store, dict) else []
+        people_lookup = {clean_value(p.get("person_id")): clean_value(p.get("name")) for p in people}
+        rows = []
+        packet_by_assignment = {}
+        for p in packets:
+            packet_by_assignment.setdefault(clean_value(p.get("assignment_id")), []).append(p)
+        for a in assignments:
+            aid = clean_value(a.get("assignment_id"))
+            ap = packet_by_assignment.get(aid, [])
+            tv, cv, _ = _packet_progress_for_assignments(ap)
+            rows.append({
+                "Assignment": clean_value(a.get("name")) or "Unnamed Assignment",
+                "Assigned To": people_lookup.get(clean_value(a.get("person_id")), clean_value(a.get("team_member_name")) or ""),
+                "Status": clean_value(a.get("status")) or "Assigned",
+                "Loaded Voters": tv,
+                "Complete": cv,
+                "Remaining": max(tv-cv, 0),
+                "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
+            })
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.caption("No assignments yet.")
+
+
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
-    st.caption("Plan direct voter contact in Candidate Connect and execute it later from the offline mobile utility.")
+    st.caption("Dashboard first; builders are separated by workflow so campaign managers are not dropped into a giant setup page.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_programs, tab_lists, tab_assign, tab_door, tab_phone, tab_mail, tab_results = st.tabs(["Contact Programs", "Contact Lists", "Assignments", "Door-to-Door", "Phone Bank", "Postcards / Mail", "Results"])
+    tab_dash, tab_programs, tab_door, tab_phone, tab_text, tab_mail, tab_results, tab_legacy = st.tabs(["Dashboard", "Programs", "Door-to-Door", "Phone Bank", "Texting", "Mail", "Results", "Legacy Setup"])
+    with tab_dash:
+        render_outreach_dashboard_v1(campaign_id)
     with tab_programs:
+        st.markdown("### Programs")
+        st.caption("Phase A2 will merge program, universe, user access, and channel setup here. For now, the existing Contact Programs screen is preserved below.")
         render_contact_programs_workspace(campaign_id)
-    with tab_lists:
-        render_contact_lists_workspace(campaign_id)
-    with tab_assign:
-        render_assignments_workspace(campaign_id)
     with tab_door:
         st.markdown("### Door-to-Door")
-        st.info("Use Contact Lists and Assignments to generate Smart Turf v44D walk packets, then download an offline mobile package for field work.")
-        st.markdown("Workflow: Saved Universe → Contact Program → Contact List → Assignment → Smart Turf → Mobile Download → Offline Contacts → Sync Back.")
+        st.caption("Phase B home for ranked precincts, ranked streets, candidate walk packages, and canvasser turf assignments.")
+        st.info("For now, use Legacy Setup → Assignments to access the working v45 Candidate Walk Builder and v46 experimental turf builder.")
     with tab_phone:
         st.markdown("### Phone Bank")
-        st.caption("Uses the same Contact Program / Assignment / Contact Result architecture as door-to-door.")
+        st.caption("Program-based calling lists, scripts, assignments, and call results will live here.")
+    with tab_text:
+        st.markdown("### Texting")
+        st.caption("Program-based texting lists, opt-outs, replies, and message progress will live here.")
     with tab_mail:
-        st.markdown("### Postcards / Mail")
-        st.caption("Future voter-to-voter postcards, email, text, and mail-ballot chase can reuse the same contact-history structure.")
+        st.markdown("### Mail")
+        st.caption("Program-based mail lists, mail ballot chase, postcards, and export progress will live here.")
     with tab_results:
-        st.markdown("### Contact Results")
-        st.caption("Future dashboard for contact attempts, support IDs, follow-up needs, and volunteer productivity.")
+        st.markdown("### Results")
+        st.caption("Unified outreach results across doors, calls, texts, and mail will live here.")
+    with tab_legacy:
+        st.markdown("### Legacy Setup")
+        st.caption("Temporary holding area while Phase A/B moves these tools into the cleaner workflow pages.")
+        legacy_programs, legacy_lists, legacy_assign = st.tabs(["Contact Programs", "Contact Lists", "Assignments"])
+        with legacy_programs:
+            render_contact_programs_workspace(campaign_id)
+        with legacy_lists:
+            render_contact_lists_workspace(campaign_id)
+        with legacy_assign:
+            render_assignments_workspace(campaign_id)
 
 def render_election_day_workspace():
     st.markdown("## Election Day Operations")
@@ -11245,7 +11432,7 @@ with st.sidebar:
             st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
 
     with st.expander("📣 Voter Outreach", expanded=_current_section in {"voter_outreach"}):
-        if st.button("🚪 Door-to-Door / Contact Programs", width="stretch"):
+        if st.button("📣 Voter Outreach", width="stretch"):
             st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
