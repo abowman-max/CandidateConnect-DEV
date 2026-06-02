@@ -11470,6 +11470,269 @@ def _unassign_program_user_assignments_a21(campaign_id: str, program_id: str, us
     return ok, msg if not ok else f"Unassigned {changed} open assignment(s).", changed
 
 
+
+
+# ---------------------------------------------------------------------------
+# Voter Outreach: A3 Program Door-to-Door workflow
+# ---------------------------------------------------------------------------
+def _program_candidate_walk_packages_key(campaign_id: str) -> str:
+    return f"app_state/campaigns/{_ops_slug(campaign_id)}/outreach/candidate_walk_packages.json"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_program_candidate_walk_packages_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_program_candidate_walk_packages_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("version", 1)
+    data.setdefault("updated_at", datetime.now().isoformat(timespec="seconds"))
+    data.setdefault("packages", [])
+    if not isinstance(data.get("packages"), list):
+        data["packages"] = []
+    return data
+
+
+def save_program_candidate_walk_packages_store(campaign_id: str, store: dict) -> tuple[bool, str]:
+    if not isinstance(store, dict):
+        store = {"version": 1, "packages": []}
+    store["version"] = 1
+    store["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    store.setdefault("packages", [])
+    ok, msg = _put_json_to_r2_key(_program_candidate_walk_packages_key(campaign_id), store)
+    if ok:
+        try:
+            load_program_candidate_walk_packages_store.clear()
+        except Exception:
+            pass
+    return ok, msg
+
+
+def _a3_program_voters_dataframe(source_universe: str, max_rows: int = 75000) -> tuple[pd.DataFrame, dict]:
+    """Load a program universe into the v45 candidate-walk dataframe shape."""
+    raw, meta = _mobile_voters_dataframe_from_saved_universe(source_universe, max_rows=max_rows)
+    if raw is None or raw.empty:
+        return pd.DataFrame(), meta
+    rows = _mobile_rows_from_dataframe(raw)
+    fake_packet = {
+        "packet_id": "program-universe",
+        "packet_name": clean_value(source_universe) or "Program Universe",
+        "voters": rows,
+    }
+    out = _v45_flatten_packet_voters([fake_packet])
+    meta["candidate_walk_rows"] = int(len(out)) if out is not None else 0
+    return out, meta
+
+
+def _a3_program_assigned_user_labels(program: dict, user_id_to_label: dict) -> list[str]:
+    labels = []
+    for uid in _program_user_ids(program):
+        if uid in user_id_to_label:
+            labels.append(user_id_to_label[uid])
+    return labels
+
+
+def _a3_candidate_walk_package(campaign_id: str, program: dict, scope: str, precinct_row: dict, street_row: dict | None, households: pd.DataFrame, voters: pd.DataFrame, assignee_label: str = "") -> dict:
+    pid = clean_value(program.get("program_id"))
+    pname = clean_value(program.get("name"))
+    package_seed = "|".join([
+        _ops_slug(campaign_id),
+        pid,
+        clean_value(scope),
+        clean_value(precinct_row.get("Precinct", "")),
+        clean_value((street_row or {}).get("Street Name", "")),
+        datetime.now().isoformat(timespec="seconds"),
+    ])
+    package_id = "cw-" + hashlib.md5(package_seed.encode("utf-8")).hexdigest()[:12]
+    return {
+        "version": 1,
+        "package_type": "candidate_connect_candidate_walk_package",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "campaign_id": _ops_slug(campaign_id),
+        "program": {
+            "program_id": pid,
+            "name": pname,
+            "source_saved_universe": clean_value(program.get("source_saved_universe") or program.get("universe") or ""),
+            "channels": _program_channels(program),
+            "assigned_to": clean_value(assignee_label),
+        },
+        "package_id": package_id,
+        "mode": "Candidate Walk Mode",
+        "scope": clean_value(scope),
+        "selected_precinct": clean_value(precinct_row.get("Precinct", "")),
+        "county": clean_value(precinct_row.get("County", "")),
+        "municipality": clean_value(precinct_row.get("Municipality", "")),
+        "selected_street": clean_value((street_row or {}).get("Street Name", "")),
+        "household_count": int(len(households)) if households is not None else 0,
+        "voter_count": int(len(voters)) if voters is not None else 0,
+        "households": households.to_dict("records") if households is not None and not households.empty else [],
+        "voters": voters.to_dict("records") if voters is not None and not voters.empty else [],
+        "result_options": ["Favorable", "Undecided", "Against", "Yard Sign", "Not Home", "Refused", "Moved", "Needs Follow-up"],
+    }
+
+
+def render_program_door_to_door_a3(campaign_id: str, program: dict, people_lookup: dict | None = None, user_id_to_label: dict | None = None) -> None:
+    """Program-owned Door-to-Door workspace: ranked precincts → streets → households."""
+    campaign_id = _ops_slug(campaign_id or _active_campaign_id())
+    program = program or {}
+    pid = clean_value(program.get("program_id")) or "program"
+    user_id_to_label = user_id_to_label or {}
+    source_universe = clean_value(program.get("source_saved_universe") or program.get("universe") or "")
+    channels = _program_channels(program)
+
+    st.markdown("#### Door-to-Door")
+    st.caption("Candidate workflow: Program → Universe → Ranked Precincts → Ranked Streets → Household → Voter.")
+
+    if channels and not any("door" in clean_value(x).lower() for x in channels):
+        st.warning("This program does not currently include the Door-to-Door channel. Add Door-to-Door under the program's channel settings to use this workspace.")
+
+    top1, top2, top3 = st.columns(3)
+    with top1:
+        st.metric("Universe", source_universe or "Not selected")
+    with top2:
+        st.metric("Program Users", len(_program_user_ids(program)))
+    with top3:
+        st.metric("Status", clean_value(program.get("status")) or "Planning")
+
+    if not source_universe:
+        st.info("Choose a saved universe on the Program Overview tab before building door-to-door work.")
+        return
+
+    load_key = f"a3_load_door_{campaign_id}_{pid}"
+    load = st.checkbox("Load Ranked Street List / Candidate Walk Builder", value=False, key=load_key)
+    if not load:
+        st.info("Paused until checked so Program Details stays fast.")
+        return
+
+    with st.spinner("Loading program universe for Door-to-Door..."):
+        df, meta = _a3_program_voters_dataframe(source_universe, max_rows=75000)
+    if meta.get("error"):
+        st.error(meta.get("error"))
+        return
+    if df is None or df.empty:
+        st.warning("No voters were found for this program universe.")
+        return
+    if meta.get("truncated_by_safety"):
+        st.warning("This universe was truncated for safety. The ranked street list is based on the first 75,000 voters returned.")
+
+    pc = _v45_rank_precincts(df)
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("Assigned Voters", f"{len(df):,}")
+    with m2:
+        st.metric("Households", f"{df['Household Key'].nunique():,}")
+    with m3:
+        st.metric("Precincts", f"{len(pc):,}")
+    with m4:
+        st.metric("Streets", f"{df['Street Norm'].nunique():,}")
+
+    st.markdown("##### Ranked Precincts")
+    pc_show = pc.rename(columns={"rank":"Rank","target_voters":"Target Voters","households":"Households","streets":"Streets","voters_per_street":"Voters / Street","voters_per_household":"Voters / HH","priority_score":"Priority Score"})
+    keep_cols = [c for c in ["Rank","County","Municipality","Precinct","Target Voters","Households","Streets","Voters / Street","Voters / HH","Priority Score"] if c in pc_show.columns]
+    st.dataframe(pc_show[keep_cols], width="stretch", hide_index=True)
+
+    streets_all = _v45_rank_streets(df)
+    st.download_button(
+        "Download Full Ranked Street List CSV",
+        streets_all.to_csv(index=False).encode("utf-8"),
+        file_name=f"{_ops_slug(program.get('name') or 'program')}_ranked_streets.csv",
+        mime="text/csv",
+        key=f"a3_ranked_streets_csv_{campaign_id}_{pid}",
+    )
+
+    pc_records = pc.to_dict("records")
+    pc_opts = [f"#{int(r.get('rank', 0))} — {clean_value(r.get('Precinct'))} — {int(r.get('target_voters') or 0):,} voters / {int(r.get('households') or 0):,} HH" for r in pc_records]
+    if not pc_opts:
+        return
+    pc_label = st.selectbox("Open precinct", pc_opts, key=f"a3_pc_{campaign_id}_{pid}")
+    precinct_row = pc_records[pc_opts.index(pc_label)]
+    pdf = df[
+        (df["County"].str.upper() == clean_value(precinct_row.get("County", "")).upper()) &
+        (df["Municipality"].str.upper() == clean_value(precinct_row.get("Municipality", "")).upper()) &
+        (df["Precinct"].str.upper() == clean_value(precinct_row.get("Precinct", "")).upper())
+    ].copy()
+
+    st.markdown("##### Ranked Streets in Selected Precinct")
+    st_df = _v45_rank_streets(pdf)
+    st_show = st_df.rename(columns={"rank":"Rank","target_voters":"Target Voters","households":"Households","voters_per_household":"Voters / HH","priority_score":"Priority Score"})
+    st_cols = [c for c in ["Rank","Street Name","Target Voters","Households","Voters / HH","Priority Score"] if c in st_show.columns]
+    st.dataframe(st_show[st_cols], width="stretch", hide_index=True)
+
+    st_records = st_df.to_dict("records")
+    st_opts = [f"#{int(r.get('rank', 0))} — {clean_value(r.get('Street Name'))} — {int(r.get('target_voters') or 0):,} voters / {int(r.get('households') or 0):,} HH" for r in st_records]
+    if not st_opts:
+        return
+    st_label = st.selectbox("Open street", st_opts, key=f"a3_street_{campaign_id}_{pid}")
+    street_row = st_records[st_opts.index(st_label)]
+    sdf = pdf[pdf["Street Norm"].str.upper() == clean_value(street_row.get("Street Norm", "")).upper()].copy()
+    hh = _v45_households(sdf)
+
+    st.markdown("##### Households on Selected Street")
+    st.dataframe(hh.drop(columns=["Household Key"], errors="ignore"), width="stretch", hide_index=True)
+
+    hh_opts = [f"#{int(r.get('Knock Order') or 0)} — {clean_value(r.get('Address'))} — {int(r.get('Voters') or 0)} voter(s)" for r in hh.to_dict("records")]
+    if hh_opts:
+        hh_label = st.selectbox("Open household", hh_opts, key=f"a3_hh_{campaign_id}_{pid}")
+        hh_row = hh.to_dict("records")[hh_opts.index(hh_label)]
+        voters = sdf[sdf["Household Key"] == hh_row.get("Household Key")].copy()
+        st.markdown("##### Voter Card Preview")
+        st.dataframe(voters[[c for c in ["FullName","Age","Party","Gender","Address","Mobile","Landline","Email","Tags"] if c in voters.columns]], width="stretch", hide_index=True)
+
+    st.markdown("##### Candidate Walk Package")
+    scope = st.radio("Package scope", ["Selected Street", "Entire Selected Precinct"], horizontal=True, key=f"a3_scope_{campaign_id}_{pid}")
+    assignee_labels = _a3_program_assigned_user_labels(program, user_id_to_label)
+    assignee = st.selectbox("Assign/package for", ["Unassigned / Candidate"] + assignee_labels, key=f"a3_assignee_{campaign_id}_{pid}")
+    if scope == "Entire Selected Precinct":
+        pkg_voters = pdf.copy()
+        pkg_households = _v45_households(pdf)
+        pkg_street_row = None
+    else:
+        pkg_voters = sdf.copy()
+        pkg_households = hh.copy()
+        pkg_street_row = street_row
+    pkg = _a3_candidate_walk_package(campaign_id, program, scope, precinct_row, pkg_street_row, pkg_households, pkg_voters, assignee)
+
+    save_col, dl_col = st.columns(2)
+    with save_col:
+        if st.button("Save Candidate Walk Package", key=f"a3_save_pkg_{campaign_id}_{pid}"):
+            store = load_program_candidate_walk_packages_store(campaign_id)
+            existing = store.get("packages") or []
+            summary = {
+                "package_id": pkg.get("package_id"),
+                "program_id": pid,
+                "program_name": clean_value(program.get("name")),
+                "name": f"{clean_value(program.get('name'))} — {pkg.get('selected_precinct')}" + (f" — {pkg.get('selected_street')}" if pkg.get("selected_street") else ""),
+                "scope": scope,
+                "assigned_to": assignee,
+                "selected_precinct": pkg.get("selected_precinct"),
+                "selected_street": pkg.get("selected_street"),
+                "household_count": pkg.get("household_count"),
+                "voter_count": pkg.get("voter_count"),
+                "status": "Ready",
+                "created_at": pkg.get("generated_at"),
+                "package": pkg,
+            }
+            store["packages"] = existing + [summary]
+            ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
+            if ok:
+                st.success("Candidate walk package saved for this program.")
+                st.rerun()
+            else:
+                st.error(msg)
+    with dl_col:
+        st.download_button(
+            "Download Candidate Walk Package JSON",
+            json.dumps(pkg, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=f"{_ops_slug(program.get('name') or 'candidate-walk')}_{_ops_slug(pkg.get('selected_precinct'))}_{_ops_slug(pkg.get('selected_street') or scope)}.json",
+            mime="application/json",
+            key=f"a3_pkg_download_{campaign_id}_{pid}",
+        )
+
+    saved_store = load_program_candidate_walk_packages_store(campaign_id)
+    saved = [x for x in (saved_store.get("packages") or []) if clean_value(x.get("program_id")) == pid]
+    if saved:
+        st.markdown("##### Saved Candidate Walk Packages")
+        st.dataframe(pd.DataFrame([{k: x.get(k) for k in ["name","assigned_to","scope","household_count","voter_count","status","created_at"]} for x in saved]), width="stretch", hide_index=True)
+
 def render_program_manager_a2(campaign_id: str | None = None):
     campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
     store = load_outreach_programs_store(campaign_id)
@@ -11664,7 +11927,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 st.caption("Assign at least one program user before replacing or removing assignees.")
 
         with detail_door:
-            st.info("Phase B will move ranked precincts, ranked streets, candidate walks, and canvasser turf assignments here for this program.")
+            render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label)
 
         with detail_phone:
             st.info("Phone Bank workflow will use this program's universe, users, and results here.")
