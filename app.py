@@ -12620,7 +12620,7 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
 
 
 def render_mobile_shell_c1() -> None:
-    """C3.2 Mobile-only display: compact branded phone UI, persistent DEV state, tighter rows, clearer back buttons."""
+    """C3.3 Mobile-only display: compact branded phone UI, persistent DEV state, inline progress rows, subtle striping, compact household actions."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
@@ -12630,7 +12630,7 @@ def render_mobile_shell_c1() -> None:
 
     st.markdown("""
     <style>
-    /* C3.2 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
+    /* C3.3 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
     [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
     .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
     .block-container, [data-testid="stMain"] .block-container {
@@ -12657,11 +12657,11 @@ def render_mobile_shell_c1() -> None:
     [data-testid="stCaptionContainer"] { font-size: .68rem !important; line-height: 1.05 !important; }
     /* C3/C2.8 ultra dense field UI */
     .cc-mobile-step {
-        background: rgba(7,29,58,.02);
+        background: #f8f4ea;
         border: 1px solid rgba(159,21,28,.22);
         border-radius: 7px;
-        padding: 2px 6px;
-        margin: 1px 0 2px 0;
+        padding: 4px 7px;
+        margin: 2px 0 5px 0;
         color: #071d3a;
         font-weight: 950;
         font-size: .92rem;
@@ -12755,7 +12755,7 @@ def render_mobile_shell_c1() -> None:
         font-weight: 900 !important;
     }
 
-    /* C3.2: make true navigation/back controls visible without touching app-wide colors. */
+    /* C3.3: make true navigation/back controls visible without touching app-wide colors. */
     [class*="st-key-c26_back"] button,
     [class*="st-key-c26_new_street"] button,
     [class*="st-key-c26_new_list"] button,
@@ -12784,7 +12784,7 @@ def render_mobile_shell_c1() -> None:
         font-weight: 900 !important;
     }
 
-    /* C3.2: denser field rows and closer data columns. */
+    /* C3.3: denser field rows and closer data columns. */
     .cc-field-row-sep {
         border-bottom: 1px solid rgba(7,29,58,.10) !important;
         margin: 0 !important;
@@ -12801,6 +12801,50 @@ def render_mobile_shell_c1() -> None:
         font-size: .76rem !important;
     }
     [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .08rem !important; }
+
+
+
+    /* C3.3 Field UX Polish: inline row data, subtle striping, and compact equal actions. */
+    .cc-inline-hint { color:#5f6b7a; font-size:.70rem; font-weight:800; margin:0 0 2px 0; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
+        min-height: 16px !important;
+        height: 16px !important;
+        padding: 0 4px !important;
+        font-size: .80rem !important;
+        line-height: 1 !important;
+        border-radius: 2px !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
+        font-size: .80rem !important;
+        line-height: 1 !important;
+    }
+    [data-testid="stMain"] div[data-testid="element-container"]:nth-of-type(even) div[data-testid="stButton"] > button:not([kind="primary"]) {
+        background: rgba(7,29,58,.035) !important;
+        background-color: rgba(7,29,58,.035) !important;
+    }
+    [data-testid="stMain"] div[data-testid="element-container"]:nth-of-type(odd) div[data-testid="stButton"] > button:not([kind="primary"]) {
+        background: rgba(255,255,255,.18) !important;
+        background-color: rgba(255,255,255,.18) !important;
+    }
+    [data-testid="stMain"] .cc-field-header {
+        font-size: .78rem !important;
+        border-bottom: 1px solid rgba(7,29,58,.22) !important;
+        padding: 0 0 1px 0 !important;
+        margin: 1px 0 1px 0 !important;
+    }
+    [data-testid="stMain"] textarea { min-height: 38px !important; height: 38px !important; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"],
+    [class*="st-key-c26_back"] button,
+    [class*="st-key-c26_new_street"] button,
+    [class*="st-key-c26_new_list"] button,
+    [class*="st-key-c26_login_from"] button {
+        min-height: 24px !important;
+        height: 24px !important;
+        padding: 2px 12px !important;
+        width: auto !important;
+        max-width: max-content !important;
+    }
+    .cc-legend-line { color:#5f6b7a; font-size:.64rem; line-height:1.05; margin-top:1px; }
 
     @media (max-width: 700px) {
         .block-container { padding-left: .35rem !important; padding-right: .35rem !important; padding-top: .35rem !important; }
@@ -12865,7 +12909,7 @@ def render_mobile_shell_c1() -> None:
     """, unsafe_allow_html=True)
 
     with st.expander("Tools", expanded=False):
-        st.caption("C3.2 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
+        st.caption("C3.3 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
         upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
         if upload is not None:
             try:
@@ -12926,9 +12970,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "login"
                 st.rerun()
             return
-        h1, h2, _sp = st.columns([3.0, .9, 5.1])
-        h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Voters | HH</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-field-header">List &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Voters | HH</span></div>', unsafe_allow_html=True)
         for i, pkg0 in enumerate(packages, start=1):
             a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
             mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
@@ -12937,16 +12979,13 @@ def render_mobile_shell_c1() -> None:
             v_count = int(a0.get("voter_count") or 0)
             if not v_count:
                 v_count = sum(int(h.get("Voters") or 0) for h in (pkg0.get("households") or []))
-            c1, c2, _sp = st.columns([3.0, .9, 5.1])
-            with c1:
-                if st.button(title.upper(), key=f"c26_open_list_{mid0}"):
-                    st.session_state[assignment_key] = mid0
-                    st.session_state[street_key] = ""
-                    st.session_state[hh_key] = ""
-                    st.session_state[screen_key] = "streets"
-                    st.rerun()
-            c2.markdown(f"**{v_count:,} | {hh_count:,}**")
-            _row_sep()
+            row_label = f"{title.upper()}      {v_count:,} | {hh_count:,}"
+            if st.button(row_label, key=f"c26_open_list_{mid0}"):
+                st.session_state[assignment_key] = mid0
+                st.session_state[street_key] = ""
+                st.session_state[hh_key] = ""
+                st.session_state[screen_key] = "streets"
+                st.rerun()
         if st.button("← Login", key="c26_back_login_from_lists"):
             st.session_state[screen_key] = "login"
             st.rerun()
@@ -12967,9 +13006,7 @@ def render_mobile_shell_c1() -> None:
     if screen == "streets":
         st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
         st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
-        h1, h2, _sp = st.columns([3.0, .9, 5.1])
-        h1.markdown('<div class="cc-field-header">Street</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Done | Houses</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-field-header">Street &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Done/Houses</span></div>', unsafe_allow_html=True)
         for street in street_names:
             hhs = sorted(street_map.get(street) or [], key=_c21_house_sort_value)
             done_count = 0
@@ -12979,15 +13016,12 @@ def render_mobile_shell_c1() -> None:
                 status, _cls = _is_house_done(hk, vct)
                 if status == "✓":
                     done_count += 1
-            c1, c2, _sp = st.columns([3.0, .9, 5.1])
-            with c1:
-                if st.button(street.upper(), key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
-                    st.session_state[street_key] = street
-                    st.session_state[hh_key] = ""
-                    st.session_state[screen_key] = "houses"
-                    st.rerun()
-            c2.markdown(f"**{done_count:,}/{len(hhs):,}**")
-            _row_sep()
+            row_label = f"{street.upper()}      {done_count:,}/{len(hhs):,}"
+            if st.button(row_label, key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
+                st.session_state[street_key] = street
+                st.session_state[hh_key] = ""
+                st.session_state[screen_key] = "houses"
+                st.rerun()
         b1, b2 = st.columns(2)
         with b1:
             if st.button("← Lists", key="c26_new_list_from_streets"):
@@ -13011,9 +13045,7 @@ def render_mobile_shell_c1() -> None:
             if _is_house_done(hk, vct)[0] == "✓":
                 done_total += 1
         st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
-        h1, h2, _sp = st.columns([3.0, .9, 5.1])
-        h1.markdown('<div class="cc-field-header">House</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Voters</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-field-header">House &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Voters</span></div>', unsafe_allow_html=True)
         if not street_households:
             st.warning("No households found for this street.")
         for h in street_households:
@@ -13021,14 +13053,11 @@ def render_mobile_shell_c1() -> None:
             addr = clean_value(h.get("Address"))
             voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
             marker, marker_cls = _is_house_done(hk, voters_n)
-            c1, c2, _sp = st.columns([3.0, .9, 5.1])
-            with c1:
-                if st.button(f"{marker} {addr}".upper(), key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
-                    st.session_state[hh_key] = hk
-                    st.session_state[screen_key] = "household"
-                    st.rerun()
-            c2.markdown(f"**{voters_n:,}**")
-            _row_sep()
+            row_label = f"{marker} {addr.upper()}      {voters_n:,}"
+            if st.button(row_label, key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
+                st.session_state[hh_key] = hk
+                st.session_state[screen_key] = "household"
+                st.rerun()
         b1, b2 = st.columns(2)
         with b1:
             if st.button("← Streets", key="c26_new_street_from_houses"):
@@ -13090,9 +13119,9 @@ def render_mobile_shell_c1() -> None:
         if meta_bits:
             st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
 
-        widths = [3.35, .44, .44, .44, .52, .52, .90]
+        widths = [2.20, .38, .38, .38, .46, .46, .82, 3.0]
         hdr = st.columns(widths)
-        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
+        for hc, label in zip(hdr[:7], ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
             hc.markdown(f"**{label}**")
         _row_sep()
 
@@ -13129,7 +13158,7 @@ def render_mobile_shell_c1() -> None:
         if notes_key not in st.session_state and prior_household_note:
             st.session_state[notes_key] = prior_household_note
         household_notes = st.text_area("Notes", height=44, key=notes_key, placeholder="Short household note")
-        d1, d2, d3 = st.columns([1.0, .7, 4.2])
+        d1, d2, d3 = st.columns([.7, .7, 4.8])
         with d1:
             if st.button("Save / Done", type="primary", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
                 saved_count = 0
@@ -13186,7 +13215,7 @@ def render_mobile_shell_c1() -> None:
             if st.button("Back", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
-        st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
+        st.markdown('<div class="cc-legend-line">F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot</div>', unsafe_allow_html=True)
         return
 
     st.session_state[screen_key] = "login"
