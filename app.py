@@ -8934,31 +8934,66 @@ def _team_people_dataframe(people: list) -> pd.DataFrame:
 # C4.3.1 Campaign Organization -> Field User login bridge
 # ---------------------------------------------------------------------------
 def _field_username_base_for_person(person: dict) -> str:
-    """Create a readable login username from the volunteer/team member record."""
+    """Create the Field App login username from the person's email address.
+
+    Rule for C4.3.2:
+    - Preferred/default username = full email address, lower-case.
+    - If there is no email, fall back to a readable name slug.
+    - Treat old bad placeholder values like "default" as blank so they get repaired.
+    """
     person = person or {}
-    existing = clean_value(person.get("field_username") or "").lower()
-    if existing:
-        return _ops_slug(existing).replace("-", ".")
-    email = clean_value(person.get("email") or "").lower()
+    existing = clean_value(person.get("field_username") or "").lower().strip()
+    if existing in {"default", "none", "null", "nan", "n/a", "na"}:
+        existing = ""
+    if existing and "@" in existing:
+        return existing
+    email = clean_value(person.get("email") or "").lower().strip()
     if email and "@" in email:
-        return _ops_slug(email.split("@", 1)[0]).replace("-", ".")
+        return email
+    if existing:
+        return existing
     name = clean_value(person.get("name") or "team.member").lower()
     return _ops_slug(name).replace("-", ".") or "field.user"
 
 
 def _unique_field_username(store: dict, base: str, preferred: str = "") -> str:
+    """Return a unique Field User username.
+
+    Email usernames are allowed and are now preferred. Only add a numeric suffix if
+    a non-Field-User account already owns the same username.
+    """
     users = (store or {}).setdefault("users", {})
-    preferred = _ops_slug(preferred or "").replace("-", ".")
+    preferred = clean_value(preferred or "").lower().strip()
+    if preferred in {"default", "none", "null", "nan", "n/a", "na"}:
+        preferred = ""
     if preferred and (preferred not in users or str((users.get(preferred) or {}).get("role") or "") == "Field User"):
         return preferred
-    base = _ops_slug(base or "field.user").replace("-", ".") or "field.user"
-    if base not in users:
-        return base
-    i = 2
-    while f"{base}.{i}" in users:
-        i += 1
-    return f"{base}.{i}"
 
+    raw_base = clean_value(base or "field.user").lower().strip()
+    if raw_base in {"default", "none", "null", "nan", "n/a", "na"}:
+        raw_base = "field.user"
+
+    if "@" in raw_base:
+        candidate = raw_base
+    else:
+        candidate = _ops_slug(raw_base).replace("-", ".") or "field.user"
+
+    if candidate not in users:
+        return candidate
+    if str((users.get(candidate) or {}).get("role") or "") == "Field User":
+        return candidate
+
+    if "@" in candidate:
+        local, domain = candidate.split("@", 1)
+        i = 2
+        while f"{local}.{i}@{domain}" in users:
+            i += 1
+        return f"{local}.{i}@{domain}"
+
+    i = 2
+    while f"{candidate}.{i}" in users:
+        i += 1
+    return f"{candidate}.{i}"
 
 def _campaign_record_for_field_user(store: dict, campaign_id: str) -> dict:
     campaigns = (store or {}).setdefault("campaigns", {})
@@ -8990,7 +9025,9 @@ def create_or_update_field_user_for_person(campaign_id: str, person: dict, *, re
     campaign_rec = _campaign_record_for_field_user(store, campaign_id)
     campaign_name = clean_value(campaign_rec.get("campaign_name") or person.get("campaign") or campaign_id)
     scope = campaign_rec.get("scope_filters") or security_scope_filters()
-    existing_username = clean_value(person.get("field_username") or "").lower()
+    existing_username = clean_value(person.get("field_username") or "").lower().strip()
+    if existing_username in {"default", "none", "null", "nan", "n/a", "na"}:
+        existing_username = ""
     username = _unique_field_username(store, _field_username_base_for_person(person), existing_username)
     prior = dict(users.get(username) or {})
     is_new = username not in users
