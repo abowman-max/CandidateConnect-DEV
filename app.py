@@ -8895,6 +8895,7 @@ def _normalize_team_person(raw: dict, campaign_id: str, source: str = "manual") 
         "status": status or "Active",
         "skills": skills,
         "notes": notes,
+        "field_username": clean_value(raw.get("field_username") or raw.get("Field Username") or raw.get("login_username") or raw.get("Login Username") or "") if 'clean_value' in globals() else str(raw.get("field_username") or "").strip(),
         "source": source,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -8920,12 +8921,130 @@ def _merge_team_people(existing: list, incoming: list) -> tuple[list, int, int]:
 
 
 def _team_people_dataframe(people: list) -> pd.DataFrame:
-    cols = ["person_id", "name", "role", "status", "mobile", "landline", "email", "address", "city", "state", "zip", "skills", "notes"]
+    cols = ["person_id", "name", "role", "status", "field_username", "mobile", "landline", "email", "address", "city", "state", "zip", "skills", "notes"]
     df = pd.DataFrame(people or [])
     for c in cols:
         if c not in df.columns:
             df[c] = ""
     return df[cols]
+
+
+
+# ---------------------------------------------------------------------------
+# C4.3.1 Campaign Organization -> Field User login bridge
+# ---------------------------------------------------------------------------
+def _field_username_base_for_person(person: dict) -> str:
+    """Create a readable login username from the volunteer/team member record."""
+    person = person or {}
+    existing = clean_value(person.get("field_username") or "").lower()
+    if existing:
+        return _ops_slug(existing).replace("-", ".")
+    email = clean_value(person.get("email") or "").lower()
+    if email and "@" in email:
+        return _ops_slug(email.split("@", 1)[0]).replace("-", ".")
+    name = clean_value(person.get("name") or "team.member").lower()
+    return _ops_slug(name).replace("-", ".") or "field.user"
+
+
+def _unique_field_username(store: dict, base: str, preferred: str = "") -> str:
+    users = (store or {}).setdefault("users", {})
+    preferred = _ops_slug(preferred or "").replace("-", ".")
+    if preferred and (preferred not in users or str((users.get(preferred) or {}).get("role") or "") == "Field User"):
+        return preferred
+    base = _ops_slug(base or "field.user").replace("-", ".") or "field.user"
+    if base not in users:
+        return base
+    i = 2
+    while f"{base}.{i}" in users:
+        i += 1
+    return f"{base}.{i}"
+
+
+def _campaign_record_for_field_user(store: dict, campaign_id: str) -> dict:
+    campaigns = (store or {}).setdefault("campaigns", {})
+    rec = campaigns.get(_ops_slug(campaign_id)) or {}
+    if rec:
+        return rec
+    return {
+        "campaign_id": _ops_slug(campaign_id),
+        "campaign_name": _ops_slug(campaign_id),
+        "scope_filters": security_scope_filters() if 'security_scope_filters' in globals() else {},
+        "dataset_status": "active",
+        "account_status": "active",
+    }
+
+
+def create_or_update_field_user_for_person(campaign_id: str, person: dict, *, reset_password: bool = False) -> tuple[bool, str, str]:
+    """Create/link one Campaign Organization person to a Field User account.
+
+    Returns (ok, username, message). New accounts receive Welcome123! and must change it.
+    Existing accounts keep their password unless reset_password=True.
+    """
+    campaign_id = _ops_slug(campaign_id or _current_campaign_ops_id())
+    person = dict(person or {})
+    name = clean_value(person.get("name") or "").strip()
+    if not name:
+        return False, "", "Team member name is required."
+    store = load_security_store()
+    users = store.setdefault("users", {})
+    campaign_rec = _campaign_record_for_field_user(store, campaign_id)
+    campaign_name = clean_value(campaign_rec.get("campaign_name") or person.get("campaign") or campaign_id)
+    scope = campaign_rec.get("scope_filters") or security_scope_filters()
+    existing_username = clean_value(person.get("field_username") or "").lower()
+    username = _unique_field_username(store, _field_username_base_for_person(person), existing_username)
+    prior = dict(users.get(username) or {})
+    is_new = username not in users
+    disabled = str(person.get("status") or "").strip().lower() in {"inactive", "do not contact", "disabled"}
+    record = dict(prior)
+    record.update({
+        "display_name": name,
+        "role": "Field User",
+        "campaign": campaign_name,
+        "campaign_id": campaign_id,
+        "scope_filters": scope or {},
+        "email": clean_value(person.get("email") or prior.get("email") or "").lower(),
+        "phone": clean_value(person.get("mobile") or person.get("landline") or prior.get("phone") or ""),
+        "disabled": bool(disabled),
+        "source": "campaign_organization",
+        "team_person_id": clean_value(person.get("person_id") or ""),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    if is_new:
+        record["created_at"] = datetime.now().isoformat(timespec="seconds")
+    if is_new or reset_password or not record.get("password_hash"):
+        temp_password = "Welcome123!"
+        record["password_hash"] = _password_hash(username, temp_password)
+        record["force_password_change"] = True
+        record["password_updated_at"] = datetime.now().isoformat(timespec="seconds")
+        record["password_reset_by"] = current_username() if 'current_username' in globals() else "system"
+        record["password_reset_at"] = datetime.now().isoformat(timespec="seconds")
+    else:
+        record.setdefault("force_password_change", False)
+    users[username] = record
+    try:
+        reconcile_security_campaign_records(store)
+    except Exception:
+        pass
+    if save_security_store(store):
+        msg = f"Created Field User login {username}. Temporary password: Welcome123!" if is_new or reset_password else f"Linked existing Field User login {username}."
+        return True, username, msg
+    return False, username, "Could not save security store."
+
+
+def create_field_users_for_team_people(campaign_id: str, people: list[dict], *, reset_existing: bool = False) -> tuple[list[dict], list[str], list[str]]:
+    updated_people = [dict(p) for p in (people or [])]
+    messages, errors = [], []
+    for p in updated_people:
+        if str(p.get("status") or "").strip().lower() in {"do not contact", "inactive"}:
+            continue
+        ok, uname, msg = create_or_update_field_user_for_person(campaign_id, p, reset_password=reset_existing)
+        if ok:
+            p["field_username"] = uname
+            p["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            messages.append(msg)
+        else:
+            errors.append(f"{p.get('name','Unnamed')}: {msg}")
+    return updated_people, messages, errors
 
 
 def _select_ops_campaign_control(prefix: str = "ops") -> str:
@@ -9047,12 +9166,72 @@ def render_team_volunteers_workspace(campaign_id: str | None = None):
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
             st.download_button("Download roster CSV", df.to_csv(index=False).encode("utf-8"), f"team_roster_{campaign_id}.csv", "text/csv")
+            st.markdown("#### Field App Logins")
+            st.caption("Everyone in Campaign Organization can receive a Field App login. They will only see assignments/packages you export to their username.")
+            col_login_a, col_login_b = st.columns([1, 1])
+            with col_login_a:
+                if st.button("Create / Link Field Logins for Active Team", key=f"team_bulk_field_logins_{campaign_id}", type="primary"):
+                    updated_people, messages, errors = create_field_users_for_team_people(campaign_id, people, reset_existing=False)
+                    store["people"] = updated_people
+                    ok, msg = save_team_people_store(campaign_id, store)
+                    if ok:
+                        st.success(f"Field logins checked/created for {len(messages)} active team members. New users use temporary password: Welcome123!")
+                        if errors:
+                            st.warning("Some records could not be linked: " + "; ".join(errors[:5]))
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with col_login_b:
+                if st.button("Reset Active Field Passwords", key=f"team_bulk_field_pw_reset_{campaign_id}"):
+                    updated_people, messages, errors = create_field_users_for_team_people(campaign_id, people, reset_existing=True)
+                    store["people"] = updated_people
+                    ok, msg = save_team_people_store(campaign_id, store)
+                    if ok:
+                        st.success("Active Field User passwords reset to temporary password: Welcome123!")
+                        if errors:
+                            st.warning("Some records could not be reset: " + "; ".join(errors[:5]))
+                        st.rerun()
+                    else:
+                        st.error(msg)
             st.markdown("#### Update / Delete")
             options = [f"{r.get('name','')} — {r.get('role','')} — {r.get('person_id','')}" for r in people]
             choice = st.selectbox("Select team member", [""] + options, key=f"team_edit_choice_{campaign_id}")
             if choice:
                 pid = choice.rsplit(" — ", 1)[-1]
                 rec = next((p for p in people if p.get("person_id") == pid), {})
+                if rec.get("field_username"):
+                    st.info(f"Field App login: {rec.get('field_username')} · temporary password for new/reset accounts is Welcome123!")
+                else:
+                    st.warning("No Field App login linked yet.")
+                login_col1, login_col2 = st.columns(2)
+                with login_col1:
+                    if st.button("Create / Link Field User", key=f"team_create_field_user_{pid}", type="primary"):
+                        ok, uname, msg = create_or_update_field_user_for_person(campaign_id, rec, reset_password=False)
+                        if ok:
+                            for p in people:
+                                if p.get("person_id") == pid:
+                                    p["field_username"] = uname
+                                    p["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                            store["people"] = people
+                            save_team_people_store(campaign_id, store)
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with login_col2:
+                    if st.button("Reset Field Password", key=f"team_reset_field_pw_{pid}"):
+                        ok, uname, msg = create_or_update_field_user_for_person(campaign_id, rec, reset_password=True)
+                        if ok:
+                            for p in people:
+                                if p.get("person_id") == pid:
+                                    p["field_username"] = uname
+                                    p["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                            store["people"] = people
+                            save_team_people_store(campaign_id, store)
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
                 e1, e2 = st.columns(2)
                 with e1:
                     new_status = st.selectbox("Status", ["Active", "Prospect", "Inactive", "Do Not Contact"], index=["Active", "Prospect", "Inactive", "Do Not Contact"].index(rec.get("status", "Active") if rec.get("status", "Active") in ["Active", "Prospect", "Inactive", "Do Not Contact"] else "Active"), key=f"team_status_{pid}")
@@ -9538,7 +9717,9 @@ def _team_lookup_for_assignments(campaign_id: str) -> tuple[list[dict], dict, li
         pid = str(p.get("person_id") or "").strip()
         if not pid:
             continue
-        label = f"{p.get('name','Unnamed')} — {p.get('role','')} — {p.get('status','')}"
+        fu = clean_value(p.get("field_username") or "")
+        login_txt = f" · Field User: {fu}" if fu else " · No field login"
+        label = f"{p.get('name','Unnamed')} — {p.get('role','')} — {p.get('status','')}{login_txt}"
         labels.append(label)
         label_to_id[label] = pid
     return people, label_to_id, labels
