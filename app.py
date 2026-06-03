@@ -13074,6 +13074,26 @@ def render_mobile_shell_c1() -> None:
     queue_key = _c1_mobile_queue_key(campaign_id, username)
     uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
 
+    def _c42_exit_mobile_to_web() -> None:
+        """Leave the mobile shell without touching offline queue/persistence state."""
+        _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None)
+        if is_super_admin():
+            st.session_state["left_section"] = "account_admin"
+            st.session_state["view"] = "security"
+        else:
+            st.session_state["left_section"] = None
+            st.session_state["view"] = "dashboard"
+        st.rerun()
+
+    def _c42_mobile_logout() -> None:
+        """Log out from mobile mode and clear mobile routing query params."""
+        _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None, cc_session=None)
+        for _k in ["auth_user", "auth_username"]:
+            st.session_state.pop(_k, None)
+        st.session_state["left_section"] = None
+        st.session_state["view"] = "dashboard"
+        st.rerun()
+
     # C3.6: Mobile Field should open directly to Lists after auth; login is handled by the app gate.
     _cc_qp_set(cc_mobile="1")
     if screen_key not in st.session_state:
@@ -13130,6 +13150,16 @@ def render_mobile_shell_c1() -> None:
       <div class="cc-mobile-sub">Q:{len(queue)} · Lists:{len(packages)}</div>
     </div>
     """, unsafe_allow_html=True)
+
+    nav_col1, nav_col2, nav_col3 = st.columns([1.15, .85, 3.0])
+    with nav_col1:
+        if st.button("← Web App", key="c42_exit_mobile_to_web"):
+            _c42_exit_mobile_to_web()
+    with nav_col2:
+        if st.button("Log Out", key="c42_mobile_logout"):
+            _c42_mobile_logout()
+    with nav_col3:
+        st.caption("Mobile mode hides the desktop menu. Use Web App to return without clearing saved field data.")
 
     with st.expander("Tools", expanded=False):
         st.caption("C4.2 stages mobile field results to campaign-scoped R2 app_state. This does not update voter records yet.")
