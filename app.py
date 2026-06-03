@@ -1868,6 +1868,99 @@ def _refresh_current_session_user(store: dict, username: str = None) -> None:
 def _user_must_change_password() -> bool:
     return bool((current_user() or {}).get("force_password_change"))
 
+def _cc_auth_sessions(store: dict) -> dict:
+    return (store or {}).setdefault("auth_sessions", {})
+
+def _cc_now() -> datetime:
+    return datetime.now()
+
+def _cc_parse_dt(value: str):
+    try:
+        return datetime.fromisoformat(str(value or ""))
+    except Exception:
+        return None
+
+def _cc_get_query_param(name: str) -> str:
+    try:
+        val = st.query_params.get(name, "")
+        if isinstance(val, list):
+            return str(val[0] if val else "")
+        return str(val or "")
+    except Exception:
+        return ""
+
+def _cc_set_query_param(name: str, value: str) -> None:
+    try:
+        if value:
+            st.query_params[name] = value
+        elif name in st.query_params:
+            del st.query_params[name]
+    except Exception:
+        pass
+
+def _cc_clear_persistent_login_token() -> None:
+    for key in ["cc_session", "mobile", "field", "mode"]:
+        _cc_set_query_param(key, "")
+    st.session_state.pop("cc_session_token", None)
+
+def _cc_create_persistent_login(store: dict, username: str, days: int = 14) -> str:
+    uname = str(username or "").strip().lower()
+    if not uname:
+        return ""
+    token = secrets.token_urlsafe(32)
+    sessions = _cc_auth_sessions(store)
+    sessions[token] = {
+        "username": uname,
+        "created_at": _cc_now().isoformat(timespec="seconds"),
+        "expires_at": (_cc_now() + timedelta(days=days)).isoformat(timespec="seconds"),
+        "source": "web_remember_me",
+    }
+    # opportunistic cleanup
+    for t, rec in list(sessions.items()):
+        exp = _cc_parse_dt((rec or {}).get("expires_at"))
+        if exp and exp < _cc_now():
+            sessions.pop(t, None)
+    save_security_store(store)
+    st.session_state["cc_session_token"] = token
+    _cc_set_query_param("cc_session", token)
+    return token
+
+def _cc_restore_persistent_login(store: dict) -> bool:
+    if st.session_state.get("auth_user"):
+        return True
+    token = str(st.session_state.get("cc_session_token") or _cc_get_query_param("cc_session") or "").strip()
+    if not token:
+        return False
+    rec = _cc_auth_sessions(store).get(token) or {}
+    exp = _cc_parse_dt(rec.get("expires_at"))
+    uname = str(rec.get("username") or "").strip().lower()
+    user = ((store or {}).get("users") or {}).get(uname) or {}
+    if not rec or not exp or exp < _cc_now() or not user or user.get("disabled") or user.get("pending_approval"):
+        try:
+            _cc_auth_sessions(store).pop(token, None)
+            save_security_store(store)
+        except Exception:
+            pass
+        _cc_clear_persistent_login_token()
+        return False
+    st.session_state["auth_username"] = uname
+    st.session_state["auth_user"] = user
+    st.session_state["cc_session_token"] = token
+    _cc_set_query_param("cc_session", token)
+    return True
+
+def _cc_logout_current_browser(store: dict | None = None) -> None:
+    token = str(st.session_state.get("cc_session_token") or _cc_get_query_param("cc_session") or "").strip()
+    if token and store is not None:
+        try:
+            _cc_auth_sessions(store).pop(token, None)
+            save_security_store(store)
+        except Exception:
+            pass
+    for _k in ["auth_user", "auth_username", "cc_session_token"]:
+        st.session_state.pop(_k, None)
+    _cc_clear_persistent_login_token()
+
 
 # ---------------------------------------------------------------------------
 # Temporary Gmail SMTP Forgot Password workflow (v19)
@@ -3094,6 +3187,9 @@ def render_security_gate():
     store = load_security_store()
     users = store.get("users") or {}
 
+    # Restore web login across refreshes/hard reloads when this browser has a valid session token.
+    _cc_restore_persistent_login(store)
+
     # Login/setup screens use a compact centered card instead of full-width inputs.
     pass
 
@@ -3141,8 +3237,9 @@ def render_security_gate():
     _left, _center, _right = st.columns([1, 1.15, 1])
     with _center:
         with st.form("candidate_connect_login"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
+            username = st.text_input("Username", key="cc_login_username")
+            password = st.text_input("Password", type="password", key="cc_login_password")
+            remember_me = st.checkbox("Keep me signed in on this browser", value=True, key="cc_login_remember_me")
             submitted = st.form_submit_button("Log In", type="primary")
     if submitted:
         username_clean = str(username or "").strip().lower()
@@ -3158,6 +3255,10 @@ def render_security_gate():
         else:
             st.session_state["auth_username"] = username_clean
             st.session_state["auth_user"] = user
+            if remember_me:
+                _cc_create_persistent_login(store, username_clean)
+            else:
+                _cc_clear_persistent_login_token()
             st.success("Logged in.")
             st.rerun()
 
@@ -3211,8 +3312,7 @@ def render_password_change_panel(*, forced: bool = False):
 
     if forced:
         if st.button("Log Out", key="forced_password_logout"):
-            for _k in ["auth_user", "auth_username"]:
-                st.session_state.pop(_k, None)
+            _cc_logout_current_browser(load_security_store())
             st.rerun()
 
 def render_my_account_workspace():
@@ -12650,8 +12750,7 @@ with st.sidebar:
             st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
 
     if st.button("Log Out", width="stretch"):
-        for _k in ["auth_user", "auth_username"]:
-            st.session_state.pop(_k, None)
+        _cc_logout_current_browser(load_security_store())
         st.rerun()
     st.divider()
 
