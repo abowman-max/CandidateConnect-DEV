@@ -2510,8 +2510,9 @@ def _cc_restore_browser_session_from_query(store: dict) -> bool:
         return False
     st.session_state["auth_username"] = uname
     st.session_state["auth_user"] = user
-    if _cc_qp_get("cc_mobile", "") == "1":
-        st.session_state["left_section"] = "mobile_shell_c1"
+    # C4.2.7 sidebar recovery: do NOT let stale mobile URL flags force the web app
+    # back into the mobile shell. Mobile Field is entered only by clicking the
+    # sidebar button after a normal web session is restored.
     return True
 
 def current_role() -> str:
@@ -3195,9 +3196,11 @@ def render_security_gate():
             # C3.6: preserve login across Streamlit refreshes and route mobile users directly to Lists.
             token = _cc_create_browser_session(store, username_clean)
             _cc_qp_set(cc_session=token)
-            if _cc_qp_get("cc_mobile", "") == "1":
-                st.session_state["left_section"] = "mobile_shell_c1"
-                _cc_qp_set(cc_mobile="1", cc_screen="lists")
+            # C4.2.7 sidebar recovery: ignore stale cc_mobile URL flags at login.
+            # The mobile shell should only open from the left navigation, not because
+            # a prior mobile URL remained in the browser.
+            if False:
+                pass
             st.success("Logged in.")
             st.rerun()
 
@@ -13131,6 +13134,26 @@ def render_mobile_shell_c1() -> None:
     </div>
     """, unsafe_allow_html=True)
 
+    # C4.2.7 sidebar recovery: a real escape hatch from the mobile shell.
+    # This does not touch persistence, local queue, R2 sync state, saved universes, or voter records.
+    esc1, esc2, _escsp = st.columns([1.1, 1.0, 4.0])
+    with esc1:
+        if st.button("← Web App", key="c427_exit_mobile_to_web", width="stretch"):
+            for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household"]:
+                _cc_qp_set(**{_qp: None})
+            st.session_state["left_section"] = None
+            st.session_state["view"] = "dashboard"
+            st.rerun()
+    with esc2:
+        if st.button("Log Out", key="c427_mobile_logout", width="stretch"):
+            for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household", "cc_session"]:
+                _cc_qp_set(**{_qp: None})
+            for _k in ["auth_user", "auth_username"]:
+                st.session_state.pop(_k, None)
+            st.session_state["left_section"] = None
+            st.session_state["view"] = "dashboard"
+            st.rerun()
+
     with st.expander("Tools", expanded=False):
         st.caption("C4.2 stages mobile field results to campaign-scoped R2 app_state. This does not update voter records yet.")
         remote_mobile_store = _c42_load_mobile_results_store(campaign_id)
@@ -13538,6 +13561,22 @@ if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_
 if "left_section" not in st.session_state: st.session_state["left_section"] = None
 _filter_suffix = st.session_state["filter_reset_token"]
 
+# C4.2.7 sidebar recovery: when the app is not explicitly in Mobile Field,
+# make the Streamlit sidebar visible again even if stale mobile CSS existed in the browser DOM.
+if st.session_state.get("left_section") != "mobile_shell_c1":
+    st.markdown("""
+<style>
+[data-testid="stSidebar"], section[data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
+}
+[data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # v29 DEV-only sidebar visual refinement:
 # Make the left navigation quieter and less overwhelming without touching main-pane action buttons.
@@ -13673,8 +13712,12 @@ with st.sidebar:
             st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
 
     if st.button("Log Out", width="stretch"):
+        for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household", "cc_session"]:
+            _cc_qp_set(**{_qp: None})
         for _k in ["auth_user", "auth_username"]:
             st.session_state.pop(_k, None)
+        st.session_state["left_section"] = None
+        st.session_state["view"] = "dashboard"
         st.rerun()
     st.divider()
 
