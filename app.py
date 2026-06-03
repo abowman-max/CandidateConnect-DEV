@@ -1,4 +1,5 @@
-# Candidate Connect LIVE — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
+# Candidate Connect LIVE
+# C4.6 WEB MOBILE RESULTS READER — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 # v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
@@ -11633,6 +11634,140 @@ def _active_program_ids_a21(programs: list[dict]) -> set[str]:
     }
 
 
+
+
+# C4.6 Web Mobile Results Reader
+@st.cache_data(ttl=15, show_spinner=False)
+def load_mobile_results_store(campaign_id: str) -> dict:
+    """Read synced field-app results from R2 app_state/mobile_results/<campaign_id>.json."""
+    cid = _ops_slug(campaign_id or "")
+    if not cid:
+        return {"queued": [], "synced": [], "failed": []}
+    try:
+        r = requests.get(root_r2_url(f"app_state/mobile_results/{cid}.json"), timeout=10)
+        if r.ok:
+            data = r.json()
+            if isinstance(data, dict):
+                data.setdefault("queued", [])
+                data.setdefault("synced", [])
+                data.setdefault("failed", [])
+                return data
+    except Exception:
+        pass
+    return {"queued": [], "synced": [], "failed": []}
+
+
+def _mobile_result_rows(store: dict) -> list[dict]:
+    """Flatten mobile result store into display/countable rows."""
+    if not isinstance(store, dict):
+        return []
+    rows = []
+    for status_bucket in ["synced", "queued", "failed"]:
+        items = store.get(status_bucket) or []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            row["_bucket"] = status_bucket
+            rows.append(row)
+    return rows
+
+
+def _result_label_to_key(value) -> str:
+    v = clean_value(value).strip().lower()
+    if v in {"f", "fav", "favorable"}:
+        return "Favorable"
+    if v in {"u", "und", "undecided"}:
+        return "Undecided"
+    if v in {"a", "against", "opposed", "oppose"}:
+        return "Against"
+    if v in {"nh", "not home", "not_home"}:
+        return "Not Home"
+    return clean_value(value) or "Other"
+
+
+def render_mobile_results_reader_c46(campaign_id: str) -> None:
+    """Show field-app synced results in the web app. No voter-record writeback yet."""
+    st.markdown("#### Field App Sync Results")
+    st.caption("C4.6 reads synced field-app results from R2. This does not update voter records yet.")
+
+    if st.button("Refresh Field Results", key=f"refresh_mobile_results_c46_{_ops_slug(campaign_id)}"):
+        try:
+            load_mobile_results_store.clear()
+        except Exception:
+            pass
+        st.rerun()
+
+    store = load_mobile_results_store(campaign_id)
+    rows = _mobile_result_rows(store)
+    synced_rows = [r for r in rows if r.get("_bucket") == "synced"]
+    queued_rows = [r for r in rows if r.get("_bucket") == "queued"]
+    failed_rows = [r for r in rows if r.get("_bucket") == "failed"]
+
+    if not rows:
+        st.info("No field-app results synced yet.")
+        st.caption(f"Expected R2 path: app_state/mobile_results/{_ops_slug(campaign_id)}.json")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("Synced Results", f"{len(synced_rows):,}")
+    with c2: st.metric("Still Queued", f"{len(queued_rows):,}")
+    with c3: st.metric("Failed", f"{len(failed_rows):,}")
+    with c4:
+        last_sync = clean_value(store.get("last_sync") or store.get("updated_at") or "")
+        st.metric("Last Sync", last_sync[:19] if last_sync else "—")
+
+    count_rows = synced_rows or rows
+    result_counts = {"Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0}
+    yard = follow = mb = volunteer = 0
+    for r in count_rows:
+        key = _result_label_to_key(r.get("result"))
+        if key in result_counts:
+            result_counts[key] += 1
+        yard += 1 if bool(r.get("yard_sign")) else 0
+        follow += 1 if bool(r.get("follow_up") or r.get("needs_follow_up")) else 0
+        mb += 1 if bool(r.get("mail_ballot_interest") or r.get("mb_interest")) else 0
+        volunteer += 1 if bool(r.get("volunteer_interest")) else 0
+
+    r1, r2, r3, r4 = st.columns(4)
+    with r1: st.metric("Favorable", f"{result_counts.get('Favorable', 0):,}")
+    with r2: st.metric("Undecided", f"{result_counts.get('Undecided', 0):,}")
+    with r3: st.metric("Against", f"{result_counts.get('Against', 0):,}")
+    with r4: st.metric("Not Home", f"{result_counts.get('Not Home', 0):,}")
+
+    f1, f2, f3, f4 = st.columns(4)
+    with f1: st.metric("Yard Sign", f"{yard:,}")
+    with f2: st.metric("Follow Up", f"{follow:,}")
+    with f3: st.metric("MB Interest", f"{mb:,}")
+    with f4: st.metric("Volunteer Interest", f"{volunteer:,}")
+
+    try:
+        import pandas as pd
+        display_rows = []
+        for r in sorted(rows, key=lambda x: clean_value(x.get("created_at") or x.get("synced_at") or ""), reverse=True):
+            display_rows.append({
+                "Status": clean_value(r.get("_bucket")).title(),
+                "Result": _result_label_to_key(r.get("result")),
+                "Voter": clean_value(r.get("voter_name")) or clean_value(r.get("voter_id")),
+                "Address": clean_value(r.get("household_address")),
+                "Assignment": clean_value(r.get("assignment_name")),
+                "Field User": clean_value(r.get("username")),
+                "Yard Sign": "Y" if r.get("yard_sign") else "",
+                "Follow Up": "Y" if (r.get("follow_up") or r.get("needs_follow_up")) else "",
+                "MB Interest": "Y" if (r.get("mail_ballot_interest") or r.get("mb_interest")) else "",
+                "Volunteer": "Y" if r.get("volunteer_interest") else "",
+                "Notes": clean_value(r.get("notes")),
+                "Created": clean_value(r.get("created_at"))[:19],
+            })
+        if display_rows:
+            st.markdown("##### Recent Field Results")
+            st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
+    except Exception as exc:
+        st.warning(f"Could not render field results table: {exc}")
+
+
 def render_outreach_dashboard_v1(campaign_id: str) -> None:
     st.markdown("### Outreach Dashboard")
     st.caption("High-level status for active voter contact programs, assignments, and field progress. Builders live on the other outreach pages.")
@@ -11692,6 +11827,8 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
     with r3: st.metric("Against", f"{contact_results.get('A',0):,}")
     with r4: st.metric("Yard Sign", f"{contact_results.get('YS',0):,}")
     with r5: st.metric("Not Home", f"{contact_results.get('NH',0):,}")
+
+    render_mobile_results_reader_c46(campaign_id)
 
     st.markdown("#### Program Progress")
     if active_programs:
