@@ -12853,8 +12853,12 @@ def render_mobile_shell_c1() -> None:
     st.markdown("""
     <style>
     /* C3.2 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
-    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
-    .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
+    /* C4.2.3 SAFE REPAIR: do not hard-hide the Streamlit sidebar in mobile mode.
+       The previous rule could survive the Web App transition and leave the user
+       trapped without the desktop menu. Keep sidebar rendering intact; phone users
+       can still use Streamlit's collapse control. */
+    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: flex !important; visibility: visible !important; }
+    /* C4.2.3 SAFE REPAIR: do not destroy the desktop header DOM from the mobile shell. */
     .block-container, [data-testid="stMain"] .block-container {
         padding: .35rem .45rem .8rem .45rem !important;
         max-width: 100vw !important;
@@ -12863,7 +12867,7 @@ def render_mobile_shell_c1() -> None:
     }
     [data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
     [data-testid="stAppViewContainer"] > .main { margin-left: 0 !important; padding-left: 0 !important; }
-    header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; height: 0 !important; }
+    /* C4.2.3 SAFE REPAIR: leave Streamlit header/sidebar controls available. */
     .cc-mobile-topbar {
         position: sticky; top: 0; z-index: 999;
         background: #efe8d8; border-bottom: 1px solid #9f151c;
@@ -13075,16 +13079,10 @@ def render_mobile_shell_c1() -> None:
     uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
 
     def _c42_exit_mobile_to_web() -> None:
-        """Leave the mobile shell without touching offline queue/persistence state.
-
-        C4.2.2 repair: set an explicit one-run desktop restore flag. Streamlit can
-        keep the mobile CSS/query-param shell alive across a soft rerun unless we
-        clear both the query params and the session route before the normal sidebar
-        is rebuilt.
-        """
+        """Leave the mobile shell without touching offline queue/persistence state."""
         _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None)
-        st.session_state["cc_force_desktop_web_app"] = True
         st.session_state["cc_mobile_shell_active"] = False
+        st.session_state["cc_force_desktop_web_app"] = True
         if is_super_admin():
             st.session_state["left_section"] = "account_admin"
             st.session_state["view"] = "security"
@@ -13103,7 +13101,6 @@ def render_mobile_shell_c1() -> None:
         st.rerun()
 
     # C3.6: Mobile Field should open directly to Lists after auth; login is handled by the app gate.
-    st.session_state["cc_mobile_shell_active"] = True
     _cc_qp_set(cc_mobile="1")
     if screen_key not in st.session_state:
         st.session_state[screen_key] = _cc_qp_get("cc_screen", "lists") or "lists"
@@ -13537,43 +13534,26 @@ def render_election_day_workspace():
     st.markdown("## Election Day Operations")
     st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
 
-# Full-width branded header fixed across both the sidebar and main workspace.
-# C3: when the mobile field shell is active, suppress the desktop header/sidebar
-# so the phone gets a true full-width field UI without damaging the web app.
-# C4.2.2: hard-reset mobile routing before the desktop/sidebar is built when the
-# user taps "Web App" from the mobile shell. This preserves mobile persistence,
-# but prevents the hidden-sidebar CSS route from surviving the transition.
+# C4.2.3: clean transition from Mobile Field back to desktop web app.
+# This intentionally does not inject any sidebar/header sizing override; the base
+# Candidate Connect theme owns the header and sidebar layout.
 if st.session_state.pop("cc_force_desktop_web_app", False):
     _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None)
     st.session_state["cc_mobile_shell_active"] = False
     if st.session_state.get("left_section") == "mobile_shell_c1":
         st.session_state["left_section"] = None
-    if not st.session_state.get("view") or st.session_state.get("view") == "mobile":
+    if st.session_state.get("view") == "mobile":
         st.session_state["view"] = "dashboard"
 
+# Full-width branded header fixed across both the sidebar and main workspace.
+# C3: when the mobile field shell is active, suppress the desktop header/sidebar
+# so the phone gets a true full-width field UI without damaging the web app.
 _CC_MOBILE_FIELD_MODE = st.session_state.get("left_section") == "mobile_shell_c1"
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
 _tss_logo_uri = img_data_uri(LOGO_TPTC)
 _cc_logo_html = f'<img class="cc-global-logo-center" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
 _tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
 if not _CC_MOBILE_FIELD_MODE:
-    # C4.2.2 repair: explicitly reverse any mobile-shell CSS hiding the sidebar
-    # after returning to the web app.
-    st.markdown("""
-    <style>
-    [data-testid="stSidebar"], section[data-testid="stSidebar"] {
-        display: flex !important;
-        visibility: visible !important;
-        width: auto !important;
-        min-width: 0 !important;
-        max-width: none !important;
-    }
-    .cc-global-header, .cc-global-redbar, .cc-global-brand-row {
-        display: block !important;
-        visibility: visible !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
     st.markdown(f'''<div class="cc-global-header">
   <div class="cc-global-sidebar-fill"></div>
   <div class="cc-global-header-inner">
