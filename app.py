@@ -12598,9 +12598,135 @@ def _c1_household_voters_from_package(hh: dict, voter_map: dict[str, list[dict]]
     return out
 
 
+def _c42_mobile_result_id(record: dict) -> str:
+    """Stable-ish ID for a mobile result staged before voter-record writes exist."""
+    raw = "|".join([
+        clean_value(record.get("campaign_id")),
+        clean_value(record.get("mobile_assignment_id")),
+        clean_value(record.get("household_key")),
+        clean_value(record.get("voter_id")) or clean_value(record.get("voter_name")),
+        clean_value(record.get("contacted_at")),
+        clean_value(record.get("result")),
+        clean_value(record.get("device_id")),
+    ])
+    return "mr-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _c42_mobile_results_key(campaign_id: str) -> str:
+    # C4.2 durable staging location. This is intentionally separate from voter records.
+    return f"app_state/mobile_results/{_ops_slug(campaign_id)}.json"
+
+
+def _c42_empty_mobile_results_store(campaign_id: str) -> dict:
+    return {
+        "version": 1,
+        "campaign_id": _ops_slug(campaign_id),
+        "updated_at": "",
+        "last_sync_at": "",
+        "records": [],
+    }
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _c42_load_mobile_results_store(campaign_id: str) -> dict:
+    data = _ops_json_get(_c42_mobile_results_key(campaign_id), {})
+    if not isinstance(data, dict):
+        data = {}
+    store = _c42_empty_mobile_results_store(campaign_id)
+    store.update({k: v for k, v in data.items() if k in store})
+    if not isinstance(store.get("records"), list):
+        store["records"] = []
+    return store
+
+
+def _c42_save_mobile_results_store(campaign_id: str, records: list[dict]) -> tuple[bool, str, dict]:
+    now = datetime.now().isoformat(timespec="seconds")
+    store = _c42_empty_mobile_results_store(campaign_id)
+    store["updated_at"] = now
+    store["last_sync_at"] = now
+    store["records"] = records if isinstance(records, list) else []
+    ok, msg = _put_json_to_r2_key(_c42_mobile_results_key(campaign_id), store)
+    try:
+        _c42_load_mobile_results_store.clear()
+    except Exception:
+        pass
+    return ok, msg, store
+
+
+def _c42_queue_counts(records: list[dict]) -> dict:
+    counts = {"queued": 0, "synced": 0, "failed": 0}
+    for rec in records or []:
+        status = clean_value(rec.get("sync_status") or rec.get("status") or "queued_offline").lower()
+        if status in {"synced", "synced_to_r2"}:
+            counts["synced"] += 1
+        elif status in {"failed", "sync_failed"}:
+            counts["failed"] += 1
+        else:
+            counts["queued"] += 1
+    return counts
+
+
+def _c42_merge_mobile_results(existing: list[dict], local_queue: list[dict], campaign_id: str, username: str) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for rec in existing or []:
+        if not isinstance(rec, dict):
+            continue
+        rid = clean_value(rec.get("result_id")) or _c42_mobile_result_id(rec)
+        rec["result_id"] = rid
+        merged[rid] = rec
+    now = datetime.now().isoformat(timespec="seconds")
+    for rec in local_queue or []:
+        if not isinstance(rec, dict):
+            continue
+        staged = dict(rec)
+        staged.setdefault("campaign_id", _ops_slug(campaign_id))
+        staged.setdefault("username", username)
+        staged.setdefault("queued_at", staged.get("contacted_at") or now)
+        staged["synced_at"] = now
+        staged["sync_status"] = "synced"
+        staged["result_id"] = clean_value(staged.get("result_id")) or _c42_mobile_result_id(staged)
+        merged[staged["result_id"]] = staged
+    return sorted(merged.values(), key=lambda r: clean_value(r.get("contacted_at") or r.get("queued_at") or r.get("synced_at")))
+
+
+def _c42_sync_mobile_queue_to_r2(campaign_id: str, username: str, queue: list[dict]) -> tuple[bool, str, list[dict], str]:
+    remote = _c42_load_mobile_results_store(campaign_id)
+    merged = _c42_merge_mobile_results(remote.get("records") or [], queue or [], campaign_id, username)
+    ok, msg, saved = _c42_save_mobile_results_store(campaign_id, merged)
+    last_sync_at = clean_value(saved.get("last_sync_at")) or datetime.now().isoformat(timespec="seconds")
+    if ok:
+        local = []
+        for rec in queue or []:
+            if not isinstance(rec, dict):
+                continue
+            new_rec = dict(rec)
+            new_rec.setdefault("campaign_id", _ops_slug(campaign_id))
+            new_rec.setdefault("username", username)
+            new_rec["result_id"] = clean_value(new_rec.get("result_id")) or _c42_mobile_result_id(new_rec)
+            new_rec["sync_status"] = "synced"
+            new_rec["synced_at"] = last_sync_at
+            local.append(new_rec)
+        return True, msg, local, last_sync_at
+    failed = []
+    for rec in queue or []:
+        if not isinstance(rec, dict):
+            continue
+        new_rec = dict(rec)
+        new_rec["sync_status"] = "failed"
+        new_rec["sync_error"] = msg
+        failed.append(new_rec)
+    return False, msg, failed, ""
+
+
 def _c1_queue_mobile_result(campaign_id: str, username: str, assignment: dict, hh: dict, result_record: dict) -> None:
     qkey = _c1_mobile_queue_key(campaign_id, username)
     queue = st.session_state.setdefault(qkey, [])
+    result_record = dict(result_record or {})
+    result_record.setdefault("campaign_id", _ops_slug(campaign_id))
+    result_record.setdefault("username", username)
+    result_record.setdefault("queued_at", datetime.now().isoformat(timespec="seconds"))
+    result_record.setdefault("sync_status", "queued")
+    result_record["result_id"] = clean_value(result_record.get("result_id")) or _c42_mobile_result_id(result_record)
     queue.append(result_record)
     st.session_state[qkey] = queue
 
@@ -13006,7 +13132,28 @@ def render_mobile_shell_c1() -> None:
     """, unsafe_allow_html=True)
 
     with st.expander("Tools", expanded=False):
-        st.caption("C3.4 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
+        st.caption("C4.2 stages mobile field results to campaign-scoped R2 app_state. This does not update voter records yet.")
+        remote_mobile_store = _c42_load_mobile_results_store(campaign_id)
+        last_sync = clean_value(st.session_state.get(_c21_mobile_state_key(campaign_id, username, "last_sync_at"))) or clean_value(remote_mobile_store.get("last_sync_at")) or "Never"
+        q_counts = _c42_queue_counts(queue)
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("Queued", f"{q_counts.get('queued', 0):,}")
+        mc2.metric("Synced", f"{q_counts.get('synced', 0):,}")
+        mc3.metric("Failed", f"{q_counts.get('failed', 0):,}")
+        mc4.metric("Last Sync", last_sync)
+
+        if st.button("Sync Now", type="primary", key="c42_sync_now"):
+            ok_sync, msg_sync, synced_queue, synced_at = _c42_sync_mobile_queue_to_r2(campaign_id, username, queue)
+            st.session_state[queue_key] = synced_queue
+            if synced_at:
+                st.session_state[_c21_mobile_state_key(campaign_id, username, "last_sync_at")] = synced_at
+            _c3_save_mobile_state(campaign_id, username, synced_queue, st.session_state.get(completed_key, {}))
+            if ok_sync:
+                st.success(f"Sync complete. Results staged at app_state/mobile_results/{_ops_slug(campaign_id)}.json")
+            else:
+                st.error(f"Sync failed: {msg_sync}")
+            st.rerun()
+
         upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
         if upload is not None:
             try:
