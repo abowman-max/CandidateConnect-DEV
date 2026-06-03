@@ -13668,6 +13668,40 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# C4.2.4: Streamlit sidebar recovery.
+# Some browsers keep the Streamlit sidebar in a collapsed client-side state after
+# leaving the mobile shell. This CSS does not alter the Candidate Connect header;
+# it only makes the actual sidebar and its collapse/expand control visible again.
+st.markdown("""
+<style>
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: translateX(0px) !important;
+    left: 0 !important;
+    pointer-events: auto !important;
+}
+section[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] > div:first-child {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+[data-testid="collapsedControl"],
+button[kind="header"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: 1000002 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
