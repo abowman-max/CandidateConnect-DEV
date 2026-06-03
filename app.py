@@ -12853,12 +12853,8 @@ def render_mobile_shell_c1() -> None:
     st.markdown("""
     <style>
     /* C3.2 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
-    /* C4.2.3 SAFE REPAIR: do not hard-hide the Streamlit sidebar in mobile mode.
-       The previous rule could survive the Web App transition and leave the user
-       trapped without the desktop menu. Keep sidebar rendering intact; phone users
-       can still use Streamlit's collapse control. */
-    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: flex !important; visibility: visible !important; }
-    /* C4.2.3 SAFE REPAIR: do not destroy the desktop header DOM from the mobile shell. */
+    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
+    .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
     .block-container, [data-testid="stMain"] .block-container {
         padding: .35rem .45rem .8rem .45rem !important;
         max-width: 100vw !important;
@@ -12867,7 +12863,7 @@ def render_mobile_shell_c1() -> None:
     }
     [data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
     [data-testid="stAppViewContainer"] > .main { margin-left: 0 !important; padding-left: 0 !important; }
-    /* C4.2.3 SAFE REPAIR: leave Streamlit header/sidebar controls available. */
+    header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; height: 0 !important; }
     .cc-mobile-topbar {
         position: sticky; top: 0; z-index: 999;
         background: #efe8d8; border-bottom: 1px solid #9f151c;
@@ -13078,33 +13074,6 @@ def render_mobile_shell_c1() -> None:
     queue_key = _c1_mobile_queue_key(campaign_id, username)
     uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
 
-    def _c42_exit_mobile_to_web() -> None:
-        """Leave the mobile shell without touching offline queue/persistence state."""
-        _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None)
-        st.session_state["cc_mobile_shell_active"] = False
-        st.session_state["cc_force_desktop_web_app"] = True
-        if is_super_admin():
-            st.session_state["left_section"] = "account_admin"
-            st.session_state["view"] = "security"
-        else:
-            st.session_state["left_section"] = None
-            st.session_state["view"] = "dashboard"
-        st.rerun()
-
-    def _c42_mobile_logout() -> None:
-        """Log out from mobile mode and clear mobile routing query params."""
-        _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None, cc_session=None)
-        for _k in [
-            "auth_user",
-            "auth_username",
-            "cc_mobile_shell_active",
-            "cc_force_desktop_web_app",
-        ]:
-            st.session_state.pop(_k, None)
-        st.session_state["left_section"] = None
-        st.session_state["view"] = "dashboard"
-        st.rerun()
-
     # C3.6: Mobile Field should open directly to Lists after auth; login is handled by the app gate.
     _cc_qp_set(cc_mobile="1")
     if screen_key not in st.session_state:
@@ -13161,16 +13130,6 @@ def render_mobile_shell_c1() -> None:
       <div class="cc-mobile-sub">Q:{len(queue)} · Lists:{len(packages)}</div>
     </div>
     """, unsafe_allow_html=True)
-
-    nav_col1, nav_col2, nav_col3 = st.columns([1.15, .85, 3.0])
-    with nav_col1:
-        if st.button("← Web App", key="c42_exit_mobile_to_web"):
-            _c42_exit_mobile_to_web()
-    with nav_col2:
-        if st.button("Log Out", key="c42_mobile_logout"):
-            _c42_mobile_logout()
-    with nav_col3:
-        st.caption("Mobile mode hides the desktop menu. Use Web App to return without clearing saved field data.")
 
     with st.expander("Tools", expanded=False):
         st.caption("C4.2 stages mobile field results to campaign-scoped R2 app_state. This does not update voter records yet.")
@@ -13539,17 +13498,6 @@ def render_election_day_workspace():
     st.markdown("## Election Day Operations")
     st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
 
-# C4.2.3: clean transition from Mobile Field back to desktop web app.
-# This intentionally does not inject any sidebar/header sizing override; the base
-# Candidate Connect theme owns the header and sidebar layout.
-if st.session_state.pop("cc_force_desktop_web_app", False):
-    _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None)
-    st.session_state["cc_mobile_shell_active"] = False
-    if st.session_state.get("left_section") == "mobile_shell_c1":
-        st.session_state["left_section"] = None
-    if st.session_state.get("view") == "mobile":
-        st.session_state["view"] = "dashboard"
-
 # Full-width branded header fixed across both the sidebar and main workspace.
 # C3: when the mobile field shell is active, suppress the desktop header/sidebar
 # so the phone gets a true full-width field UI without damaging the web app.
@@ -13673,40 +13621,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# C4.2.4: Streamlit sidebar recovery.
-# Some browsers keep the Streamlit sidebar in a collapsed client-side state after
-# leaving the mobile shell. This CSS does not alter the Candidate Connect header;
-# it only makes the actual sidebar and its collapse/expand control visible again.
-st.markdown("""
-<style>
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: translateX(0px) !important;
-    left: 0 !important;
-    pointer-events: auto !important;
-}
-section[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] > div:first-child {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-}
-[data-testid="collapsedControl"],
-button[kind="header"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    z-index: 1000002 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
@@ -13758,27 +13672,9 @@ with st.sidebar:
         if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
             st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
 
-    if st.button("Log Out", width="stretch", key="sidebar_logout_main"):
-        # C4.2.5: clear the refresh-recovery query session too.
-        # Otherwise _cc_restore_browser_session_from_query() can immediately
-        # sign the user back in on rerun, making logout look broken.
-        _cc_qp_set(
-            cc_session=None,
-            cc_mobile=None,
-            cc_screen=None,
-            cc_assignment=None,
-            cc_street=None,
-            cc_household=None,
-        )
-        for _k in [
-            "auth_user",
-            "auth_username",
-            "cc_mobile_shell_active",
-            "cc_force_desktop_web_app",
-        ]:
+    if st.button("Log Out", width="stretch"):
+        for _k in ["auth_user", "auth_username"]:
             st.session_state.pop(_k, None)
-        st.session_state["left_section"] = None
-        st.session_state["view"] = "dashboard"
         st.rerun()
     st.divider()
 
