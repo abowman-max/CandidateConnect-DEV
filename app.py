@@ -12829,6 +12829,17 @@ def render_mobile_shell_c1() -> None:
         div[data-testid="column"] { padding-left: .05rem !important; padding-right: .05rem !important; }
         div[data-testid="stMetric"] { padding: 0 !important; }
     }
+
+    .cc-center { text-align: center !important; }
+    .cc-count-cell { color:#071d3a; font-weight:900; font-size:.84rem; line-height:1.05; padding-top:2px; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button { white-space: nowrap !important; }
+    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
+        background:#b1141b !important; background-color:#b1141b !important; color:white !important; -webkit-text-fill-color:white !important;
+        border:1px solid #8f1016 !important; min-height:24px !important; height:24px !important; padding:2px 12px !important;
+        border-radius:6px !important; width:auto !important; max-width:max-content !important;
+    }
+    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] * { color:white !important; -webkit-text-fill-color:white !important; }
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -12950,7 +12961,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "login"
                 st.rerun()
             return
-        h1, h2, _sp = st.columns([1.85, .55, 7.6])
+        h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
         h2.markdown('<div class="cc-field-header">Voters | HH</div>', unsafe_allow_html=True)
         for i, pkg0 in enumerate(packages, start=1):
@@ -12961,7 +12972,7 @@ def render_mobile_shell_c1() -> None:
             v_count = int(a0.get("voter_count") or 0)
             if not v_count:
                 v_count = sum(int(h.get("Voters") or 0) for h in (pkg0.get("households") or []))
-            c1, c2, _sp = st.columns([1.85, .55, 7.6])
+            c1, c2, _sp = st.columns([2.35, .80, 6.85])
             with c1:
                 if st.button(title.upper(), key=f"c26_open_list_{mid0}"):
                     st.session_state[assignment_key] = mid0
@@ -12969,7 +12980,7 @@ def render_mobile_shell_c1() -> None:
                     st.session_state[hh_key] = ""
                     st.session_state[screen_key] = "streets"
                     st.rerun()
-            c2.markdown(f'<span class="cc-count-cell">{v_count:,} | {hh_count:,}</span>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="cc-count-cell cc-center">{v_count:,} | {hh_count:,}</div>', unsafe_allow_html=True)
             _row_band(i)
         if st.button("← Login", key="c26_back_login_from_lists"):
             st.session_state[screen_key] = "login"
@@ -12991,9 +13002,9 @@ def render_mobile_shell_c1() -> None:
     if screen == "streets":
         st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
         st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
-        h1, h2, _sp = st.columns([1.85, .55, 7.6])
+        h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">Street</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Done | Houses</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header cc-center">Completed</div>', unsafe_allow_html=True)
         for row_i, street in enumerate(street_names):
             hhs = sorted(street_map.get(street) or [], key=_c21_house_sort_value)
             done_count = 0
@@ -13003,24 +13014,18 @@ def render_mobile_shell_c1() -> None:
                 status, _cls = _is_house_done(hk, vct)
                 if status == "✓":
                     done_count += 1
-            c1, c2, _sp = st.columns([1.85, .55, 7.6])
+            c1, c2, _sp = st.columns([2.35, .80, 6.85])
             with c1:
                 if st.button(street.upper(), key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
                     st.session_state[street_key] = street
                     st.session_state[hh_key] = ""
                     st.session_state[screen_key] = "houses"
                     st.rerun()
-            c2.markdown(f'<span class="cc-count-cell">{done_count:,}/{len(hhs):,}</span>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="cc-count-cell cc-center">{done_count:,}/{len(hhs):,}</div>', unsafe_allow_html=True)
             _row_band(row_i)
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("← Lists", key="c26_new_list_from_streets"):
-                st.session_state[screen_key] = "lists"
-                st.rerun()
-        with b2:
-            if st.button("Login", key="c26_login_from_streets"):
-                st.session_state[screen_key] = "login"
-                st.rerun()
+        if st.button("← Lists", key="c26_new_list_from_streets"):
+            st.session_state[screen_key] = "lists"
+            st.rerun()
         return
 
     selected_street = clean_value(st.session_state.get(street_key))
@@ -13035,7 +13040,7 @@ def render_mobile_shell_c1() -> None:
             if _is_house_done(hk, vct)[0] == "✓":
                 done_total += 1
         st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
-        h1, h2, _sp = st.columns([1.85, .55, 7.6])
+        h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">House</div>', unsafe_allow_html=True)
         h2.markdown('<div class="cc-field-header">Voters</div>', unsafe_allow_html=True)
         if not street_households:
@@ -13045,24 +13050,18 @@ def render_mobile_shell_c1() -> None:
             addr = clean_value(h.get("Address"))
             voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
             marker, marker_cls = _is_house_done(hk, voters_n)
-            c1, c2, _sp = st.columns([1.85, .55, 7.6])
+            c1, c2, _sp = st.columns([2.35, .80, 6.85])
             with c1:
                 label_addr = ((marker + " ") if marker else "") + addr
                 if st.button(label_addr.upper(), key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
                     st.session_state[hh_key] = hk
                     st.session_state[screen_key] = "household"
                     st.rerun()
-            c2.markdown(f'<span class="cc-count-cell">{voters_n:,}</span>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="cc-count-cell cc-center">{voters_n:,}</div>', unsafe_allow_html=True)
             _row_band(row_i)
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("← Streets", key="c26_new_street_from_houses"):
-                st.session_state[screen_key] = "streets"
-                st.rerun()
-        with b2:
-            if st.button("Lists", key="c26_new_list_from_houses"):
-                st.session_state[screen_key] = "lists"
-                st.rerun()
+        if st.button("← Streets", key="c26_new_street_from_houses"):
+            st.session_state[screen_key] = "streets"
+            st.rerun()
         return
 
     if screen == "household":
@@ -13115,9 +13114,9 @@ def render_mobile_shell_c1() -> None:
         if meta_bits:
             st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
 
-        widths = [3.35, .44, .44, .44, .52, .52, .90]
+        widths = [2.45, .42, .42, .42, .50, .50, .92, 4.37]
         hdr = st.columns(widths)
-        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
+        for hc, label in zip(hdr[:7], ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
             hc.markdown(f"**{label}**")
         _row_sep()
 
@@ -13208,7 +13207,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         with d2:
-            if st.button("Back", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Back", type="primary", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
