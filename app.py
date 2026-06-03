@@ -2426,6 +2426,94 @@ def current_user() -> dict:
 def current_username() -> str:
     return str(st.session_state.get("auth_username") or "").strip().lower()
 
+
+def _cc_qp_get(name: str, default: str = "") -> str:
+    """Read one query-param value safely across Streamlit versions."""
+    try:
+        val = st.query_params.get(name, default)
+        if isinstance(val, list):
+            return str(val[0] if val else default)
+        return str(val if val is not None else default)
+    except Exception:
+        return default
+
+
+def _cc_qp_set(**kwargs) -> None:
+    """Best-effort query-param persistence for refresh-safe mobile routing."""
+    try:
+        for k, v in kwargs.items():
+            if v is None:
+                try:
+                    st.query_params.pop(k, None)
+                except Exception:
+                    pass
+            else:
+                st.query_params[str(k)] = str(v)
+    except Exception:
+        pass
+
+
+
+
+def _cc_text_input(label: str, **kwargs):
+    """Streamlit text_input with graceful fallback when autocomplete is unsupported."""
+    try:
+        return st.text_input(label, **kwargs)
+    except TypeError:
+        kwargs.pop("autocomplete", None)
+        return st.text_input(label, **kwargs)
+
+
+def _cc_session_token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def _cc_create_browser_session(store: dict, username: str, *, days: int = 14) -> str:
+    """Create a lightweight browser session token for refresh recovery.
+
+    This is not a replacement for production SSO; it prevents Streamlit refreshes from
+    trapping mobile field users on the login screen during DEV/field testing.
+    """
+    token = secrets.token_urlsafe(32)
+    sessions = store.setdefault("browser_sessions", {})
+    sessions[_cc_session_token_hash(token)] = {
+        "username": str(username or "").strip().lower(),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "expires_at": (datetime.now() + timedelta(days=days)).isoformat(timespec="seconds"),
+        "source": "candidate_connect_browser_refresh_session",
+    }
+    save_security_store(store)
+    return token
+
+
+def _cc_restore_browser_session_from_query(store: dict) -> bool:
+    """Restore auth_user/auth_username from cc_session query param when valid."""
+    if st.session_state.get("auth_user"):
+        return True
+    token = _cc_qp_get("cc_session", "").strip()
+    if not token:
+        return False
+    sess = ((store or {}).get("browser_sessions") or {}).get(_cc_session_token_hash(token)) or {}
+    uname = str(sess.get("username") or "").strip().lower()
+    if not uname:
+        return False
+    try:
+        exp = datetime.fromisoformat(str(sess.get("expires_at") or ""))
+        if exp < datetime.now():
+            return False
+    except Exception:
+        return False
+    user = ((store or {}).get("users") or {}).get(uname) or {}
+    if not user or user.get("disabled") or user.get("pending_approval"):
+        return False
+    if user.get("campaign_id") and (((store or {}).get("campaigns") or {}).get(user.get("campaign_id"), {}) or {}).get("account_status") not in ("active", "", None):
+        return False
+    st.session_state["auth_username"] = uname
+    st.session_state["auth_user"] = user
+    if _cc_qp_get("cc_mobile", "") == "1":
+        st.session_state["left_section"] = "mobile_shell_c1"
+    return True
+
 def current_role() -> str:
     return current_user().get("role", "Viewer")
 
@@ -3038,6 +3126,7 @@ def render_security_gate():
     """Block the app until a user is logged in, or create the first Super Admin."""
     store = load_security_store()
     users = store.get("users") or {}
+    _cc_restore_browser_session_from_query(store)
 
     # Login/setup screens use a compact centered card instead of full-width inputs.
     pass
@@ -3050,9 +3139,9 @@ def render_security_gate():
         _left, _center, _right = st.columns([1, 1.15, 1])
         with _center:
             with st.form("first_admin_setup"):
-                username = st.text_input("Super Admin username")
-                pw1 = st.text_input("Password", type="password")
-                pw2 = st.text_input("Confirm password", type="password")
+                username = _cc_text_input("Super Admin username", key="first_admin_username", autocomplete="username")
+                pw1 = _cc_text_input("Password", type="password", key="first_admin_pw1", autocomplete="new-password")
+                pw2 = _cc_text_input("Confirm password", type="password", key="first_admin_pw2", autocomplete="new-password")
                 submitted = st.form_submit_button("Create Super Admin", type="primary")
         if submitted:
             username_clean = str(username or "").strip().lower()
@@ -3086,8 +3175,8 @@ def render_security_gate():
     _left, _center, _right = st.columns([1, 1.15, 1])
     with _center:
         with st.form("candidate_connect_login"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
+            username = _cc_text_input("Username", key="cc_login_username", autocomplete="username")
+            password = _cc_text_input("Password", type="password", key="cc_login_password", autocomplete="current-password")
             submitted = st.form_submit_button("Log In", type="primary")
     if submitted:
         username_clean = str(username or "").strip().lower()
@@ -3103,6 +3192,12 @@ def render_security_gate():
         else:
             st.session_state["auth_username"] = username_clean
             st.session_state["auth_user"] = user
+            # C3.6: preserve login across Streamlit refreshes and route mobile users directly to Lists.
+            token = _cc_create_browser_session(store, username_clean)
+            _cc_qp_set(cc_session=token)
+            if _cc_qp_get("cc_mobile", "") == "1":
+                st.session_state["left_section"] = "mobile_shell_c1"
+                _cc_qp_set(cc_mobile="1", cc_screen="lists")
             st.success("Logged in.")
             st.rerun()
 
@@ -3158,6 +3253,7 @@ def render_password_change_panel(*, forced: bool = False):
         if st.button("Log Out", key="forced_password_logout"):
             for _k in ["auth_user", "auth_username"]:
                 st.session_state.pop(_k, None)
+            _cc_qp_set(cc_session=None)
             st.rerun()
 
 def render_my_account_workspace():
@@ -12852,7 +12948,16 @@ def render_mobile_shell_c1() -> None:
     queue_key = _c1_mobile_queue_key(campaign_id, username)
     uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
 
-    st.session_state.setdefault(screen_key, "login")
+    # C3.6: Mobile Field should open directly to Lists after auth; login is handled by the app gate.
+    _cc_qp_set(cc_mobile="1")
+    if screen_key not in st.session_state:
+        st.session_state[screen_key] = _cc_qp_get("cc_screen", "lists") or "lists"
+    if assignment_key not in st.session_state and _cc_qp_get("cc_assignment", ""):
+        st.session_state[assignment_key] = _cc_qp_get("cc_assignment", "")
+    if street_key not in st.session_state and _cc_qp_get("cc_street", ""):
+        st.session_state[street_key] = _cc_qp_get("cc_street", "")
+    if hh_key not in st.session_state and _cc_qp_get("cc_household", ""):
+        st.session_state[hh_key] = _cc_qp_get("cc_household", "")
 
     # C3.1 DEV bridge: restore local field state from the app server so a browser
     # refresh, or switching from desktop to phone, does not wipe test results.
@@ -12887,7 +12992,11 @@ def render_mobile_shell_c1() -> None:
         mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
         package_by_id[mid0] = pkg0
 
-    screen = st.session_state.get(screen_key, "login")
+    screen = st.session_state.get(screen_key, "lists")
+    if screen == "login":
+        screen = "lists"
+        st.session_state[screen_key] = "lists"
+    _cc_qp_set(cc_mobile="1", cc_screen=screen, cc_assignment=st.session_state.get(assignment_key, ""), cc_street=st.session_state.get(street_key, ""), cc_household=st.session_state.get(hh_key, ""))
 
     st.markdown(f"""
     <div class="cc-mobile-topbar">
@@ -12905,8 +13014,7 @@ def render_mobile_shell_c1() -> None:
                 if isinstance(pkg_loaded, dict) and pkg_loaded.get("package_type") == "candidate_connect_mobile_assignment_package":
                     st.session_state[uploaded_pkg_key] = pkg_loaded
                     st.success("Assignment package loaded.")
-                    st.session_state[screen_key] = "lists"
-                    st.rerun()
+                    _mobile_go("lists")
                 else:
                     st.error("That JSON is not a Candidate Connect mobile assignment package.")
             except Exception as e:
@@ -12934,6 +13042,24 @@ def render_mobile_shell_c1() -> None:
         cls = "cc-row-band-a" if i % 2 == 0 else "cc-row-band-b"
         st.markdown(f'<div class="{cls}"></div>', unsafe_allow_html=True)
 
+
+    def _mobile_go(next_screen: str, *, assignment: str | None = None, street: str | None = None, household: str | None = None) -> None:
+        st.session_state[screen_key] = next_screen
+        if assignment is not None:
+            st.session_state[assignment_key] = assignment
+        if street is not None:
+            st.session_state[street_key] = street
+        if household is not None:
+            st.session_state[hh_key] = household
+        _cc_qp_set(
+            cc_mobile="1",
+            cc_screen=next_screen,
+            cc_assignment=st.session_state.get(assignment_key, ""),
+            cc_street=st.session_state.get(street_key, ""),
+            cc_household=st.session_state.get(hh_key, ""),
+        )
+        st.rerun()
+
     def _is_house_done(hk: str, voter_count: int = 0) -> tuple[str, str]:
         recs = [r for r in queue if isinstance(r, dict) and clean_value(r.get("household_key")) == hk]
         if bool(completed.get(hk)):
@@ -12950,17 +13076,15 @@ def render_mobile_shell_c1() -> None:
         st.markdown('<div class="cc-mobile-step">Screen 0: Login</div>', unsafe_allow_html=True)
         st.caption("For DEV, mobile inherits the current Candidate Connect login.")
         if st.button("Continue to Lists", key="c26_continue_lists"):
-            st.session_state[screen_key] = "lists"
-            st.rerun()
+            _mobile_go("lists")
         return
 
     if screen == "lists":
         st.markdown('<div class="cc-mobile-step">Screen 1: Lists</div>', unsafe_allow_html=True)
         if not packages:
             st.warning("No mobile lists are available. Use DEV tools above to load a package or generate one from Voter Outreach.")
-            if st.button("Back to Login", key="c26_back_login_no_lists"):
-                st.session_state[screen_key] = "login"
-                st.rerun()
+            if st.button("Refresh Lists", key="c26_refresh_lists_no_lists"):
+                _mobile_go("lists")
             return
         h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
@@ -12976,24 +13100,17 @@ def render_mobile_shell_c1() -> None:
             c1, c2, _sp = st.columns([2.35, .80, 6.85])
             with c1:
                 if st.button(title.upper(), key=f"c26_open_list_{mid0}"):
-                    st.session_state[assignment_key] = mid0
-                    st.session_state[street_key] = ""
-                    st.session_state[hh_key] = ""
-                    st.session_state[screen_key] = "streets"
-                    st.rerun()
+                    _mobile_go("streets", assignment=mid0, street="", household="")
             c2.markdown(f'<div class="cc-count-cell cc-center">{v_count:,} | {hh_count:,}</div>', unsafe_allow_html=True)
             _row_band(i)
-        if st.button("← Login", key="c26_back_login_from_lists"):
-            st.session_state[screen_key] = "login"
-            st.rerun()
+        # C3.6: no Login nav from Mobile Field; app login is handled by the security gate.
         return
 
     selected_assignment_id = clean_value(st.session_state.get(assignment_key))
     pkg = package_by_id.get(selected_assignment_id)
     if not pkg:
         st.warning("Selected list is no longer available. Returning to Lists.")
-        st.session_state[screen_key] = "lists"
-        st.rerun()
+        _mobile_go("lists")
         return
 
     assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
@@ -13018,15 +13135,11 @@ def render_mobile_shell_c1() -> None:
             c1, c2, _sp = st.columns([2.35, .80, 6.85])
             with c1:
                 if st.button(street.upper(), key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
-                    st.session_state[street_key] = street
-                    st.session_state[hh_key] = ""
-                    st.session_state[screen_key] = "houses"
-                    st.rerun()
+                    _mobile_go("houses", street=street, household="")
             c2.markdown(f'<div class="cc-count-cell cc-center">{done_count:,}/{len(hhs):,}</div>', unsafe_allow_html=True)
             _row_band(row_i)
         if st.button("← Lists", key="c26_new_list_from_streets"):
-            st.session_state[screen_key] = "lists"
-            st.rerun()
+            _mobile_go("lists")
         return
 
     selected_street = clean_value(st.session_state.get(street_key))
@@ -13055,14 +13168,11 @@ def render_mobile_shell_c1() -> None:
             with c1:
                 label_addr = ((marker + " ") if marker else "") + addr
                 if st.button(label_addr.upper(), key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
-                    st.session_state[hh_key] = hk
-                    st.session_state[screen_key] = "household"
-                    st.rerun()
+                    _mobile_go("household", household=hk)
             c2.markdown(f'<div class="cc-count-cell cc-center">{voters_n:,}</div>', unsafe_allow_html=True)
             _row_band(row_i)
         if st.button("← Streets", key="c26_new_street_from_houses"):
-            st.session_state[screen_key] = "streets"
-            st.rerun()
+            _mobile_go("streets")
         return
 
     if screen == "household":
@@ -13075,8 +13185,7 @@ def render_mobile_shell_c1() -> None:
                 break
         if not hh:
             st.warning("Selected household is no longer available. Returning to house list.")
-            st.session_state[screen_key] = "houses"
-            st.rerun()
+            _mobile_go("houses")
             return
 
         hk = clean_value(hh.get("Household Key") or hh.get("household_key") or selected_hk)
@@ -13205,17 +13314,14 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[completed_key] = completed
                 _c3_save_mobile_state(campaign_id, username, st.session_state.get(queue_key, []), completed)
                 st.toast(f"Saved {saved_count} record(s).")
-                st.session_state[screen_key] = "houses"
-                st.rerun()
+                _mobile_go("houses")
         with d2:
             if st.button("Back", type="primary", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
-                st.session_state[screen_key] = "houses"
-                st.rerun()
+                _mobile_go("houses")
         st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
         return
 
-    st.session_state[screen_key] = "login"
-    st.rerun()
+    _mobile_go("lists")
 
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
