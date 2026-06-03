@@ -12280,6 +12280,12 @@ def _c433_mobile_assignment_item_from_a34_package(package: dict) -> dict:
         "voter_count": int(assignment.get("voter_count") or len(voters) or 0),
         "due_date": clean_value(assignment.get("due_date") or ""),
         "status": clean_value(assignment.get("status") or "Assigned"),
+        # C4.4: expose the actual household/voter payload at the assignment-item
+        # level as well as inside package so the separate Field App can render
+        # an offline walk workflow without guessing nested schema.
+        "content_version": "C4.4_household_voter_package",
+        "households": households,
+        "voters": voters,
         "package": package,
     }
 
@@ -12637,7 +12643,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                         st.error(msg)
 
             st.markdown("##### Mobile Assignment Package")
-            st.caption("C4.3.4: Exports immediately to R2 so the Field App can load it now after Refresh / Download Assignments.")
+            st.caption("C4.4: Exports the full household/voter walk package to R2 so the Field App can load it now after Refresh / Download Assignments.")
             mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
             m1, m2 = st.columns(2)
             with m1:
@@ -12645,7 +12651,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
                         st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}"] = mobile_pkg
-                        st.success("C4.3.4 export complete: package was uploaded to R2 and is available to the Field App now.")
+                        st.success("C4.4 export complete: full household/voter package was uploaded to R2 and is available to the Field App now.")
                         st.code(msg)
                     else:
                         st.error(msg)
