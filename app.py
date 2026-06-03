@@ -12832,6 +12832,7 @@ def render_mobile_shell_c1() -> None:
 
     .cc-center { text-align: center !important; }
     .cc-count-cell { color:#071d3a; font-weight:900; font-size:.84rem; line-height:1.05; padding-top:2px; }
+    .cc-count-cell.cc-center { display:block !important; width:100% !important; text-align:center !important; }
     [data-testid="stMain"] div[data-testid="stButton"] > button { white-space: nowrap !important; }
     [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
         background:#b1141b !important; background-color:#b1141b !important; color:white !important; -webkit-text-fill-color:white !important;
@@ -12963,7 +12964,7 @@ def render_mobile_shell_c1() -> None:
             return
         h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Voters | HH</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header cc-center">Voters | HH</div>', unsafe_allow_html=True)
         for i, pkg0 in enumerate(packages, start=1):
             a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
             mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
@@ -13042,7 +13043,7 @@ def render_mobile_shell_c1() -> None:
         st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
         h1, h2, _sp = st.columns([2.35, .80, 6.85])
         h1.markdown('<div class="cc-field-header">House</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header">Voters</div>', unsafe_allow_html=True)
+        h2.markdown('<div class="cc-field-header cc-center">Voters</div>', unsafe_allow_html=True)
         if not street_households:
             st.warning("No households found for this street.")
         for row_i, h in enumerate(street_households):
