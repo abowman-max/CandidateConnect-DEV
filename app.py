@@ -12550,6 +12550,57 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+
+# C4 WEB RECOVERY: keep Streamlit sidebar controls available and undo browser-collapsed/sidebar-hidden state.
+# This is intentionally WEB ONLY and does not reintroduce the mobile shell.
+st.markdown("""
+<style>
+/* Restore the Streamlit sidebar and its collapsed/open control even if prior browser state collapsed it. */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+  z-index: 999990 !important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"],
+[data-testid="stSidebar"][aria-expanded="false"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
+[data-testid="stSidebarContent"],
+[data-testid="stSidebar"] > div:first-child {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+/* The user needs this visible as a safety valve. Do not hide it in DEV. */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[aria-label*="sidebar" i],
+button[title*="sidebar" i] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 1000005 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
