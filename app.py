@@ -2253,6 +2253,61 @@ def refresh_security_admin_view():
     st.toast("Refreshed account/campaign state from R2 app_state.")
     st.rerun()
 
+
+def _campaign_dataset_manifest_exists(campaign_id: str) -> bool:
+    """Return True when the campaign mini dataset is present on public R2.
+
+    The queue worker can successfully upload app_state/campaigns/<id>/dataset/*
+    even if the security_store campaign row still says pending_build. This helper
+    lets the web app repair that stale admin status from the actual R2 dataset.
+    """
+    try:
+        cid = _campaign_slug(campaign_id or "")
+        if not cid:
+            return False
+        url = f"{campaign_dataset_base_url(cid).rstrip('/')}/dataset_manifest.json"
+        r = requests.get(url, timeout=8)
+        if not r.ok:
+            return False
+        # A valid manifest is JSON. Keep this permissive so a small schema change
+        # does not block activation if the file exists and is readable.
+        try:
+            data = r.json()
+            return isinstance(data, dict)
+        except Exception:
+            return bool((r.text or "").strip())
+    except Exception:
+        return False
+
+
+def reconcile_campaign_dataset_statuses_from_r2(store: dict) -> bool:
+    """Mark active campaigns active when their mini dataset manifest exists on R2."""
+    if not isinstance(store, dict):
+        return False
+    changed = False
+    campaigns = store.setdefault("campaigns", {})
+    for cid, campaign in list(campaigns.items()):
+        if not isinstance(campaign, dict):
+            continue
+        account_status = str(campaign.get("account_status") or "").strip().lower()
+        dataset_status = str(campaign.get("dataset_status") or "").strip().lower()
+        if account_status != "active":
+            continue
+        if dataset_status in {"active", "disabled"}:
+            continue
+        clean_cid = _campaign_slug(campaign.get("campaign_id") or cid)
+        if _campaign_dataset_manifest_exists(clean_cid):
+            campaign["campaign_id"] = clean_cid
+            campaign["dataset_status"] = "active"
+            campaign["dataset_base_url"] = campaign_dataset_base_url(clean_cid)
+            campaign["dataset_activated_at"] = datetime.now().isoformat(timespec="seconds")
+            campaign["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            campaigns[clean_cid] = campaign
+            if clean_cid != cid and cid in campaigns:
+                campaigns.pop(cid, None)
+            changed = True
+    return changed
+
 def save_security_store(store: dict) -> bool:
     if not isinstance(store, dict):
         store = _empty_security_store()
@@ -2425,95 +2480,6 @@ def current_user() -> dict:
 
 def current_username() -> str:
     return str(st.session_state.get("auth_username") or "").strip().lower()
-
-
-def _cc_qp_get(name: str, default: str = "") -> str:
-    """Read one query-param value safely across Streamlit versions."""
-    try:
-        val = st.query_params.get(name, default)
-        if isinstance(val, list):
-            return str(val[0] if val else default)
-        return str(val if val is not None else default)
-    except Exception:
-        return default
-
-
-def _cc_qp_set(**kwargs) -> None:
-    """Best-effort query-param persistence for refresh-safe mobile routing."""
-    try:
-        for k, v in kwargs.items():
-            if v is None:
-                try:
-                    st.query_params.pop(k, None)
-                except Exception:
-                    pass
-            else:
-                st.query_params[str(k)] = str(v)
-    except Exception:
-        pass
-
-
-
-
-def _cc_text_input(label: str, **kwargs):
-    """Streamlit text_input with graceful fallback when autocomplete is unsupported."""
-    try:
-        return st.text_input(label, **kwargs)
-    except TypeError:
-        kwargs.pop("autocomplete", None)
-        return st.text_input(label, **kwargs)
-
-
-def _cc_session_token_hash(token: str) -> str:
-    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
-
-
-def _cc_create_browser_session(store: dict, username: str, *, days: int = 14) -> str:
-    """Create a lightweight browser session token for refresh recovery.
-
-    This is not a replacement for production SSO; it prevents Streamlit refreshes from
-    trapping mobile field users on the login screen during DEV/field testing.
-    """
-    token = secrets.token_urlsafe(32)
-    sessions = store.setdefault("browser_sessions", {})
-    sessions[_cc_session_token_hash(token)] = {
-        "username": str(username or "").strip().lower(),
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "expires_at": (datetime.now() + timedelta(days=days)).isoformat(timespec="seconds"),
-        "source": "candidate_connect_browser_refresh_session",
-    }
-    save_security_store(store)
-    return token
-
-
-def _cc_restore_browser_session_from_query(store: dict) -> bool:
-    """Restore auth_user/auth_username from cc_session query param when valid."""
-    if st.session_state.get("auth_user"):
-        return True
-    token = _cc_qp_get("cc_session", "").strip()
-    if not token:
-        return False
-    sess = ((store or {}).get("browser_sessions") or {}).get(_cc_session_token_hash(token)) or {}
-    uname = str(sess.get("username") or "").strip().lower()
-    if not uname:
-        return False
-    try:
-        exp = datetime.fromisoformat(str(sess.get("expires_at") or ""))
-        if exp < datetime.now():
-            return False
-    except Exception:
-        return False
-    user = ((store or {}).get("users") or {}).get(uname) or {}
-    if not user or user.get("disabled") or user.get("pending_approval"):
-        return False
-    if user.get("campaign_id") and (((store or {}).get("campaigns") or {}).get(user.get("campaign_id"), {}) or {}).get("account_status") not in ("active", "", None):
-        return False
-    st.session_state["auth_username"] = uname
-    st.session_state["auth_user"] = user
-    # C4.2.7 sidebar recovery: do NOT let stale mobile URL flags force the web app
-    # back into the mobile shell. Mobile Field is entered only by clicking the
-    # sidebar button after a normal web session is restored.
-    return True
 
 def current_role() -> str:
     return current_user().get("role", "Viewer")
@@ -3127,7 +3093,6 @@ def render_security_gate():
     """Block the app until a user is logged in, or create the first Super Admin."""
     store = load_security_store()
     users = store.get("users") or {}
-    _cc_restore_browser_session_from_query(store)
 
     # Login/setup screens use a compact centered card instead of full-width inputs.
     pass
@@ -3140,9 +3105,9 @@ def render_security_gate():
         _left, _center, _right = st.columns([1, 1.15, 1])
         with _center:
             with st.form("first_admin_setup"):
-                username = _cc_text_input("Super Admin username", key="first_admin_username", autocomplete="username")
-                pw1 = _cc_text_input("Password", type="password", key="first_admin_pw1", autocomplete="new-password")
-                pw2 = _cc_text_input("Confirm password", type="password", key="first_admin_pw2", autocomplete="new-password")
+                username = st.text_input("Super Admin username")
+                pw1 = st.text_input("Password", type="password")
+                pw2 = st.text_input("Confirm password", type="password")
                 submitted = st.form_submit_button("Create Super Admin", type="primary")
         if submitted:
             username_clean = str(username or "").strip().lower()
@@ -3176,8 +3141,8 @@ def render_security_gate():
     _left, _center, _right = st.columns([1, 1.15, 1])
     with _center:
         with st.form("candidate_connect_login"):
-            username = _cc_text_input("Username", key="cc_login_username", autocomplete="username")
-            password = _cc_text_input("Password", type="password", key="cc_login_password", autocomplete="current-password")
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Log In", type="primary")
     if submitted:
         username_clean = str(username or "").strip().lower()
@@ -3193,14 +3158,6 @@ def render_security_gate():
         else:
             st.session_state["auth_username"] = username_clean
             st.session_state["auth_user"] = user
-            # C3.6: preserve login across Streamlit refreshes and route mobile users directly to Lists.
-            token = _cc_create_browser_session(store, username_clean)
-            _cc_qp_set(cc_session=token)
-            # C4.2.7 sidebar recovery: ignore stale cc_mobile URL flags at login.
-            # The mobile shell should only open from the left navigation, not because
-            # a prior mobile URL remained in the browser.
-            if False:
-                pass
             st.success("Logged in.")
             st.rerun()
 
@@ -3256,7 +3213,6 @@ def render_password_change_panel(*, forced: bool = False):
         if st.button("Log Out", key="forced_password_logout"):
             for _k in ["auth_user", "auth_username"]:
                 st.session_state.pop(_k, None)
-            _cc_qp_set(cc_session=None)
             st.rerun()
 
 def render_my_account_workspace():
@@ -3485,6 +3441,9 @@ def render_account_admin_workspace(filter_options=None):
         st.markdown("### Campaigns / Mini Datasets")
     with camp_refresh_col:
         if st.button("Refresh Campaigns", key="refresh_campaigns_section", width="stretch"):
+            if reconcile_campaign_dataset_statuses_from_r2(store):
+                save_security_store(store)
+                st.success("Found uploaded campaign mini dataset(s) on R2 and marked them active.")
             refresh_security_admin_view()
     st.caption("Phase 2A: define campaign records now. Once its mini dataset is built/uploaded, campaign users can read the smaller dataset instead of statewide.")
     if is_super_admin():
@@ -3495,6 +3454,10 @@ def render_account_admin_workspace(filter_options=None):
                 st.rerun()
             else:
                 st.info("Campaign records already look synced.")
+
+    if reconcile_campaign_dataset_statuses_from_r2(store):
+        save_security_store(store)
+        st.toast("Detected uploaded campaign dataset on R2 and marked it active.")
 
     campaigns = store.setdefault("campaigns", {})
     visible_campaigns = visible_campaign_records_for_current_user(campaigns)
@@ -12440,1059 +12403,6 @@ def render_program_manager_a2(campaign_id: str | None = None):
                     else:
                         st.error(msg)
 
-
-# ---------------------------------------------------------------------------
-# Candidate Connect Phase C1: Mobile Shell (offline-first field workflow)
-# ---------------------------------------------------------------------------
-def _c1_mobile_queue_key(campaign_id: str, username: str) -> str:
-    return f"c1_mobile_offline_queue_{_ops_slug(campaign_id)}_{_ops_slug(username)}"
-
-
-def _c1_mobile_downloads_key(campaign_id: str, username: str) -> str:
-    return f"c1_mobile_downloaded_assignments_{_ops_slug(campaign_id)}_{_ops_slug(username)}"
-
-
-def _c1_current_person_labels(campaign_id: str) -> set[str]:
-    """Best-effort match between the logged-in account and Campaign Organization person labels."""
-    labels: set[str] = set()
-    try:
-        user = current_user() or {}
-        uname = current_username()
-        email = clean_value(user.get("email") or user.get("username") or uname).lower()
-        display = clean_value(user.get("name") or user.get("full_name") or uname)
-        people, _user_labels, _label_to_user_id, user_id_to_label = _program_user_labels(campaign_id)
-        for person in people:
-            pid = clean_value(person.get("person_id"))
-            label = clean_value(user_id_to_label.get(pid))
-            person_email = clean_value(person.get("email")).lower()
-            person_name = clean_value(person.get("name")).lower()
-            if label and (person_email and person_email == email or person_name and person_name == display.lower()):
-                labels.add(label)
-        if display:
-            # Generated mobile packages store assignees as labels like "Al Bowman — Volunteer".
-            for label in user_id_to_label.values():
-                if clean_value(display).lower() in clean_value(label).lower():
-                    labels.add(clean_value(label))
-    except Exception:
-        pass
-    return {x for x in labels if x}
-
-
-def _c1_programs_for_mobile(campaign_id: str) -> list[dict]:
-    try:
-        programs = load_outreach_programs_store(campaign_id).get("programs", []) or []
-    except Exception:
-        programs = []
-    if is_super_admin() or current_role() in {"Campaign Admin", "Manager"}:
-        return programs
-    labels = _c1_current_person_labels(campaign_id)
-    try:
-        _people, _user_labels, _label_to_user_id, user_id_to_label = _program_user_labels(campaign_id)
-        my_ids = {pid for pid, label in user_id_to_label.items() if clean_value(label) in labels}
-    except Exception:
-        my_ids = set()
-    return [p for p in programs if any(clean_value(uid) in my_ids for uid in _program_user_ids(p))]
-
-
-def _c1_saved_mobile_packages_for_user(campaign_id: str, programs: list[dict]) -> list[dict]:
-    """Load saved A3.4 mobile packages from saved work items, filtered to the mobile user when possible."""
-    out: list[dict] = []
-    program_lookup = {clean_value(p.get("program_id")): p for p in (programs or [])}
-    allowed_program_ids = set(program_lookup.keys())
-    labels = _c1_current_person_labels(campaign_id)
-    role_can_see_all = is_super_admin() or current_role() in {"Campaign Admin", "Manager"}
-    try:
-        store = load_program_candidate_walk_packages_store(campaign_id)
-        saved = store.get("packages") or []
-    except Exception:
-        saved = []
-    for item in saved:
-        pid = clean_value(item.get("program_id") or ((item.get("package") or {}).get("program") or {}).get("program_id"))
-        if allowed_program_ids and pid not in allowed_program_ids:
-            continue
-        assignee = clean_value(item.get("assigned_to") or (((item.get("package") or {}).get("program") or {}).get("assigned_to")))
-        status = clean_value(item.get("status")) or "Assigned"
-        if (not role_can_see_all) and labels and assignee and assignee not in labels:
-            continue
-        if status.lower() in {"deleted", "archived"}:
-            continue
-        pkg = _a34_build_mobile_assignment_package(campaign_id, program_lookup.get(pid, {}), item)
-        pkg.setdefault("offline_sync_queue", [])
-        out.append(pkg)
-    return out
-
-
-def _c1_package_card(pkg: dict, campaign_id: str, username: str) -> None:
-    assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
-    program = pkg.get("program") if isinstance(pkg.get("program"), dict) else {}
-    mobile_id = clean_value(assignment.get("mobile_assignment_id"))
-    title = clean_value(assignment.get("name")) or clean_value(assignment.get("street_area")) or "Mobile Assignment"
-    with st.container(border=True):
-        st.markdown(f"**{title}**")
-        st.caption(f"{clean_value(program.get('name')) or 'Program'} · {clean_value(assignment.get('assigned_to')) or 'Unassigned'}")
-        a, b, c, d = st.columns(4)
-        with a: st.metric("Households", f"{int(assignment.get('household_count') or len(pkg.get('households') or [])):,}")
-        with b: st.metric("Voters", f"{int(assignment.get('voter_count') or len(pkg.get('voters') or [])):,}")
-        with c: st.metric("Status", clean_value(assignment.get('status')) or "Assigned")
-        with d: st.metric("Sync", "Offline ready")
-        st.caption(clean_value(assignment.get("street_area")) or clean_value(assignment.get("selected_precinct")) or "Assigned area")
-        dl_key = _c1_mobile_downloads_key(campaign_id, username)
-        downloaded = st.session_state.setdefault(dl_key, {})
-        col1, col2, col3 = st.columns([1, 1, 2])
-        with col1:
-            if st.button("Download to Device", key=f"c1_download_{mobile_id}"):
-                downloaded[mobile_id] = pkg
-                st.session_state[dl_key] = downloaded
-                st.success("Assignment saved to this device session for offline field testing.")
-        with col2:
-            st.download_button(
-                "Export JSON",
-                json.dumps(pkg, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name=f"{_ops_slug(title)}_mobile_assignment.json",
-                mime="application/json",
-                key=f"c1_export_{mobile_id}",
-            )
-        with col3:
-            st.caption("C1 stores the field package locally first. Sync will upload only contact results later.")
-
-
-def _c1_street_name_from_address(address: str) -> str:
-    """Best-effort street grouping for mobile field navigation."""
-    addr = clean_value(address).strip()
-    if not addr:
-        return "Unknown Street"
-    parts = addr.split()
-    if parts and parts[0].replace("-", "").isdigit():
-        parts = parts[1:]
-    return " ".join(parts).strip() or addr
-
-
-def _c1_split_household_names(names: str) -> list[str]:
-    raw = clean_value(names)
-    if not raw:
-        return []
-    return [clean_value(x) for x in raw.replace(" & ", ";").split(";") if clean_value(x)]
-
-
-def _c1_household_voters_from_package(hh: dict, voter_map: dict[str, list[dict]]) -> list[dict]:
-    hk = clean_value(hh.get("Household Key") or hh.get("household_key"))
-    mapped = voter_map.get(hk) or []
-    out: list[dict] = []
-    for idx, v in enumerate(mapped, start=1):
-        nm = clean_value(v.get("FullName") or v.get("Name") or v.get("Names") or v.get("Voter Name"))
-        mb_perm_raw = clean_value(v.get("MB_PERM") or v.get("MB Perm") or v.get("MBPerm") or v.get("PermanentMB") or v.get("Permanent MB"))
-        out.append({
-            "voter_id": clean_value(v.get("voter_id") or v.get("Voter ID") or v.get("PA_VOTER_ID")),
-            "name": nm or f"Voter {idx}",
-            "party": clean_value(v.get("Party") or v.get("CalculatedParty")),
-            "age": clean_value(v.get("Age") or v.get("AGE")),
-            "mb_perm": mb_perm_raw,
-        })
-    if out:
-        return out
-    for idx, nm in enumerate(_c1_split_household_names(hh.get("Names", "")), start=1):
-        out.append({
-            "voter_id": "",
-            "name": nm or f"Voter {idx}",
-            "party": clean_value(hh.get("Party")),
-            "age": "",
-            "mb_perm": clean_value(hh.get("MB_PERM") or hh.get("MB Perm") or hh.get("MBPerm") or hh.get("PermanentMB") or hh.get("Permanent MB")),
-        })
-    return out
-
-
-def _c42_mobile_result_id(record: dict) -> str:
-    """Stable-ish ID for a mobile result staged before voter-record writes exist."""
-    raw = "|".join([
-        clean_value(record.get("campaign_id")),
-        clean_value(record.get("mobile_assignment_id")),
-        clean_value(record.get("household_key")),
-        clean_value(record.get("voter_id")) or clean_value(record.get("voter_name")),
-        clean_value(record.get("contacted_at")),
-        clean_value(record.get("result")),
-        clean_value(record.get("device_id")),
-    ])
-    return "mr-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _c42_mobile_results_key(campaign_id: str) -> str:
-    # C4.2 durable staging location. This is intentionally separate from voter records.
-    return f"app_state/mobile_results/{_ops_slug(campaign_id)}.json"
-
-
-def _c42_empty_mobile_results_store(campaign_id: str) -> dict:
-    return {
-        "version": 1,
-        "campaign_id": _ops_slug(campaign_id),
-        "updated_at": "",
-        "last_sync_at": "",
-        "records": [],
-    }
-
-
-@st.cache_data(ttl=15, show_spinner=False)
-def _c42_load_mobile_results_store(campaign_id: str) -> dict:
-    data = _ops_json_get(_c42_mobile_results_key(campaign_id), {})
-    if not isinstance(data, dict):
-        data = {}
-    store = _c42_empty_mobile_results_store(campaign_id)
-    store.update({k: v for k, v in data.items() if k in store})
-    if not isinstance(store.get("records"), list):
-        store["records"] = []
-    return store
-
-
-def _c42_save_mobile_results_store(campaign_id: str, records: list[dict]) -> tuple[bool, str, dict]:
-    now = datetime.now().isoformat(timespec="seconds")
-    store = _c42_empty_mobile_results_store(campaign_id)
-    store["updated_at"] = now
-    store["last_sync_at"] = now
-    store["records"] = records if isinstance(records, list) else []
-    ok, msg = _put_json_to_r2_key(_c42_mobile_results_key(campaign_id), store)
-    try:
-        _c42_load_mobile_results_store.clear()
-    except Exception:
-        pass
-    return ok, msg, store
-
-
-def _c42_queue_counts(records: list[dict]) -> dict:
-    counts = {"queued": 0, "synced": 0, "failed": 0}
-    for rec in records or []:
-        status = clean_value(rec.get("sync_status") or rec.get("status") or "queued_offline").lower()
-        if status in {"synced", "synced_to_r2"}:
-            counts["synced"] += 1
-        elif status in {"failed", "sync_failed"}:
-            counts["failed"] += 1
-        else:
-            counts["queued"] += 1
-    return counts
-
-
-def _c42_merge_mobile_results(existing: list[dict], local_queue: list[dict], campaign_id: str, username: str) -> list[dict]:
-    merged: dict[str, dict] = {}
-    for rec in existing or []:
-        if not isinstance(rec, dict):
-            continue
-        rid = clean_value(rec.get("result_id")) or _c42_mobile_result_id(rec)
-        rec["result_id"] = rid
-        merged[rid] = rec
-    now = datetime.now().isoformat(timespec="seconds")
-    for rec in local_queue or []:
-        if not isinstance(rec, dict):
-            continue
-        staged = dict(rec)
-        staged.setdefault("campaign_id", _ops_slug(campaign_id))
-        staged.setdefault("username", username)
-        staged.setdefault("queued_at", staged.get("contacted_at") or now)
-        staged["synced_at"] = now
-        staged["sync_status"] = "synced"
-        staged["result_id"] = clean_value(staged.get("result_id")) or _c42_mobile_result_id(staged)
-        merged[staged["result_id"]] = staged
-    return sorted(merged.values(), key=lambda r: clean_value(r.get("contacted_at") or r.get("queued_at") or r.get("synced_at")))
-
-
-def _c42_sync_mobile_queue_to_r2(campaign_id: str, username: str, queue: list[dict]) -> tuple[bool, str, list[dict], str]:
-    remote = _c42_load_mobile_results_store(campaign_id)
-    merged = _c42_merge_mobile_results(remote.get("records") or [], queue or [], campaign_id, username)
-    ok, msg, saved = _c42_save_mobile_results_store(campaign_id, merged)
-    last_sync_at = clean_value(saved.get("last_sync_at")) or datetime.now().isoformat(timespec="seconds")
-    if ok:
-        local = []
-        for rec in queue or []:
-            if not isinstance(rec, dict):
-                continue
-            new_rec = dict(rec)
-            new_rec.setdefault("campaign_id", _ops_slug(campaign_id))
-            new_rec.setdefault("username", username)
-            new_rec["result_id"] = clean_value(new_rec.get("result_id")) or _c42_mobile_result_id(new_rec)
-            new_rec["sync_status"] = "synced"
-            new_rec["synced_at"] = last_sync_at
-            local.append(new_rec)
-        return True, msg, local, last_sync_at
-    failed = []
-    for rec in queue or []:
-        if not isinstance(rec, dict):
-            continue
-        new_rec = dict(rec)
-        new_rec["sync_status"] = "failed"
-        new_rec["sync_error"] = msg
-        failed.append(new_rec)
-    return False, msg, failed, ""
-
-
-def _c1_queue_mobile_result(campaign_id: str, username: str, assignment: dict, hh: dict, result_record: dict) -> None:
-    qkey = _c1_mobile_queue_key(campaign_id, username)
-    queue = st.session_state.setdefault(qkey, [])
-    result_record = dict(result_record or {})
-    result_record.setdefault("campaign_id", _ops_slug(campaign_id))
-    result_record.setdefault("username", username)
-    result_record.setdefault("queued_at", datetime.now().isoformat(timespec="seconds"))
-    result_record.setdefault("sync_status", "queued")
-    result_record["result_id"] = clean_value(result_record.get("result_id")) or _c42_mobile_result_id(result_record)
-    queue.append(result_record)
-    st.session_state[qkey] = queue
-
-
-def _c3_mobile_state_path(campaign_id: str, username: str) -> Path:
-    """DEV bridge persistence so phone refreshes do not wipe the field queue.
-
-    This is intentionally server-local for C3.1. The production/offline version will
-    move this to device storage + sync, but this keeps test results visible across
-    browser refreshes and across desktop/phone sessions on the same DEV app instance.
-    """
-    root = Path(os.environ.get("CC_MOBILE_STATE_DIR", "/tmp/candidate_connect_mobile_state"))
-    root.mkdir(parents=True, exist_ok=True)
-    return root / f"{_ops_slug(campaign_id)}__{_ops_slug(username)}.json"
-
-
-def _c3_load_mobile_state(campaign_id: str, username: str) -> dict:
-    path = _c3_mobile_state_path(campaign_id, username)
-    try:
-        if path.exists():
-            data = json.loads(path.read_text())
-            if isinstance(data, dict):
-                return {
-                    "queue": data.get("queue") if isinstance(data.get("queue"), list) else [],
-                    "completed": data.get("completed") if isinstance(data.get("completed"), dict) else {},
-                }
-    except Exception:
-        pass
-    return {"queue": [], "completed": {}}
-
-
-def _c3_save_mobile_state(campaign_id: str, username: str, queue: list, completed: dict) -> None:
-    path = _c3_mobile_state_path(campaign_id, username)
-    payload = {
-        "saved_at": datetime.now().isoformat(timespec="seconds"),
-        "campaign_id": campaign_id,
-        "username": username,
-        "queue": queue if isinstance(queue, list) else [],
-        "completed": completed if isinstance(completed, dict) else {},
-    }
-    try:
-        path.write_text(json.dumps(payload, indent=2))
-    except Exception:
-        # Do not break field usage if DEV persistence is unavailable.
-        pass
-
-
-def _c21_house_sort_value(hh: dict) -> tuple[int, int, str]:
-    """Sort Screen 3 like a printed street list: knock order first, then house number/address."""
-    ko = clean_value(hh.get("Knock Order") or hh.get("knock_order"))
-    try:
-        knock = int(float(ko)) if ko else 999999
-    except Exception:
-        knock = 999999
-    hn = clean_value(hh.get("House Number") or hh.get("house_number"))
-    try:
-        house_no = int(float(hn)) if hn else 999999
-    except Exception:
-        # fall back to leading address number
-        addr = clean_value(hh.get("Address") or "")
-        first = addr.split()[0] if addr.split() else ""
-        try:
-            house_no = int(float(first))
-        except Exception:
-            house_no = 999999
-    return (knock, house_no, clean_value(hh.get("Address")))
-
-
-def _c21_mobile_state_key(campaign_id: str, username: str, suffix: str) -> str:
-    return f"c21_{suffix}_{_ops_slug(campaign_id)}_{_ops_slug(username)}"
-
-
-def _c21_mobile_card_button(label: str, key: str, help_text: str = "", button_type: str = "secondary") -> bool:
-    """Large tap target used for phone-like navigation screens."""
-    return st.button(label, key=key, help=help_text or None, type=button_type, width="stretch")
-
-
-def _c21_package_label(pkg: dict) -> str:
-    a = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
-    p = pkg.get("program") if isinstance(pkg.get("program"), dict) else {}
-    title = clean_value(a.get("name") or a.get("street_area") or a.get("selected_precinct") or "Mobile List")
-    program = clean_value(p.get("name") or "Program")
-    hh_count = int(a.get("household_count") or len(pkg.get("households") or []) or 0)
-    v_count = int(a.get("voter_count") or len(pkg.get("voters") or []) or 0)
-    return f"{title}\n\n{program} · {hh_count:,} households · {v_count:,} voters"
-
-
-def _c21_prepare_mobile_package_maps(pkg: dict) -> tuple[list[dict], list[dict], dict[str, list[dict]], dict[str, list[dict]], list[str]]:
-    households = pkg.get("households") if isinstance(pkg.get("households"), list) else []
-    voters = pkg.get("voters") if isinstance(pkg.get("voters"), list) else []
-    voter_map: dict[str, list[dict]] = {}
-    for v in voters:
-        voter_map.setdefault(clean_value(v.get("Household Key") or v.get("household_key")), []).append(v)
-    street_map: dict[str, list[dict]] = {}
-    for h in households:
-        street = clean_value(h.get("Street") or h.get("Street Name") or _c1_street_name_from_address(h.get("Address", "")))
-        street_map.setdefault(street or "Unknown Street", []).append(h)
-    street_names = sorted(street_map.keys(), key=lambda x: (x == "Unknown Street", x))
-    return households, voters, voter_map, street_map, street_names
-
-
-def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: list[str] | None = None) -> list[str]:
-    """Phone-friendly checkboxes instead of dropdowns/multiselects."""
-    defaults = defaults or []
-    selected: list[str] = []
-    cols = st.columns(2)
-    for i, opt in enumerate(options):
-        with cols[i % 2]:
-            if st.checkbox(opt, value=(opt in defaults), key=f"{key_prefix}_{_ops_slug(opt)}"):
-                selected.append(opt)
-    return selected
-
-
-
-def render_mobile_shell_c1() -> None:
-    """C3.4 Mobile field UI repair: compact branded phone UI, persistent DEV state, tighter rows, clearer back buttons."""
-    campaign_id = _ops_slug(_current_campaign_ops_id())
-    username = current_username() or "mobile-user"
-    programs = _c1_programs_for_mobile(campaign_id)
-
-    _mobile_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
-    _mobile_logo_html = f'<img class="cc-mobile-logo" src="{_mobile_logo_uri}" />' if _mobile_logo_uri else '<span class="cc-mobile-brand-text">Candidate Connect</span>'
-
-    st.markdown("""
-    <style>
-    /* C3.2 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
-    [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
-    .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
-    .block-container, [data-testid="stMain"] .block-container {
-        padding: .35rem .45rem .8rem .45rem !important;
-        max-width: 100vw !important;
-        width: 100% !important;
-        margin: 0 !important;
-    }
-    [data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
-    [data-testid="stAppViewContainer"] > .main { margin-left: 0 !important; padding-left: 0 !important; }
-    header[data-testid="stHeader"] { display: none !important; visibility: hidden !important; height: 0 !important; }
-    .cc-mobile-topbar {
-        position: sticky; top: 0; z-index: 999;
-        background: #efe8d8; border-bottom: 1px solid #9f151c;
-        padding: 3px 6px 3px 6px; margin: -4px -6px 4px -6px;
-        display: flex; align-items: center; justify-content: space-between; gap: 8px;
-        min-height: 30px;
-    }
-    .cc-mobile-brand-left { display:flex; align-items:center; gap:6px; min-width:0; }
-    .cc-mobile-logo { height: 24px; width:auto; display:block; }
-    .cc-mobile-brand-text { color:#071d3a; font-weight:950; font-size:.9rem; line-height:1; white-space:nowrap; }
-    .cc-mobile-sub { color:#5f6b7a; font-weight:800; font-size:.64rem; white-space: nowrap; }
-    h2 { font-size: 1.05rem !important; margin: 0 0 2px 0 !important; line-height: 1.05 !important; }
-    [data-testid="stCaptionContainer"] { font-size: .68rem !important; line-height: 1.05 !important; }
-    /* C3/C2.8 ultra dense field UI */
-    .cc-mobile-step {
-        background: #f8f4ea;
-        border: 1px solid rgba(159,21,28,.22);
-        border-radius: 7px;
-        padding: 4px 7px;
-        margin: 2px 0 5px 0;
-        color: #071d3a;
-        font-weight: 950;
-        font-size: .92rem;
-    }
-    .cc-field-header {
-        border-bottom: 1px solid rgba(7,29,58,.20);
-        margin: 0 0 2px 0;
-        padding: 0 0 2px 0;
-        font-weight: 950;
-        color: #071d3a;
-        font-size: .88rem;
-    }
-    .cc-field-row-sep {
-        border-bottom: 1px solid rgba(7,29,58,.08);
-        margin: 0 !important;
-        height: 1px;
-    }
-    .cc-mobile-done { color: #1f6b3a; font-weight: 950; }
-    .cc-mobile-pending { color: #637083; font-weight: 850; }
-    .cc-mobile-partial { color: #8a6d00; font-weight: 950; }
-    .cc-house-title { font-size: 1.22rem; font-weight: 950; margin: 1px 0 1px 0; color: #071d3a; }
-    .cc-house-meta { color: #9f151c; font-weight: 850; margin: 0 0 5px 0; line-height: 1.05; }
-    .cc-voter-name { font-weight: 900; color: #071d3a; line-height: 1.05; }
-    .cc-voter-meta { color: #5f6b7a; font-size: .78rem; line-height: 1.0; }
-
-    /* C3.4 repair: compact visible buttons. Row/nav controls are no longer transparent. */
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
-        background: #eee9dd !important;
-        background-color: #eee9dd !important;
-        color: #071d3a !important;
-        -webkit-text-fill-color: #071d3a !important;
-        border: 1px solid rgba(7,29,58,.22) !important;
-        border-radius: 6px !important;
-        box-shadow: none !important;
-        font-weight: 900 !important;
-        min-height: 19px !important;
-        height: 19px !important;
-        padding: 1px 7px !important;
-        margin: 0 !important;
-        line-height: 1.0 !important;
-        justify-content: flex-start !important;
-        text-align: left !important;
-        width: auto !important;
-        max-width: max-content !important;
-        font-size: .78rem !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]):hover {
-        background: #e1dbcd !important;
-        background-color: #e1dbcd !important;
-        color: #071d3a !important;
-        -webkit-text-fill-color: #071d3a !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
-        color: #071d3a !important;
-        -webkit-text-fill-color: #071d3a !important;
-        opacity: 1 !important;
-        font-weight: 900 !important;
-        line-height: 1.0 !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] { margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
-    [data-testid="stMain"] div[data-testid="element-container"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .15rem !important; margin: 0 !important; padding: 0 !important; align-items: center !important; }
-    [data-testid="stMain"] div[data-testid="column"] { padding-top: 0 !important; padding-bottom: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] p { margin: 0 !important; line-height: 1.0 !important; }
-    [data-testid="stMain"] hr { margin: 1px 0 !important; }
-    div[data-testid="stCheckbox"] { margin: 0 !important; padding: 0 !important; }
-    div[data-testid="stCheckbox"] label { min-height: 18px !important; padding: 0 !important; margin: 0 !important; }
-    div[data-testid="stCheckbox"] p { font-size: .72rem !important; line-height: 1 !important; margin: 0 !important; }
-    textarea { min-height: 46px !important; }
-
-
-    [data-testid="stMain"] div[data-testid="stVerticalBlock"] { gap: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stVerticalBlockBorderWrapper"] { margin: 0 !important; padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMarkdownContainer"] h3 { margin: 2px 0 3px 0 !important; line-height: 1.0 !important; }
-    [data-testid="stMain"] div[data-testid="stMetric"] { padding: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMetric"] label { margin-bottom: 0 !important; }
-    [data-testid="stMain"] div[data-testid="stMetric"] [data-testid="stMetricValue"] { font-size: 1.35rem !important; line-height: 1 !important; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
-        min-height: 22px !important;
-        height: 22px !important;
-        padding: 1px 10px !important;
-        border-radius: 6px !important;
-        width: auto !important;
-        max-width: max-content !important;
-        line-height: 1 !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] * {
-        line-height: 1 !important;
-        font-size: .82rem !important;
-        font-weight: 900 !important;
-    }
-
-    /* C3.2: make true navigation/back controls visible without touching app-wide colors. */
-    [class*="st-key-c26_back"] button,
-    [class*="st-key-c26_new_street"] button,
-    [class*="st-key-c26_new_list"] button,
-    [class*="st-key-c26_login_from"] button {
-        background: #e6e2d7 !important;
-        background-color: #e6e2d7 !important;
-        color: #111111 !important;
-        -webkit-text-fill-color: #111111 !important;
-        border: 1px solid rgba(7,29,58,.28) !important;
-        border-radius: 6px !important;
-        min-height: 22px !important;
-        height: 22px !important;
-        width: auto !important;
-        max-width: max-content !important;
-        padding: 1px 9px !important;
-        font-size: .80rem !important;
-        font-weight: 900 !important;
-    }
-    [class*="st-key-c26_back"] button *,
-    [class*="st-key-c26_new_street"] button *,
-    [class*="st-key-c26_new_list"] button *,
-    [class*="st-key-c26_login_from"] button * {
-        color: #111111 !important;
-        -webkit-text-fill-color: #111111 !important;
-        font-size: .80rem !important;
-        font-weight: 900 !important;
-    }
-
-    /* C3.2: denser field rows and closer data columns. */
-    .cc-field-row-sep {
-        border-bottom: 1px solid rgba(7,29,58,.10) !important;
-        margin: 0 !important;
-        height: 0 !important;
-    }
-    .cc-field-header { margin-bottom: 0 !important; padding-bottom: 1px !important; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
-        min-height: 12px !important;
-        height: 12px !important;
-        padding: 0 !important;
-        font-size: .76rem !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
-        font-size: .76rem !important;
-    }
-    [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .08rem !important; }
-
-
-    /* C3.4 repair: visible alternating row bands generated by explicit markdown separators. */
-    .cc-row-band-a, .cc-row-band-b {
-        height: 2px;
-        margin: 1px 0 1px 0;
-        border: 0;
-    }
-    .cc-row-band-a { background: rgba(7,29,58,.035); }
-    .cc-row-band-b { background: rgba(255,255,255,.20); }
-    .cc-count-cell {
-        display: inline-block;
-        color:#071d3a;
-        font-weight: 950;
-        font-size: .82rem;
-        line-height: 1;
-        padding-top: 2px;
-        white-space: nowrap;
-    }
-    .cc-voter-spacer { height: 5px; border-bottom: 1px solid rgba(7,29,58,.12); margin: 3px 0 3px 0; }
-
-    @media (max-width: 700px) {
-        .block-container { padding-left: .35rem !important; padding-right: .35rem !important; padding-top: .35rem !important; }
-        h2 { font-size: 1.15rem !important; margin-bottom: .1rem !important; }
-        h3 { font-size: 1.0rem !important; margin: .1rem 0 !important; }
-        div[data-testid="column"] { padding-left: .05rem !important; padding-right: .05rem !important; }
-        div[data-testid="stMetric"] { padding: 0 !important; }
-    }
-
-    .cc-center { text-align: center !important; }
-    .cc-count-cell { color:#071d3a; font-weight:900; font-size:.84rem; line-height:1.05; padding-top:2px; }
-    .cc-count-cell.cc-center { display:block !important; width:100% !important; text-align:center !important; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button { white-space: nowrap !important; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] {
-        background:#b1141b !important; background-color:#b1141b !important; color:white !important; -webkit-text-fill-color:white !important;
-        border:1px solid #8f1016 !important; min-height:24px !important; height:24px !important; padding:2px 12px !important;
-        border-radius:6px !important; width:auto !important; max-width:max-content !important;
-    }
-    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] * { color:white !important; -webkit-text-fill-color:white !important; }
-    
-    </style>
-    """, unsafe_allow_html=True)
-
-    screen_key = _c21_mobile_state_key(campaign_id, username, "screen")
-    assignment_key = _c21_mobile_state_key(campaign_id, username, "assignment")
-    street_key = _c21_mobile_state_key(campaign_id, username, "street")
-    hh_key = _c21_mobile_state_key(campaign_id, username, "household")
-    completed_key = _c21_mobile_state_key(campaign_id, username, "completed_households")
-    queue_key = _c1_mobile_queue_key(campaign_id, username)
-    uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
-
-    # C3.6: Mobile Field should open directly to Lists after auth; login is handled by the app gate.
-    _cc_qp_set(cc_mobile="1")
-    if screen_key not in st.session_state:
-        st.session_state[screen_key] = _cc_qp_get("cc_screen", "lists") or "lists"
-    if assignment_key not in st.session_state and _cc_qp_get("cc_assignment", ""):
-        st.session_state[assignment_key] = _cc_qp_get("cc_assignment", "")
-    if street_key not in st.session_state and _cc_qp_get("cc_street", ""):
-        st.session_state[street_key] = _cc_qp_get("cc_street", "")
-    if hh_key not in st.session_state and _cc_qp_get("cc_household", ""):
-        st.session_state[hh_key] = _cc_qp_get("cc_household", "")
-
-    # C3.1 DEV bridge: restore local field state from the app server so a browser
-    # refresh, or switching from desktop to phone, does not wipe test results.
-    persisted_mobile_state = _c3_load_mobile_state(campaign_id, username)
-    if queue_key not in st.session_state:
-        st.session_state[queue_key] = persisted_mobile_state.get("queue", [])
-    if completed_key not in st.session_state:
-        st.session_state[completed_key] = persisted_mobile_state.get("completed", {})
-    queue = st.session_state.setdefault(queue_key, [])
-    completed = st.session_state.setdefault(completed_key, {})
-
-    saved_packages = _c1_saved_mobile_packages_for_user(campaign_id, programs)
-    uploaded_pkg = st.session_state.get(uploaded_pkg_key)
-    packages = ([uploaded_pkg] if isinstance(uploaded_pkg, dict) else []) + saved_packages
-
-    deduped = []
-    seen = set()
-    for pkg0 in packages:
-        if not isinstance(pkg0, dict):
-            continue
-        a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
-        mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or _c21_package_label(pkg0))
-        if mid0 in seen:
-            continue
-        seen.add(mid0)
-        deduped.append(pkg0)
-    packages = deduped
-
-    package_by_id = {}
-    for i, pkg0 in enumerate(packages, start=1):
-        a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
-        mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
-        package_by_id[mid0] = pkg0
-
-    screen = st.session_state.get(screen_key, "lists")
-    if screen == "login":
-        screen = "lists"
-        st.session_state[screen_key] = "lists"
-    _cc_qp_set(cc_mobile="1", cc_screen=screen, cc_assignment=st.session_state.get(assignment_key, ""), cc_street=st.session_state.get(street_key, ""), cc_household=st.session_state.get(hh_key, ""))
-
-    st.markdown(f"""
-    <div class="cc-mobile-topbar">
-      <div class="cc-mobile-brand-left">{_mobile_logo_html}<span class="cc-mobile-brand-text">Field</span></div>
-      <div class="cc-mobile-sub">Q:{len(queue)} · Lists:{len(packages)}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # C4.2.7 sidebar recovery: a real escape hatch from the mobile shell.
-    # This does not touch persistence, local queue, R2 sync state, saved universes, or voter records.
-    esc1, esc2, _escsp = st.columns([1.1, 1.0, 4.0])
-    with esc1:
-        if st.button("← Web App", key="c427_exit_mobile_to_web", width="stretch"):
-            for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household"]:
-                _cc_qp_set(**{_qp: None})
-            st.session_state["left_section"] = None
-            st.session_state["view"] = "dashboard"
-            st.rerun()
-    with esc2:
-        if st.button("Log Out", key="c427_mobile_logout", width="stretch"):
-            for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household", "cc_session"]:
-                _cc_qp_set(**{_qp: None})
-            for _k in ["auth_user", "auth_username"]:
-                st.session_state.pop(_k, None)
-            st.session_state["left_section"] = None
-            st.session_state["view"] = "dashboard"
-            st.rerun()
-
-    with st.expander("Tools", expanded=False):
-        st.caption("C4.2 stages mobile field results to campaign-scoped R2 app_state. This does not update voter records yet.")
-        remote_mobile_store = _c42_load_mobile_results_store(campaign_id)
-        last_sync = clean_value(st.session_state.get(_c21_mobile_state_key(campaign_id, username, "last_sync_at"))) or clean_value(remote_mobile_store.get("last_sync_at")) or "Never"
-        q_counts = _c42_queue_counts(queue)
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        mc1.metric("Queued", f"{q_counts.get('queued', 0):,}")
-        mc2.metric("Synced", f"{q_counts.get('synced', 0):,}")
-        mc3.metric("Failed", f"{q_counts.get('failed', 0):,}")
-        mc4.metric("Last Sync", last_sync)
-
-        if st.button("Sync Now", type="primary", key="c42_sync_now"):
-            ok_sync, msg_sync, synced_queue, synced_at = _c42_sync_mobile_queue_to_r2(campaign_id, username, queue)
-            st.session_state[queue_key] = synced_queue
-            if synced_at:
-                st.session_state[_c21_mobile_state_key(campaign_id, username, "last_sync_at")] = synced_at
-            _c3_save_mobile_state(campaign_id, username, synced_queue, st.session_state.get(completed_key, {}))
-            if ok_sync:
-                st.success(f"Sync complete. Results staged at app_state/mobile_results/{_ops_slug(campaign_id)}.json")
-            else:
-                st.error(f"Sync failed: {msg_sync}")
-            st.rerun()
-
-        upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
-        if upload is not None:
-            try:
-                pkg_loaded = json.loads(upload.getvalue().decode("utf-8"))
-                if isinstance(pkg_loaded, dict) and pkg_loaded.get("package_type") == "candidate_connect_mobile_assignment_package":
-                    st.session_state[uploaded_pkg_key] = pkg_loaded
-                    st.success("Assignment package loaded.")
-                    _mobile_go("lists")
-                else:
-                    st.error("That JSON is not a Candidate Connect mobile assignment package.")
-            except Exception as e:
-                st.error("Could not read JSON package."); st.exception(e)
-        if queue:
-            st.download_button(
-                "Export Local Sync Queue JSON",
-                data=json.dumps(queue, indent=2),
-                file_name=f"{campaign_id}_mobile_offline_results_queue.json",
-                mime="application/json",
-                key="c26_export_queue",
-            )
-            if st.button("Clear Local Queue", key="c26_clear_queue"):
-                st.session_state[queue_key] = []
-                st.session_state[completed_key] = {}
-                _c3_save_mobile_state(campaign_id, username, [], {})
-                st.rerun()
-        else:
-            st.caption("Queue is empty.")
-
-    def _row_sep():
-        st.markdown('<div class="cc-field-row-sep"></div>', unsafe_allow_html=True)
-
-    def _row_band(i: int):
-        cls = "cc-row-band-a" if i % 2 == 0 else "cc-row-band-b"
-        st.markdown(f'<div class="{cls}"></div>', unsafe_allow_html=True)
-
-
-    def _mobile_go(next_screen: str, *, assignment: str | None = None, street: str | None = None, household: str | None = None) -> None:
-        st.session_state[screen_key] = next_screen
-        if assignment is not None:
-            st.session_state[assignment_key] = assignment
-        if street is not None:
-            st.session_state[street_key] = street
-        if household is not None:
-            st.session_state[hh_key] = household
-        _cc_qp_set(
-            cc_mobile="1",
-            cc_screen=next_screen,
-            cc_assignment=st.session_state.get(assignment_key, ""),
-            cc_street=st.session_state.get(street_key, ""),
-            cc_household=st.session_state.get(hh_key, ""),
-        )
-        st.rerun()
-
-    def _is_house_done(hk: str, voter_count: int = 0) -> tuple[str, str]:
-        recs = [r for r in queue if isinstance(r, dict) and clean_value(r.get("household_key")) == hk]
-        if bool(completed.get(hk)):
-            return "✓", "cc-mobile-done"
-        if recs:
-            # If some voter-level records exist but not every voter has a result, call it partial.
-            voter_recs = [r for r in recs if clean_value(r.get("result_scope")) == "voter"]
-            if voter_count and voter_recs and len({clean_value(r.get("voter_name")) or clean_value(r.get("voter_id")) for r in voter_recs}) < voter_count:
-                return "◐", "cc-mobile-partial"
-            return "✓", "cc-mobile-done"
-        return "", "cc-mobile-pending"
-
-    if screen == "login":
-        st.markdown('<div class="cc-mobile-step">Screen 0: Login</div>', unsafe_allow_html=True)
-        st.caption("For DEV, mobile inherits the current Candidate Connect login.")
-        if st.button("Continue to Lists", key="c26_continue_lists"):
-            _mobile_go("lists")
-        return
-
-    if screen == "lists":
-        st.markdown('<div class="cc-mobile-step">Screen 1: Lists</div>', unsafe_allow_html=True)
-        if not packages:
-            st.warning("No mobile lists are available. Use DEV tools above to load a package or generate one from Voter Outreach.")
-            if st.button("Refresh Lists", key="c26_refresh_lists_no_lists"):
-                _mobile_go("lists")
-            return
-        h1, h2, _sp = st.columns([2.35, .80, 6.85])
-        h1.markdown('<div class="cc-field-header">List</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header cc-center">Voters | HH</div>', unsafe_allow_html=True)
-        for i, pkg0 in enumerate(packages, start=1):
-            a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
-            mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
-            title = clean_value(a0.get("name") or a0.get("street_area") or f"List {i}")
-            hh_count = int(a0.get("household_count") or len(pkg0.get("households") or []) or 0)
-            v_count = int(a0.get("voter_count") or 0)
-            if not v_count:
-                v_count = sum(int(h.get("Voters") or 0) for h in (pkg0.get("households") or []))
-            c1, c2, _sp = st.columns([2.35, .80, 6.85])
-            with c1:
-                if st.button(title.upper(), key=f"c26_open_list_{mid0}"):
-                    _mobile_go("streets", assignment=mid0, street="", household="")
-            c2.markdown(f'<div class="cc-count-cell cc-center">{v_count:,} | {hh_count:,}</div>', unsafe_allow_html=True)
-            _row_band(i)
-        # C3.6: no Login nav from Mobile Field; app login is handled by the security gate.
-        return
-
-    selected_assignment_id = clean_value(st.session_state.get(assignment_key))
-    pkg = package_by_id.get(selected_assignment_id)
-    if not pkg:
-        st.warning("Selected list is no longer available. Returning to Lists.")
-        _mobile_go("lists")
-        return
-
-    assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
-    mobile_id = clean_value(assignment.get("mobile_assignment_id") or selected_assignment_id)
-    households, voters, voter_map, street_map, street_names = _c21_prepare_mobile_package_maps(pkg)
-
-    if screen == "streets":
-        st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
-        st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
-        h1, h2, _sp = st.columns([2.35, .80, 6.85])
-        h1.markdown('<div class="cc-field-header">Street</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header cc-center">Completed</div>', unsafe_allow_html=True)
-        for row_i, street in enumerate(street_names):
-            hhs = sorted(street_map.get(street) or [], key=_c21_house_sort_value)
-            done_count = 0
-            for h in hhs:
-                hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
-                vct = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
-                status, _cls = _is_house_done(hk, vct)
-                if status == "✓":
-                    done_count += 1
-            c1, c2, _sp = st.columns([2.35, .80, 6.85])
-            with c1:
-                if st.button(street.upper(), key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
-                    _mobile_go("houses", street=street, household="")
-            c2.markdown(f'<div class="cc-count-cell cc-center">{done_count:,}/{len(hhs):,}</div>', unsafe_allow_html=True)
-            _row_band(row_i)
-        if st.button("← Lists", key="c26_new_list_from_streets"):
-            _mobile_go("lists")
-        return
-
-    selected_street = clean_value(st.session_state.get(street_key))
-    street_households = sorted(street_map.get(selected_street) or [], key=_c21_house_sort_value)
-
-    if screen == "houses":
-        st.markdown('<div class="cc-mobile-step">Screen 3: Houses</div>', unsafe_allow_html=True)
-        done_total = 0
-        for row_i, h in enumerate(street_households):
-            hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
-            vct = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
-            if _is_house_done(hk, vct)[0] == "✓":
-                done_total += 1
-        st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
-        h1, h2, _sp = st.columns([2.35, .80, 6.85])
-        h1.markdown('<div class="cc-field-header">House</div>', unsafe_allow_html=True)
-        h2.markdown('<div class="cc-field-header cc-center">Voters</div>', unsafe_allow_html=True)
-        if not street_households:
-            st.warning("No households found for this street.")
-        for row_i, h in enumerate(street_households):
-            hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
-            addr = clean_value(h.get("Address"))
-            voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
-            marker, marker_cls = _is_house_done(hk, voters_n)
-            c1, c2, _sp = st.columns([2.35, .80, 6.85])
-            with c1:
-                label_addr = ((marker + " ") if marker else "") + addr
-                if st.button(label_addr.upper(), key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
-                    _mobile_go("household", household=hk)
-            c2.markdown(f'<div class="cc-count-cell cc-center">{voters_n:,}</div>', unsafe_allow_html=True)
-            _row_band(row_i)
-        if st.button("← Streets", key="c26_new_street_from_houses"):
-            _mobile_go("streets")
-        return
-
-    if screen == "household":
-        selected_hk = clean_value(st.session_state.get(hh_key))
-        hh = None
-        for h in street_households:
-            hk0 = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
-            if hk0 == selected_hk:
-                hh = h
-                break
-        if not hh:
-            st.warning("Selected household is no longer available. Returning to house list.")
-            _mobile_go("houses")
-            return
-
-        hk = clean_value(hh.get("Household Key") or hh.get("household_key") or selected_hk)
-        address = clean_value(hh.get("Address"))
-        city = clean_value(hh.get("City"))
-        precinct = clean_value(assignment.get("selected_precinct") or assignment.get("street_area"))
-        hh_voters = _c1_household_voters_from_package(hh, voter_map)
-
-        # Rehydrate previously saved selections from the local offline queue so a canvasser can
-        # reopen a household and see exactly what was already checked before sync.
-        prior_voter_results: dict[str, set[str]] = {}
-        prior_household_note = ""
-        for rec in queue:
-            if clean_value(rec.get("mobile_assignment_id")) != mobile_id:
-                continue
-            if clean_value(rec.get("household_key")) != hk:
-                continue
-            if clean_value(rec.get("notes")):
-                prior_household_note = clean_value(rec.get("notes"))
-            if clean_value(rec.get("result_scope")) != "voter":
-                continue
-            rec_voter_id = clean_value(rec.get("voter_id"))
-            rec_voter_name = clean_value(rec.get("voter_name"))
-            rec_key = rec_voter_id or rec_voter_name
-            raw_results = rec.get("results")
-            if isinstance(raw_results, list):
-                parsed_results = [clean_value(x) for x in raw_results if clean_value(x)]
-            else:
-                parsed_results = [clean_value(x) for x in clean_value(rec.get("result")).split(";") if clean_value(x)]
-            if rec_key:
-                prior_voter_results.setdefault(rec_key, set()).update(parsed_results)
-
-        st.markdown('<div class="cc-mobile-step">Screen 4: Household</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="cc-house-title">{address}</div>', unsafe_allow_html=True)
-        meta_bits = [x for x in [city.title() if city else "", precinct.title() if precinct else ""] if x]
-        if meta_bits:
-            st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
-
-        widths = [2.45, .42, .42, .42, .50, .50, .92, 4.37]
-        hdr = st.columns(widths)
-        for hc, label in zip(hdr[:7], ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
-            hc.markdown(f"**{label}**")
-        _row_sep()
-
-        voter_rows: list[tuple[dict, list[str]]] = []
-        checks = [("Favorable", "F"), ("Undecided", "U"), ("Against", "A"), ("Not Home", "NH"), ("Yard Sign", "YS"), ("Needs Follow-up", "Follow Up")]
-        for idx, voter in enumerate(hh_voters, start=1):
-            voter_name = clean_value(voter.get("name")) or f"Voter {idx}"
-            voter_id = clean_value(voter.get("voter_id"))
-            party = clean_value(voter.get("party"))
-            age = clean_value(voter.get("age"))
-            mb_perm = clean_value(voter.get("mb_perm")).upper()
-            is_mb_perm = mb_perm in {"Y", "YES", "TRUE", "1", "PERM", "PERMANENT", "P"}
-            display_name = ("✉ " if is_mb_perm else "") + voter_name
-            row = st.columns(widths)
-            meta = " ".join([x for x in [party, f"Age {age}" if age else ""] if x])
-            row[0].markdown(f'<div class="cc-voter-name">{display_name}</div>' + (f'<div class="cc-voter-meta">{meta}</div>' if meta else ''), unsafe_allow_html=True)
-            selections = []
-            default_results = set()
-            if voter_id and voter_id in prior_voter_results:
-                default_results.update(prior_voter_results.get(voter_id, set()))
-            if voter_name in prior_voter_results:
-                default_results.update(prior_voter_results.get(voter_name, set()))
-            for j, (full, short) in enumerate(checks, start=1):
-                with row[j]:
-                    cb_key = f"c26_v_{mobile_id}_{_ops_slug(hk)}_{idx}_{_ops_slug(short)}"
-                    if cb_key not in st.session_state:
-                        st.session_state[cb_key] = full in default_results
-                    if st.checkbox(short, key=cb_key, label_visibility="collapsed"):
-                        selections.append(full)
-            voter_rows.append(({"voter_id": voter_id, "voter_name": voter_name, "party": party, "age": age, "mb_perm": mb_perm}, selections))
-            st.markdown('<div class="cc-voter-spacer"></div>', unsafe_allow_html=True)
-
-        notes_key = f"c26_household_notes_{mobile_id}_{_ops_slug(hk)}"
-        if notes_key not in st.session_state and prior_household_note:
-            st.session_state[notes_key] = prior_household_note
-        household_notes = st.text_area("Notes", height=44, key=notes_key, placeholder="Short household note")
-        d1, d2, d3 = st.columns([.8, .65, 4.8])
-        with d1:
-            if st.button("Save / Done", type="primary", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
-                saved_count = 0
-                now = datetime.now().isoformat(timespec="seconds")
-                for voter, selected_results in voter_rows:
-                    if not selected_results:
-                        continue
-                    record = {
-                        "mobile_assignment_id": mobile_id,
-                        "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
-                        "result_scope": "voter",
-                        "voter_id": clean_value(voter.get("voter_id")),
-                        "voter_name": clean_value(voter.get("voter_name")),
-                        "household_key": hk,
-                        "address": address,
-                        "street": selected_street,
-                        "results": selected_results,
-                        "result": "; ".join(selected_results),
-                        "tags_added": "",
-                        "notes": clean_value(household_notes),
-                        "contacted_at": now,
-                        "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
-                        "sync_status": "queued_offline",
-                    }
-                    _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
-                    saved_count += 1
-                if saved_count == 0:
-                    record = {
-                        "mobile_assignment_id": mobile_id,
-                        "source_work_item_id": clean_value(assignment.get("source_work_item_id")),
-                        "result_scope": "household",
-                        "voter_id": "",
-                        "voter_name": "",
-                        "household_key": hk,
-                        "address": address,
-                        "street": selected_street,
-                        "results": ["Completed"],
-                        "result": "Completed",
-                        "tags_added": "",
-                        "notes": clean_value(household_notes),
-                        "contacted_at": now,
-                        "device_id": st.session_state.setdefault("c1_device_id", "dev-browser-device"),
-                        "sync_status": "queued_offline",
-                    }
-                    _c1_queue_mobile_result(campaign_id, username, assignment, hh, record)
-                    saved_count = 1
-                completed[hk] = {"completed_at": now, "records": saved_count}
-                st.session_state[completed_key] = completed
-                _c3_save_mobile_state(campaign_id, username, st.session_state.get(queue_key, []), completed)
-                st.toast(f"Saved {saved_count} record(s).")
-                _mobile_go("houses")
-        with d2:
-            if st.button("Back", type="primary", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
-                _mobile_go("houses")
-        st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
-        return
-
-    _mobile_go("lists")
-
 def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results now live inside each program.")
@@ -13522,15 +12432,11 @@ def render_election_day_workspace():
     st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
 
 # Full-width branded header fixed across both the sidebar and main workspace.
-# C3: when the mobile field shell is active, suppress the desktop header/sidebar
-# so the phone gets a true full-width field UI without damaging the web app.
-_CC_MOBILE_FIELD_MODE = st.session_state.get("left_section") == "mobile_shell_c1"
 _cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
 _tss_logo_uri = img_data_uri(LOGO_TPTC)
 _cc_logo_html = f'<img class="cc-global-logo-center" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
 _tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
-if not _CC_MOBILE_FIELD_MODE:
-    st.markdown(f'''<div class="cc-global-header">
+st.markdown(f'''<div class="cc-global-header">
   <div class="cc-global-sidebar-fill"></div>
   <div class="cc-global-header-inner">
     <div class="cc-global-redbar"></div>
@@ -13560,22 +12466,6 @@ except Exception as e:
 if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_token"] = 0
 if "left_section" not in st.session_state: st.session_state["left_section"] = None
 _filter_suffix = st.session_state["filter_reset_token"]
-
-# C4.2.7 sidebar recovery: when the app is not explicitly in Mobile Field,
-# make the Streamlit sidebar visible again even if stale mobile CSS existed in the browser DOM.
-if st.session_state.get("left_section") != "mobile_shell_c1":
-    st.markdown("""
-<style>
-[data-testid="stSidebar"], section[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    min-width: 250px !important;
-    width: 250px !important;
-    max-width: 250px !important;
-}
-[data-testid="stMain"] { margin-left: 0 !important; padding-left: 0 !important; }
-</style>
-""", unsafe_allow_html=True)
 
 
 # v29 DEV-only sidebar visual refinement:
@@ -13698,9 +12588,6 @@ with st.sidebar:
     if st.button("📣 Voter Outreach", width="stretch", key="nav_voter_outreach_main"):
         st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
-    if st.button("📱 Mobile Field", width="stretch", key="nav_mobile_shell_c1"):
-        st.session_state["left_section"]="mobile_shell_c1"; st.session_state["view"]="mobile"; st.rerun()
-
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
         if st.button("🗳️ Election Day Operations", width="stretch"):
             st.session_state["left_section"]="election_day"; st.session_state["view"]="election_day"; st.rerun()
@@ -13712,12 +12599,8 @@ with st.sidebar:
             st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
 
     if st.button("Log Out", width="stretch"):
-        for _qp in ["cc_mobile", "cc_screen", "cc_assignment", "cc_street", "cc_household", "cc_session"]:
-            _cc_qp_set(**{_qp: None})
         for _k in ["auth_user", "auth_username"]:
             st.session_state.pop(_k, None)
-        st.session_state["left_section"] = None
-        st.session_state["view"] = "dashboard"
         st.rerun()
     st.divider()
 
@@ -14099,7 +12982,6 @@ if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_ma
 if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
 if section == "campaign_organization": render_campaign_organization_workspace(); st.stop()
 if section == "voter_outreach": render_voter_outreach_workspace(); st.stop()
-if section == "mobile_shell_c1": render_mobile_shell_c1(); st.stop()
 if section == "election_day": render_election_day_workspace(); st.stop()
 if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
 if section == "my_account": render_my_account_workspace(); st.stop()
