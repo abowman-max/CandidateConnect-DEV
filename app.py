@@ -12509,6 +12509,48 @@ def _c1_queue_mobile_result(campaign_id: str, username: str, assignment: dict, h
     st.session_state[qkey] = queue
 
 
+def _c3_mobile_state_path(campaign_id: str, username: str) -> Path:
+    """DEV bridge persistence so phone refreshes do not wipe the field queue.
+
+    This is intentionally server-local for C3.1. The production/offline version will
+    move this to device storage + sync, but this keeps test results visible across
+    browser refreshes and across desktop/phone sessions on the same DEV app instance.
+    """
+    root = Path(os.environ.get("CC_MOBILE_STATE_DIR", "/tmp/candidate_connect_mobile_state"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{_ops_slug(campaign_id)}__{_ops_slug(username)}.json"
+
+
+def _c3_load_mobile_state(campaign_id: str, username: str) -> dict:
+    path = _c3_mobile_state_path(campaign_id, username)
+    try:
+        if path.exists():
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                return {
+                    "queue": data.get("queue") if isinstance(data.get("queue"), list) else [],
+                    "completed": data.get("completed") if isinstance(data.get("completed"), dict) else {},
+                }
+    except Exception:
+        pass
+    return {"queue": [], "completed": {}}
+
+
+def _c3_save_mobile_state(campaign_id: str, username: str, queue: list, completed: dict) -> None:
+    path = _c3_mobile_state_path(campaign_id, username)
+    payload = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "campaign_id": campaign_id,
+        "username": username,
+        "queue": queue if isinstance(queue, list) else [],
+        "completed": completed if isinstance(completed, dict) else {},
+    }
+    try:
+        path.write_text(json.dumps(payload, indent=2))
+    except Exception:
+        # Do not break field usage if DEV persistence is unavailable.
+        pass
+
 
 def _c21_house_sort_value(hh: dict) -> tuple[int, int, str]:
     """Sort Screen 3 like a printed street list: knock order first, then house number/address."""
@@ -12578,23 +12620,17 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
 
 
 def render_mobile_shell_c1() -> None:
-    """C3 Mobile-Only Display Mode: isolated phone UI with compact field flow."""
+    """C3.1 Mobile-only display: compact branded phone UI plus DEV persistence bridge."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
 
-    st.markdown("""
-    <div class="cc-mobile-topbar">
-      <div class="cc-mobile-brand">Candidate Connect Field</div>
-      <div class="cc-mobile-sub">Offline-ready field mode</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("## C3 Mobile Field Shell")
-    st.caption("Mobile-only display mode: Lists → Streets → Houses → Household. Results queue locally until sync is built.")
+    _mobile_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
+    _mobile_logo_html = f'<img class="cc-mobile-logo" src="{_mobile_logo_uri}" />' if _mobile_logo_uri else '<span class="cc-mobile-brand-text">Candidate Connect</span>'
 
     st.markdown("""
     <style>
-    /* C3 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
+    /* C3.1 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
     [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
     .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
     .block-container, [data-testid="stMain"] .block-container {
@@ -12609,11 +12645,14 @@ def render_mobile_shell_c1() -> None:
     .cc-mobile-topbar {
         position: sticky; top: 0; z-index: 999;
         background: #efe8d8; border-bottom: 1px solid #9f151c;
-        padding: 4px 6px 5px 6px; margin: -4px -6px 5px -6px;
-        display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+        padding: 3px 6px 3px 6px; margin: -4px -6px 4px -6px;
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        min-height: 30px;
     }
-    .cc-mobile-brand { color:#071d3a; font-weight:950; font-size: .98rem; line-height:1; }
-    .cc-mobile-sub { color:#5f6b7a; font-weight:700; font-size:.68rem; white-space: nowrap; }
+    .cc-mobile-brand-left { display:flex; align-items:center; gap:6px; min-width:0; }
+    .cc-mobile-logo { height: 24px; width:auto; display:block; }
+    .cc-mobile-brand-text { color:#071d3a; font-weight:950; font-size:.9rem; line-height:1; white-space:nowrap; }
+    .cc-mobile-sub { color:#5f6b7a; font-weight:800; font-size:.64rem; white-space: nowrap; }
     h2 { font-size: 1.05rem !important; margin: 0 0 2px 0 !important; line-height: 1.05 !important; }
     [data-testid="stCaptionContainer"] { font-size: .68rem !important; line-height: 1.05 !important; }
     /* C3/C2.8 ultra dense field UI */
@@ -12735,6 +12774,14 @@ def render_mobile_shell_c1() -> None:
     uploaded_pkg_key = _c21_mobile_state_key(campaign_id, username, "uploaded_pkg")
 
     st.session_state.setdefault(screen_key, "login")
+
+    # C3.1 DEV bridge: restore local field state from the app server so a browser
+    # refresh, or switching from desktop to phone, does not wipe test results.
+    persisted_mobile_state = _c3_load_mobile_state(campaign_id, username)
+    if queue_key not in st.session_state:
+        st.session_state[queue_key] = persisted_mobile_state.get("queue", [])
+    if completed_key not in st.session_state:
+        st.session_state[completed_key] = persisted_mobile_state.get("completed", {})
     queue = st.session_state.setdefault(queue_key, [])
     completed = st.session_state.setdefault(completed_key, {})
 
@@ -12763,13 +12810,15 @@ def render_mobile_shell_c1() -> None:
 
     screen = st.session_state.get(screen_key, "login")
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Queued", len(queue))
-    m2.metric("Lists", len(packages))
-    m3.metric("User", username)
+    st.markdown(f"""
+    <div class="cc-mobile-topbar">
+      <div class="cc-mobile-brand-left">{_mobile_logo_html}<span class="cc-mobile-brand-text">Field</span></div>
+      <div class="cc-mobile-sub">Q:{len(queue)} · Lists:{len(packages)}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with st.expander("Offline Queue / DEV tools", expanded=False):
-        st.caption("C2.6 is still local/session-first. Use this area for testing package load/export only.")
+    with st.expander("Tools", expanded=False):
+        st.caption("C3.1 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
         upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
         if upload is not None:
             try:
@@ -12794,6 +12843,7 @@ def render_mobile_shell_c1() -> None:
             if st.button("Clear Local Queue", key="c26_clear_queue"):
                 st.session_state[queue_key] = []
                 st.session_state[completed_key] = {}
+                _c3_save_mobile_state(campaign_id, username, [], {})
                 st.rerun()
         else:
             st.caption("Queue is empty.")
@@ -13081,6 +13131,7 @@ def render_mobile_shell_c1() -> None:
                     saved_count = 1
                 completed[hk] = {"completed_at": now, "records": saved_count}
                 st.session_state[completed_key] = completed
+                _c3_save_mobile_state(campaign_id, username, st.session_state.get(queue_key, []), completed)
                 st.toast(f"Saved {saved_count} record(s).")
                 st.session_state[screen_key] = "houses"
                 st.rerun()
