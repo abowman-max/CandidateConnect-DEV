@@ -13094,7 +13094,12 @@ def render_mobile_shell_c1() -> None:
     def _c42_mobile_logout() -> None:
         """Log out from mobile mode and clear mobile routing query params."""
         _cc_qp_set(cc_mobile=None, cc_screen=None, cc_assignment=None, cc_street=None, cc_household=None, cc_session=None)
-        for _k in ["auth_user", "auth_username"]:
+        for _k in [
+            "auth_user",
+            "auth_username",
+            "cc_mobile_shell_active",
+            "cc_force_desktop_web_app",
+        ]:
             st.session_state.pop(_k, None)
         st.session_state["left_section"] = None
         st.session_state["view"] = "dashboard"
@@ -13753,9 +13758,27 @@ with st.sidebar:
         if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
             st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
 
-    if st.button("Log Out", width="stretch"):
-        for _k in ["auth_user", "auth_username"]:
+    if st.button("Log Out", width="stretch", key="sidebar_logout_main"):
+        # C4.2.5: clear the refresh-recovery query session too.
+        # Otherwise _cc_restore_browser_session_from_query() can immediately
+        # sign the user back in on rerun, making logout look broken.
+        _cc_qp_set(
+            cc_session=None,
+            cc_mobile=None,
+            cc_screen=None,
+            cc_assignment=None,
+            cc_street=None,
+            cc_household=None,
+        )
+        for _k in [
+            "auth_user",
+            "auth_username",
+            "cc_mobile_shell_active",
+            "cc_force_desktop_web_app",
+        ]:
             st.session_state.pop(_k, None)
+        st.session_state["left_section"] = None
+        st.session_state["view"] = "dashboard"
         st.rerun()
     st.divider()
 
