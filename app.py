@@ -12620,7 +12620,7 @@ def _c21_result_checkbox_grid(options: list[str], key_prefix: str, defaults: lis
 
 
 def render_mobile_shell_c1() -> None:
-    """C3.3 Mobile-only display: compact branded phone UI, persistent DEV state, inline progress rows, subtle striping, compact household actions."""
+    """C3.2 Mobile-only display: compact branded phone UI, persistent DEV state, tighter rows, clearer back buttons."""
     campaign_id = _ops_slug(_current_campaign_ops_id())
     username = current_username() or "mobile-user"
     programs = _c1_programs_for_mobile(campaign_id)
@@ -12630,7 +12630,7 @@ def render_mobile_shell_c1() -> None:
 
     st.markdown("""
     <style>
-    /* C3.3 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
+    /* C3.2 mobile-only display: remove desktop chrome while preserving the web app elsewhere. */
     [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; visibility: hidden !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; }
     .cc-global-header, .cc-global-redbar, .cc-global-brand-row { display: none !important; visibility: hidden !important; height: 0 !important; }
     .block-container, [data-testid="stMain"] .block-container {
@@ -12755,7 +12755,7 @@ def render_mobile_shell_c1() -> None:
         font-weight: 900 !important;
     }
 
-    /* C3.3: make true navigation/back controls visible without touching app-wide colors. */
+    /* C3.2: make true navigation/back controls visible without touching app-wide colors. */
     [class*="st-key-c26_back"] button,
     [class*="st-key-c26_new_street"] button,
     [class*="st-key-c26_new_list"] button,
@@ -12784,7 +12784,7 @@ def render_mobile_shell_c1() -> None:
         font-weight: 900 !important;
     }
 
-    /* C3.3: denser field rows and closer data columns. */
+    /* C3.2: denser field rows and closer data columns. */
     .cc-field-row-sep {
         border-bottom: 1px solid rgba(7,29,58,.10) !important;
         margin: 0 !important;
@@ -12802,49 +12802,74 @@ def render_mobile_shell_c1() -> None:
     }
     [data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: .08rem !important; }
 
-
-
-    /* C3.3 Field UX Polish: inline row data, subtle striping, and compact equal actions. */
-    .cc-inline-hint { color:#5f6b7a; font-size:.70rem; font-weight:800; margin:0 0 2px 0; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) {
-        min-height: 16px !important;
-        height: 16px !important;
-        padding: 0 4px !important;
-        font-size: .80rem !important;
+    /* C3.3 repair: tappable zebra rows, compact readable navigation, and visible secondary navigation buttons. */
+    [data-testid="stMain"] div[class*="st-key-c33_row_"] button {
+        color: #071d3a !important;
+        -webkit-text-fill-color: #071d3a !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        width: 100% !important;
+        max-width: 420px !important;
+        min-height: 22px !important;
+        height: 22px !important;
+        padding: 2px 7px !important;
+        margin: 0 !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        font-weight: 950 !important;
+        font-size: .82rem !important;
         line-height: 1 !important;
-        border-radius: 2px !important;
     }
-    [data-testid="stMain"] div[data-testid="stButton"] > button:not([kind="primary"]) * {
-        font-size: .80rem !important;
+    [data-testid="stMain"] div[class*="st-key-c33_row_"] button * {
+        color: #071d3a !important;
+        -webkit-text-fill-color: #071d3a !important;
+        font-size: .82rem !important;
+        font-weight: 950 !important;
         line-height: 1 !important;
     }
-    [data-testid="stMain"] div[data-testid="element-container"]:nth-of-type(even) div[data-testid="stButton"] > button:not([kind="primary"]) {
-        background: rgba(7,29,58,.035) !important;
-        background-color: rgba(7,29,58,.035) !important;
+    [data-testid="stMain"] div[class*="st-key-c33_row_even"] button {
+        background: rgba(248,244,234,.92) !important;
+        background-color: rgba(248,244,234,.92) !important;
     }
-    [data-testid="stMain"] div[data-testid="element-container"]:nth-of-type(odd) div[data-testid="stButton"] > button:not([kind="primary"]) {
-        background: rgba(255,255,255,.18) !important;
-        background-color: rgba(255,255,255,.18) !important;
+    [data-testid="stMain"] div[class*="st-key-c33_row_odd"] button {
+        background: rgba(230,226,215,.70) !important;
+        background-color: rgba(230,226,215,.70) !important;
     }
-    [data-testid="stMain"] .cc-field-header {
-        font-size: .78rem !important;
-        border-bottom: 1px solid rgba(7,29,58,.22) !important;
-        padding: 0 0 1px 0 !important;
-        margin: 1px 0 1px 0 !important;
+    [data-testid="stMain"] div[class*="st-key-c33_row_"] button:hover {
+        background: rgba(159,21,28,.10) !important;
+        background-color: rgba(159,21,28,.10) !important;
     }
-    [data-testid="stMain"] textarea { min-height: 38px !important; height: 38px !important; }
-    [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"],
-    [class*="st-key-c26_back"] button,
-    [class*="st-key-c26_new_street"] button,
-    [class*="st-key-c26_new_list"] button,
-    [class*="st-key-c26_login_from"] button {
+    [data-testid="stMain"] div[class*="st-key-c33_nav_"] button,
+    [data-testid="stMain"] div[class*="st-key-c26_back"] button,
+    [data-testid="stMain"] div[class*="st-key-c26_new_"] button,
+    [data-testid="stMain"] div[class*="st-key-c26_login"] button {
+        background: #ded9cc !important;
+        background-color: #ded9cc !important;
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
+        border: 1px solid rgba(7,29,58,.28) !important;
+        border-radius: 6px !important;
         min-height: 24px !important;
         height: 24px !important;
-        padding: 2px 12px !important;
         width: auto !important;
         max-width: max-content !important;
+        padding: 2px 10px !important;
+        font-size: .82rem !important;
+        font-weight: 950 !important;
     }
-    .cc-legend-line { color:#5f6b7a; font-size:.64rem; line-height:1.05; margin-top:1px; }
+    [data-testid="stMain"] div[class*="st-key-c33_nav_"] button *,
+    [data-testid="stMain"] div[class*="st-key-c26_back"] button *,
+    [data-testid="stMain"] div[class*="st-key-c26_new_"] button *,
+    [data-testid="stMain"] div[class*="st-key-c26_login"] button * {
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
+        font-size: .82rem !important;
+        font-weight: 950 !important;
+    }
+    .cc-voter-name { line-height: 1.18 !important; }
+    .cc-voter-meta { line-height: 1.12 !important; margin-top: 1px !important; }
+    [data-testid="stMain"] div[data-testid="stCheckbox"] label { min-height: 22px !important; }
 
     @media (max-width: 700px) {
         .block-container { padding-left: .35rem !important; padding-right: .35rem !important; padding-top: .35rem !important; }
@@ -12852,6 +12877,7 @@ def render_mobile_shell_c1() -> None:
         h3 { font-size: 1.0rem !important; margin: .1rem 0 !important; }
         div[data-testid="column"] { padding-left: .05rem !important; padding-right: .05rem !important; }
         div[data-testid="stMetric"] { padding: 0 !important; }
+        [data-testid="stMain"] div[class*="st-key-c33_row_"] button { max-width: 100% !important; }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -12909,7 +12935,7 @@ def render_mobile_shell_c1() -> None:
     """, unsafe_allow_html=True)
 
     with st.expander("Tools", expanded=False):
-        st.caption("C3.3 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
+        st.caption("C3.2 stores the DEV queue server-side so refresh/phone switching does not wipe test results. Production offline storage comes next.")
         upload = st.file_uploader("Load Assignment Package JSON", type=["json"], key="c26_upload_mobile_pkg")
         if upload is not None:
             try:
@@ -12970,7 +12996,7 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "login"
                 st.rerun()
             return
-        st.markdown('<div class="cc-field-header">List &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Voters | HH</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-field-header">List &nbsp;&nbsp; Voters | HH</div>', unsafe_allow_html=True)
         for i, pkg0 in enumerate(packages, start=1):
             a0 = pkg0.get("assignment") if isinstance(pkg0.get("assignment"), dict) else {}
             mid0 = clean_value(a0.get("mobile_assignment_id") or a0.get("source_work_item_id") or f"pkg_{i}")
@@ -12979,14 +13005,15 @@ def render_mobile_shell_c1() -> None:
             v_count = int(a0.get("voter_count") or 0)
             if not v_count:
                 v_count = sum(int(h.get("Voters") or 0) for h in (pkg0.get("households") or []))
-            row_label = f"{title.upper()}      {v_count:,} | {hh_count:,}"
-            if st.button(row_label, key=f"c26_open_list_{mid0}"):
+            zebra = "even" if i % 2 == 0 else "odd"
+            row_label = f"{title.upper()}   •   {v_count:,} | {hh_count:,}"
+            if st.button(row_label, key=f"c33_row_{zebra}_open_list_{mid0}"):
                 st.session_state[assignment_key] = mid0
                 st.session_state[street_key] = ""
                 st.session_state[hh_key] = ""
                 st.session_state[screen_key] = "streets"
                 st.rerun()
-        if st.button("← Login", key="c26_back_login_from_lists"):
+        if st.button("← Login", key="c33_nav_back_login_from_lists"):
             st.session_state[screen_key] = "login"
             st.rerun()
         return
@@ -13006,8 +13033,8 @@ def render_mobile_shell_c1() -> None:
     if screen == "streets":
         st.markdown('<div class="cc-mobile-step">Screen 2: Streets</div>', unsafe_allow_html=True)
         st.markdown(f"### {clean_value(assignment.get('name') or assignment.get('street_area') or 'Selected List')}")
-        st.markdown('<div class="cc-field-header">Street &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Done/Houses</span></div>', unsafe_allow_html=True)
-        for street in street_names:
+        st.markdown('<div class="cc-field-header">Street &nbsp;&nbsp; Done/Houses</div>', unsafe_allow_html=True)
+        for row_i, street in enumerate(street_names, start=1):
             hhs = sorted(street_map.get(street) or [], key=_c21_house_sort_value)
             done_count = 0
             for h in hhs:
@@ -13016,19 +13043,20 @@ def render_mobile_shell_c1() -> None:
                 status, _cls = _is_house_done(hk, vct)
                 if status == "✓":
                     done_count += 1
-            row_label = f"{street.upper()}      {done_count:,}/{len(hhs):,}"
-            if st.button(row_label, key=f"c26_street_{mobile_id}_{_ops_slug(street)}"):
+            zebra = "even" if row_i % 2 == 0 else "odd"
+            row_label = f"{street.upper()}   •   {done_count:,}/{len(hhs):,}"
+            if st.button(row_label, key=f"c33_row_{zebra}_street_{mobile_id}_{_ops_slug(street)}"):
                 st.session_state[street_key] = street
                 st.session_state[hh_key] = ""
                 st.session_state[screen_key] = "houses"
                 st.rerun()
-        b1, b2 = st.columns(2)
+        b1, b2, _sp = st.columns([.7, .7, 6.6])
         with b1:
-            if st.button("← Lists", key="c26_new_list_from_streets"):
+            if st.button("← Lists", key="c33_nav_new_list_from_streets"):
                 st.session_state[screen_key] = "lists"
                 st.rerun()
         with b2:
-            if st.button("Login", key="c26_login_from_streets"):
+            if st.button("Login", key="c33_nav_login_from_streets"):
                 st.session_state[screen_key] = "login"
                 st.rerun()
         return
@@ -13045,26 +13073,27 @@ def render_mobile_shell_c1() -> None:
             if _is_house_done(hk, vct)[0] == "✓":
                 done_total += 1
         st.markdown(f"### {selected_street or 'Selected Street'}  ·  {done_total}/{len(street_households)} done")
-        st.markdown('<div class="cc-field-header">House &nbsp;&nbsp; <span style="font-weight:800;color:#5f6b7a;">Voters</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-field-header">House &nbsp;&nbsp; Voters</div>', unsafe_allow_html=True)
         if not street_households:
             st.warning("No households found for this street.")
-        for h in street_households:
+        for row_i, h in enumerate(street_households, start=1):
             hk = clean_value(h.get("Household Key") or h.get("household_key") or h.get("Address"))
             addr = clean_value(h.get("Address"))
             voters_n = int(h.get("Voters") or len(_c1_household_voters_from_package(h, voter_map)) or 0)
             marker, marker_cls = _is_house_done(hk, voters_n)
-            row_label = f"{marker} {addr.upper()}      {voters_n:,}"
-            if st.button(row_label, key=f"c26_house_{mobile_id}_{_ops_slug(hk)}"):
+            zebra = "even" if row_i % 2 == 0 else "odd"
+            row_label = f"{marker} {addr.upper()}   •   {voters_n:,}"
+            if st.button(row_label, key=f"c33_row_{zebra}_house_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[hh_key] = hk
                 st.session_state[screen_key] = "household"
                 st.rerun()
-        b1, b2 = st.columns(2)
+        b1, b2, _sp = st.columns([.8, .7, 6.5])
         with b1:
-            if st.button("← Streets", key="c26_new_street_from_houses"):
+            if st.button("← Streets", key="c33_nav_new_street_from_houses"):
                 st.session_state[screen_key] = "streets"
                 st.rerun()
         with b2:
-            if st.button("Lists", key="c26_new_list_from_houses"):
+            if st.button("Lists", key="c33_nav_new_list_from_houses"):
                 st.session_state[screen_key] = "lists"
                 st.rerun()
         return
@@ -13119,9 +13148,9 @@ def render_mobile_shell_c1() -> None:
         if meta_bits:
             st.markdown(f'<div class="cc-house-meta">{" · ".join(meta_bits)}</div>', unsafe_allow_html=True)
 
-        widths = [2.20, .38, .38, .38, .46, .46, .82, 3.0]
+        widths = [3.35, .44, .44, .44, .52, .52, .90]
         hdr = st.columns(widths)
-        for hc, label in zip(hdr[:7], ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
+        for hc, label in zip(hdr, ["Name", "F", "U", "A", "NH", "YS", "Follow Up"]):
             hc.markdown(f"**{label}**")
         _row_sep()
 
@@ -13158,7 +13187,7 @@ def render_mobile_shell_c1() -> None:
         if notes_key not in st.session_state and prior_household_note:
             st.session_state[notes_key] = prior_household_note
         household_notes = st.text_area("Notes", height=44, key=notes_key, placeholder="Short household note")
-        d1, d2, d3 = st.columns([.7, .7, 4.8])
+        d1, d2, d3 = st.columns([.85, .65, 5.5])
         with d1:
             if st.button("Save / Done", type="primary", key=f"c26_done_household_{mobile_id}_{_ops_slug(hk)}"):
                 saved_count = 0
@@ -13212,10 +13241,10 @@ def render_mobile_shell_c1() -> None:
                 st.session_state[screen_key] = "houses"
                 st.rerun()
         with d2:
-            if st.button("Back", key=f"c26_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
+            if st.button("Back", key=f"c33_nav_back_to_houses_{mobile_id}_{_ops_slug(hk)}"):
                 st.session_state[screen_key] = "houses"
                 st.rerun()
-        st.markdown('<div class="cc-legend-line">F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot</div>', unsafe_allow_html=True)
+        st.caption("F=Favorable • U=Undecided • A=Against • NH=Not Home • YS=Yard Sign • Follow Up=Needs Follow-up • ✉=Permanent Mail Ballot")
         return
 
     st.session_state[screen_key] = "login"
