@@ -12657,11 +12657,11 @@ def render_mobile_shell_c1() -> None:
     [data-testid="stCaptionContainer"] { font-size: .68rem !important; line-height: 1.05 !important; }
     /* C3/C2.8 ultra dense field UI */
     .cc-mobile-step {
-        background: #f8f4ea;
+        background: rgba(7,29,58,.02);
         border: 1px solid rgba(159,21,28,.22);
         border-radius: 7px;
-        padding: 4px 7px;
-        margin: 2px 0 5px 0;
+        padding: 2px 6px;
+        margin: 1px 0 2px 0;
         color: #071d3a;
         font-weight: 950;
         font-size: .92rem;
