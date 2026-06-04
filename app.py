@@ -13126,7 +13126,33 @@ def _c433_mobile_assignment_item_from_a34_package(package: dict) -> dict:
     households = package.get("households") if isinstance(package.get("households"), list) else []
     voters = package.get("voters") if isinstance(package.get("voters"), list) else []
     name = clean_value(assignment.get("name") or assignment.get("street_area") or program.get("name") or "Mobile Assignment")
-    return {
+
+    # C4.6.19: The mobile app needs nested precinct -> street -> household data.
+    # The older package also contains a flat precinct summary under "precincts".
+    # Do NOT expose that flat summary as item["precincts"], or mobile will think
+    # it has precincts but no streets. Prefer package["hierarchy"] for mobile nav.
+    nested_precincts = package.get("hierarchy") if isinstance(package.get("hierarchy"), list) else []
+    if not nested_precincts:
+        try:
+            nested_precincts = cc_mobile_hierarchy_from_voters(voters)
+        except Exception:
+            nested_precincts = []
+
+    street_count = 0
+    household_count = int(assignment.get("household_count") or len(households) or 0)
+    voter_count = int(assignment.get("voter_count") or len(voters) or 0)
+    if nested_precincts:
+        try:
+            street_count = sum(int(p.get("street_count") or len(p.get("streets") or [])) for p in nested_precincts if isinstance(p, dict))
+            household_count = sum(int(p.get("household_count") or sum(int(s.get("household_count") or len(s.get("households") or [])) for s in (p.get("streets") or []) if isinstance(s, dict))) for p in nested_precincts if isinstance(p, dict)) or household_count
+            voter_count = sum(int(p.get("voter_count") or sum(int(s.get("voter_count") or 0) for s in (p.get("streets") or []) if isinstance(s, dict))) for p in nested_precincts if isinstance(p, dict)) or voter_count
+        except Exception:
+            pass
+
+    street_area = clean_value(assignment.get("selected_street") or assignment.get("street_area") or "")
+    is_whole_or_multi = ("whole universe" in street_area.lower()) or len(nested_precincts) > 1
+
+    item = {
         "assignment_id": clean_value(assignment.get("mobile_assignment_id") or assignment.get("source_work_item_id") or ""),
         "assignment_name": name,
         "label": name,
@@ -13136,21 +13162,28 @@ def _c433_mobile_assignment_item_from_a34_package(package: dict) -> dict:
         "assigned_to": clean_value(assignment.get("assigned_to") or ""),
         "street": clean_value(assignment.get("selected_street") or ""),
         "precinct": clean_value(assignment.get("selected_precinct") or assignment.get("street_area") or ""),
-        "household_count": int(assignment.get("household_count") or len(households) or 0),
-        "voter_count": int(assignment.get("voter_count") or len(voters) or 0),
+        "household_count": household_count,
+        "voter_count": voter_count,
+        "street_count": street_count,
+        "precinct_count": len(nested_precincts),
         "due_date": clean_value(assignment.get("due_date") or ""),
         "status": clean_value(assignment.get("status") or "Assigned"),
-        # C4.4: expose the actual household/voter payload at the assignment-item
-        # level as well as inside package so the separate Field App can render
-        # an offline walk workflow without guessing nested schema.
-        "content_version": "C4.4_household_voter_package",
-        "hierarchy": package.get("hierarchy") if isinstance(package.get("hierarchy"), list) else [],
-        "precincts": package.get("precincts") if isinstance(package.get("precincts"), list) else [],
+        "content_version": "C4.6.19_precinct_first_household_voter_package",
+        "mobile_open_mode": "precinct_first" if is_whole_or_multi else "street_first",
+        "mobile_group_by": "precinct" if is_whole_or_multi else "street",
+        "hierarchy": nested_precincts,
+        "precincts": nested_precincts,
+        "precinct_summary": package.get("precincts") if isinstance(package.get("precincts"), list) else [],
         "streets": package.get("streets") if isinstance(package.get("streets"), list) else [],
         "households": households,
         "voters": voters,
-        "package": cc_attach_mobile_precinct_hierarchy(package, voters),
+        "package": dict(package or {}),
     }
+    item["package"]["hierarchy"] = nested_precincts
+    item["package"]["precincts"] = nested_precincts
+    item["package"]["mobile_open_mode"] = item["mobile_open_mode"]
+    item["package"]["mobile_group_by"] = item["mobile_group_by"]
+    return item
 
 
 def _c433_publish_a34_package_to_field_user(campaign_id: str, package: dict) -> tuple[bool, str]:
@@ -13161,41 +13194,28 @@ def _c433_publish_a34_package_to_field_user(campaign_id: str, package: dict) -> 
     item = _c433_mobile_assignment_item_from_a34_package(package)
     path = _c433_mobile_assignment_user_path(campaign_id, username)
 
-    # Preserve any existing assignments for this user and upsert this package by assignment_id.
-    existing = _ops_json_get(path, {})
-    existing_items = []
-    if isinstance(existing, dict):
-        existing_items = existing.get("assignments") or []
-    elif isinstance(existing, list):
-        existing_items = existing
-    if not isinstance(existing_items, list):
-        existing_items = []
-
-    item_id = clean_value(item.get("assignment_id"))
-    merged = []
-    replaced = False
-    for old in existing_items:
-        if isinstance(old, dict) and item_id and clean_value(old.get("assignment_id")) == item_id:
-            merged.append(item)
-            replaced = True
-        else:
-            merged.append(old)
-    if not replaced:
-        merged.append(item)
-
+    # C4.6.19: source of truth export.
+    # Previously this merged the new package into whatever was already in R2,
+    # so deleted/old assignments stayed on the mobile app forever. For the
+    # current Assign screen, Generate Mobile Assignment Package should publish
+    # exactly the selected active work item for this user unless/until we add a
+    # deliberate "publish all active work items" control.
     payload = {
-        "version": 1,
+        "version": 2,
         "package_type": "candidate_connect_field_user_assignments",
         "campaign_id": _ops_slug(campaign_id),
         "username": _ops_slug(username),
         "source_username": username,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "assignments": merged,
+        "replace_local_assignments": True,
+        "assignments": [item],
     }
     ok, msg = _put_json_to_r2_key(path, payload)
     if ok:
-        return True, f"Published {len(merged)} assignment item(s) to {path} ({why})."
+        return True, f"Published 1 assignment item(s) to {path} ({why})."
     return False, f"R2 publish failed for {path}: {msg}"
+
+
 
 def _a34_save_mobile_assignment_package(campaign_id: str, package: dict) -> tuple[bool, str]:
     mobile_id = clean_value(((package or {}).get("assignment") or {}).get("mobile_assignment_id"))
