@@ -1,5 +1,5 @@
 # Candidate Connect LIVE
-# C4.6.1 WEB MOBILE RESULTS READER - duplicate key fix — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
+# C4.6.2 WEB MOBILE RESULTS READER - no duplicate refresh button — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 # v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
@@ -11693,12 +11693,7 @@ def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboar
     st.markdown("#### Field App Sync Results")
     st.caption("C4.6 reads synced field-app results from R2. This does not update voter records yet.")
 
-    if st.button("Refresh Field Results", key=f"refresh_mobile_results_c46_{panel_id}_{_ops_slug(campaign_id)}"):
-        try:
-            load_mobile_results_store.clear()
-        except Exception:
-            pass
-        st.rerun()
+    st.caption("Field results auto-refresh every 15 seconds. Use browser refresh if needed.")
 
     store = load_mobile_results_store(campaign_id)
     rows = _mobile_result_rows(store)
