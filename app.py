@@ -13399,20 +13399,52 @@ def render_program_manager_a2(campaign_id: str | None = None):
             current_user_labels = [user_id_to_label[uid] for uid in current_user_ids if uid in user_id_to_label]
             current_universe = clean_value(current.get("source_saved_universe") or current.get("universe") or "")
             st.markdown("#### Selected Program Setup")
+            st.markdown("""
+<style>
+/* Program Operations Center: keep setup controls readable and full width. */
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) {
+  max-width: 1180px !important;
+  width: 100% !important;
+}
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="select"] {
+  min-width: 100% !important;
+}
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="select"] > div {
+  min-height: 42px !important;
+  overflow: visible !important;
+}
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="tag"] {
+  max-width: none !important;
+  background: var(--cc-red) !important;
+  color: #ffffff !important;
+}
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="tag"] span,
+div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="tag"] * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+</style>
+""", unsafe_allow_html=True)
             with st.form(f"program_manager_c46_edit_overview_{campaign_id}_{pid}"):
-                a, b, c = st.columns([1.2, 1, 1])
-                with a:
+                top_a, top_b, top_c = st.columns([1.45, 0.75, 1.0])
+                with top_a:
                     e_name = st.text_input("Program name", value=clean_value(current.get("name")), key=f"pm_c46_edit_name_{pid}")
-                    universe_options = saved_universes if saved_universes else [current_universe]
-                    if current_universe and current_universe not in universe_options:
-                        universe_options = [current_universe] + universe_options
-                    e_universe = st.selectbox("Saved universe", universe_options if universe_options else [""], index=(universe_options.index(current_universe) if current_universe in universe_options else 0), key=f"pm_c46_edit_universe_{pid}")
-                with b:
+                with top_b:
                     e_status = st.selectbox("Status", status_options, index=status_options.index(clean_value(current.get("status"))) if clean_value(current.get("status")) in status_options else 1, key=f"pm_c46_edit_status_{pid}")
-                    e_channels = st.multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key=f"pm_c46_edit_channels_{pid}")
-                with c:
-                    e_users = st.multiselect("Program users", user_labels, default=current_user_labels, key=f"pm_c46_edit_users_{pid}")
+                with top_c:
                     e_goal = st.text_input("Goal", value=clean_value(current.get("goal")), key=f"pm_c46_edit_goal_{pid}")
+
+                universe_options = saved_universes if saved_universes else [current_universe]
+                if current_universe and current_universe not in universe_options:
+                    universe_options = [current_universe] + universe_options
+                e_universe = st.selectbox("Saved universe", universe_options if universe_options else [""], index=(universe_options.index(current_universe) if current_universe in universe_options else 0), key=f"pm_c46_edit_universe_{pid}")
+
+                user_col, channel_col = st.columns([1.55, 1.0])
+                with user_col:
+                    e_users = st.multiselect("Program users", user_labels, default=current_user_labels, key=f"pm_c46_edit_users_{pid}")
+                with channel_col:
+                    e_channels = st.multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key=f"pm_c46_edit_channels_{pid}")
+
                 e_notes = st.text_area("Notes", value=clean_value(current.get("notes")), height=70, key=f"pm_c46_edit_notes_{pid}")
                 save_overview = st.form_submit_button("Save Program Setup", type="primary")
             if save_overview:
