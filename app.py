@@ -12588,7 +12588,7 @@ def _a32_render_candidate_walk_preview(pkg: dict, max_households: int = 40) -> N
         hk = clean_value(v.get("Household Key"))
         voter_map.setdefault(hk, []).append(v)
 
-    show_cards = st.checkbox("Show mobile-style household cards", value=True, key=f"a32_preview_cards_{clean_value(pkg.get('package_id'))}")
+    show_cards = st.checkbox("Show mobile-style household cards", value=True, key=f"a32_preview_cards_{clean_value(pkg.get('package_id'))}_{clean_value(pkg.get('selected_precinct'))}_{clean_value(pkg.get('selected_street'))}")
     if not show_cards:
         preview_df = pd.DataFrame(households)
         cols = [c for c in ["Knock Order", "Address", "City", "Voters", "Names", "Party", "Ages"] if c in preview_df.columns]
@@ -12868,12 +12868,11 @@ def _a34_save_mobile_assignment_package(campaign_id: str, package: dict) -> tupl
         return False, publish_msg
     return True, publish_msg
 
-def render_program_door_to_door_a3(campaign_id: str, program: dict, people_lookup: dict | None = None, user_id_to_label: dict | None = None, key_context: str = "main") -> None:
+def render_program_door_to_door_a3(campaign_id: str, program: dict, people_lookup: dict | None = None, user_id_to_label: dict | None = None) -> None:
     """Program-owned Door-to-Door workspace split into Build / Review / Assign / Track."""
     campaign_id = _ops_slug(campaign_id or _active_campaign_id())
     program = program or {}
     pid = clean_value(program.get("program_id")) or "program"
-    key_context = _ops_slug(key_context or "main")
     user_id_to_label = user_id_to_label or {}
     source_universe = clean_value(program.get("source_saved_universe") or program.get("universe") or "")
     channels = _program_channels(program)
@@ -12901,14 +12900,14 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             st.info("Choose a saved universe on the Program Overview tab before building door-to-door work.")
             return
 
-        load_key = f"a3_load_door_{key_context}_{campaign_id}_{pid}"
+        load_key = f"a3_load_door_{campaign_id}_{pid}"
         load = st.checkbox("Load Ranked Street List / Candidate Walk Builder", value=False, key=load_key)
         if not load:
             st.info("Paused until checked so Program Details stays fast.")
         else:
             perf_cols = st.columns([1, 1, 3])
             with perf_cols[0]:
-                if st.button("Refresh cached universe", key=f"a31_refresh_cache_{key_context}_{campaign_id}_{pid}"):
+                if st.button("Refresh cached universe", key=f"a31_refresh_cache_{campaign_id}_{pid}"):
                     try:
                         _a3_program_voters_dataframe.clear()
                     except Exception:
@@ -12944,7 +12943,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             keep_cols = [c for c in ["Rank","County","Municipality","Precinct","Target Voters","Households","Streets","Voters / Street","Voters / HH","Priority Score"] if c in pc_show.columns]
             st.dataframe(pc_show[keep_cols], width="stretch", hide_index=True)
 
-            prepare_full_csv = st.checkbox("Prepare full ranked street CSV", value=False, key=f"a31_prepare_full_csv_{key_context}_{campaign_id}_{pid}")
+            prepare_full_csv = st.checkbox("Prepare full ranked street CSV", value=False, key=f"a31_prepare_full_csv_{campaign_id}_{pid}")
             if prepare_full_csv:
                 with st.spinner("Preparing full ranked street CSV..."):
                     streets_all = _v45_rank_streets(df)
@@ -12953,7 +12952,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     streets_all.to_csv(index=False).encode("utf-8"),
                     file_name=f"{_ops_slug(program.get('name') or 'program')}_ranked_streets.csv",
                     mime="text/csv",
-                    key=f"a3_ranked_streets_csv_{key_context}_{campaign_id}_{pid}",
+                    key=f"a3_ranked_streets_csv_{campaign_id}_{pid}",
                 )
             else:
                 st.caption("Full CSV is not prepared until requested, which keeps precinct/street drill-down faster.")
@@ -12962,7 +12961,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             pc_opts = [f"#{int(r.get('rank', 0))} — {clean_value(r.get('Precinct'))} — {int(r.get('target_voters') or 0):,} voters / {int(r.get('households') or 0):,} HH" for r in pc_records]
             if not pc_opts:
                 return
-            pc_label = st.selectbox("Open precinct", pc_opts, key=f"a3_pc_{key_context}_{campaign_id}_{pid}")
+            pc_label = st.selectbox("Open precinct", pc_opts, key=f"a3_pc_{campaign_id}_{pid}")
             precinct_row = pc_records[pc_opts.index(pc_label)]
             pdf = df[
                 (df["County"].str.upper() == clean_value(precinct_row.get("County", "")).upper()) &
@@ -12981,7 +12980,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             st_opts = [f"#{int(r.get('rank', 0))} — {clean_value(r.get('Street Name'))} — {int(r.get('target_voters') or 0):,} voters / {int(r.get('households') or 0):,} HH" for r in st_records]
             if not st_opts:
                 return
-            st_label = st.selectbox("Open street", st_opts, key=f"a3_street_{key_context}_{campaign_id}_{pid}")
+            st_label = st.selectbox("Open street", st_opts, key=f"a3_street_{campaign_id}_{pid}")
             street_row = st_records[st_opts.index(st_label)]
             sdf = pdf[pdf["Street Norm"].str.upper() == clean_value(street_row.get("Street Norm", "")).upper()].copy()
             hh = _v45_households(sdf)
@@ -12991,16 +12990,16 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
 
             hh_opts = [f"#{int(r.get('Knock Order') or 0)} — {clean_value(r.get('Address'))} — {int(r.get('Voters') or 0)} voter(s)" for r in hh.to_dict("records")]
             if hh_opts:
-                hh_label = st.selectbox("Open household", hh_opts, key=f"a3_hh_{key_context}_{campaign_id}_{pid}")
+                hh_label = st.selectbox("Open household", hh_opts, key=f"a3_hh_{campaign_id}_{pid}")
                 hh_row = hh.to_dict("records")[hh_opts.index(hh_label)]
                 voters = sdf[sdf["Household Key"] == hh_row.get("Household Key")].copy()
                 with st.expander("Voter Card Preview", expanded=False):
                     st.dataframe(voters[[c for c in ["FullName","Age","Party","Gender","Address","Mobile","Landline","Email","Tags"] if c in voters.columns]], width="stretch", hide_index=True)
 
             st.markdown("##### 4. Save / Download Candidate Walk Package")
-            scope = st.radio("Package scope", ["Selected Street", "Entire Selected Precinct"], horizontal=True, key=f"a3_scope_{key_context}_{campaign_id}_{pid}")
+            scope = st.radio("Package scope", ["Selected Street", "Entire Selected Precinct"], horizontal=True, key=f"a3_scope_{campaign_id}_{pid}")
             assignee_labels = _a3_program_assigned_user_labels(program, user_id_to_label)
-            assignee = st.selectbox("Assign/package for", ["Unassigned / Candidate"] + assignee_labels, key=f"a3_assignee_{key_context}_{campaign_id}_{pid}")
+            assignee = st.selectbox("Assign/package for", ["Unassigned / Candidate"] + assignee_labels, key=f"a3_assignee_{campaign_id}_{pid}")
             if scope == "Entire Selected Precinct":
                 pkg_voters = pdf.copy()
                 pkg_households = _v45_households(pdf)
@@ -13013,7 +13012,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
 
             save_col, dl_col = st.columns(2)
             with save_col:
-                if st.button("Save Candidate Walk Package", key=f"a3_save_pkg_{key_context}_{campaign_id}_{pid}"):
+                if st.button("Save Candidate Walk Package", key=f"a3_save_pkg_{campaign_id}_{pid}"):
                     store = load_program_candidate_walk_packages_store(campaign_id)
                     existing = store.get("packages") or []
                     summary = {
@@ -13044,7 +13043,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     json.dumps(pkg, ensure_ascii=False, indent=2).encode("utf-8"),
                     file_name=f"{_ops_slug(program.get('name') or 'candidate-walk')}_{_ops_slug(pkg.get('selected_precinct'))}_{_ops_slug(pkg.get('selected_street') or scope)}.json",
                     mime="application/json",
-                    key=f"a3_pkg_download_{key_context}_{campaign_id}_{pid}",
+                    key=f"a3_pkg_download_{campaign_id}_{pid}",
                 )
 
     with review_tab:
@@ -13057,7 +13056,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             rows = [{k: x.get(k) for k in ["name","assigned_to","scope","selected_precinct","selected_street","household_count","voter_count","status","created_at"]} for x in saved]
             st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
             labels = [f"{clean_value(x.get('name'))} — {int(x.get('household_count') or 0):,} HH / {int(x.get('voter_count') or 0):,} voters" for x in saved]
-            choice = st.selectbox("Preview package", labels, key=f"a32_review_pkg_{key_context}_{campaign_id}_{pid}")
+            choice = st.selectbox("Preview package", labels, key=f"a32_review_pkg_{campaign_id}_{pid}")
             pkg_summary = saved[labels.index(choice)]
             pkg = pkg_summary.get("package") or {}
             if pkg:
@@ -13104,7 +13103,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             } for x in saved]
             st.dataframe(pd.DataFrame(assign_rows), width="stretch", hide_index=True)
             labels = [f"{clean_value(x.get('name'))} — {int(x.get('household_count') or 0):,} HH / {int(x.get('voter_count') or 0):,} voters — {clean_value(x.get('assigned_to')) or 'Unassigned'}" for x in saved]
-            choice = st.selectbox("Work item", labels, key=f"a33_assign_pkg_{key_context}_{campaign_id}_{pid}")
+            choice = st.selectbox("Work item", labels, key=f"a33_assign_pkg_{campaign_id}_{pid}")
             idx = labels.index(choice)
             chosen = saved[idx]
             selected_id = clean_value(chosen.get("package_id"))
@@ -13112,14 +13111,14 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             st.markdown(f"**Street / Area:** {area_label}")
             c1, c2 = st.columns(2)
             with c1:
-                new_assignee = st.selectbox("Assign to", assignee_labels, key=f"a33_assign_user_{key_context}_{campaign_id}_{pid}")
-                status = st.selectbox("Status", ["Ready", "Assigned", "In Progress", "Completed", "Paused"], index=1, key=f"a33_assign_status_{key_context}_{campaign_id}_{pid}")
+                new_assignee = st.selectbox("Assign to", assignee_labels, key=f"a33_assign_user_{campaign_id}_{pid}")
+                status = st.selectbox("Status", ["Ready", "Assigned", "In Progress", "Completed", "Paused"], index=1, key=f"a33_assign_status_{campaign_id}_{pid}")
             with c2:
-                due_date = st.text_input("Due date", value=clean_value(chosen.get("due_date")), placeholder="YYYY-MM-DD", key=f"a33_due_date_{key_context}_{campaign_id}_{pid}")
-                notes = st.text_area("Assignment notes", value=clean_value(chosen.get("assignment_notes")), height=80, key=f"a33_notes_{key_context}_{campaign_id}_{pid}")
+                due_date = st.text_input("Due date", value=clean_value(chosen.get("due_date")), placeholder="YYYY-MM-DD", key=f"a33_due_date_{campaign_id}_{pid}")
+                notes = st.text_area("Assignment notes", value=clean_value(chosen.get("assignment_notes")), height=80, key=f"a33_notes_{campaign_id}_{pid}")
             save_col, delete_col = st.columns([1, 1])
             with save_col:
-                if st.button("Save Assignment", type="primary", key=f"a331_save_assignment_{key_context}_{campaign_id}_{pid}"):
+                if st.button("Save Assignment", type="primary", key=f"a331_save_assignment_{campaign_id}_{pid}"):
                     all_pkgs = store.get("packages") or []
                     now = datetime.now().isoformat(timespec="seconds")
                     for item in all_pkgs:
@@ -13150,8 +13149,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     else:
                         st.error(msg)
             with delete_col:
-                confirm_delete = st.checkbox("Confirm delete selected work item", key=f"a331_confirm_delete_work_{key_context}_{campaign_id}_{pid}")
-                if st.button("Delete Work Item", key=f"a331_delete_work_{key_context}_{campaign_id}_{pid}", disabled=not confirm_delete):
+                confirm_delete = st.checkbox("Confirm delete selected work item", key=f"a331_confirm_delete_work_{campaign_id}_{pid}")
+                if st.button("Delete Work Item", key=f"a331_delete_work_{campaign_id}_{pid}", disabled=not confirm_delete):
                     all_pkgs = store.get("packages") or []
                     store["packages"] = [item for item in all_pkgs if clean_value(item.get("package_id")) != selected_id]
                     ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
@@ -13166,7 +13165,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
             m1, m2 = st.columns(2)
             with m1:
-                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{key_context}_{campaign_id}_{pid}"):
+                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}"):
                     ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
                         st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}"] = mobile_pkg
@@ -13181,7 +13180,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
                     file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
                     mime="application/json",
-                    key=f"a34_download_mobile_assignment_{key_context}_{campaign_id}_{pid}",
+                    key=f"a34_download_mobile_assignment_{campaign_id}_{pid}",
                 )
 
     with track_tab:
@@ -13506,7 +13505,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 + '</div>'
             )
             st.markdown(quick, unsafe_allow_html=True)
-            render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label, key_context="build_lists")
+            render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label)
 
     with assign_tab:
         st.markdown("#### Assign Work")
@@ -13530,7 +13529,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 st.markdown(_c46_html_table(assign_rows, ["Assignment", "Worker", "Status", "Voters"], max_rows=12), unsafe_allow_html=True)
             else:
                 st.info("No assignments yet for this program. Use the builder below to create packets/assignments.")
-            render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label, key_context="assign_work")
+            render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label)
 
     with results_tab:
         st.markdown("#### Track Results")
