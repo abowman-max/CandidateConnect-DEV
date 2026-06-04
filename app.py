@@ -11856,9 +11856,132 @@ def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboar
         st.warning(f"Could not render field results table: {exc}")
 
 
+def _c46_mobile_outreach_summary(campaign_id: str) -> dict:
+    """Compact, workflow-oriented summary of synced mobile results."""
+    store = load_mobile_results_store(campaign_id)
+    rows = _mobile_result_rows(store)
+    synced_rows = [r for r in rows if clean_value(r.get("_bucket")) == "synced"]
+    queued_rows = [r for r in rows if clean_value(r.get("_bucket")) == "queued"]
+    failed_rows = [r for r in rows if clean_value(r.get("_bucket")) == "failed"]
+    count_rows = synced_rows or rows
+    result_counts = {"Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Other": 0}
+    yard = follow = mb = volunteer = 0
+    for r in count_rows:
+        key = _result_label_to_key(r.get("result"))
+        if key in result_counts:
+            result_counts[key] += 1
+        elif clean_value(key):
+            result_counts["Other"] += 1
+        yard += 1 if _mobile_truthy(r.get("yard_sign")) else 0
+        follow += 1 if (_mobile_truthy(r.get("follow_up")) or _mobile_truthy(r.get("needs_follow_up"))) else 0
+        mb += 1 if (_mobile_truthy(r.get("mail_ballot_interest")) or _mobile_truthy(r.get("mb_interest")) or _mobile_truthy(r.get("mb_follow_up"))) else 0
+        volunteer += 1 if (_mobile_truthy(r.get("volunteer_interest")) or _mobile_truthy(r.get("volunteer"))) else 0
+    queue = _build_follow_up_queue_c46(count_rows)
+    last_sync = clean_value(store.get("last_sync") or store.get("updated_at") or "")
+    return {
+        "store": store,
+        "rows": rows,
+        "synced_rows": synced_rows,
+        "queued_rows": queued_rows,
+        "failed_rows": failed_rows,
+        "result_counts": result_counts,
+        "yard": yard,
+        "follow": follow,
+        "mb": mb,
+        "volunteer": volunteer,
+        "queue": queue,
+        "last_sync": last_sync[:19] if last_sync else "—",
+    }
+
+
+def _c46_queue_counts(queue: list[dict]) -> dict:
+    counts = {}
+    for item in queue or []:
+        t = clean_value(item.get("Follow-Up Type")) or "Other"
+        counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
+def _c46_top_next_action(summary: dict, active_programs: list[dict], total_voters: int, completed_voters: int) -> dict:
+    queue_counts = _c46_queue_counts(summary.get("queue") or [])
+    if queue_counts.get("Yard Sign", 0) > 0:
+        return {
+            "title": "Deliver requested yard signs",
+            "why": f"{queue_counts.get('Yard Sign', 0):,} voter(s) requested a yard sign. This is the hottest follow-up because it extends a good doorstep conversation into public support.",
+            "button": "Open Follow-Up Queue",
+            "target": "Follow-Up Queue",
+        }
+    if queue_counts.get("Volunteer Follow-Up", 0) > 0:
+        return {
+            "title": "Call volunteer prospects",
+            "why": f"{queue_counts.get('Volunteer Follow-Up', 0):,} voter(s) showed volunteer interest. Move them into Campaign Organization while the conversation is still fresh.",
+            "button": "Open Follow-Up Queue",
+            "target": "Follow-Up Queue",
+        }
+    if queue_counts.get("Mail Ballot Follow-Up", 0) > 0:
+        return {
+            "title": "Follow up on mail ballot interest",
+            "why": f"{queue_counts.get('Mail Ballot Follow-Up', 0):,} voter(s) need mail-ballot help or instructions.",
+            "button": "Open Follow-Up Queue",
+            "target": "Follow-Up Queue",
+        }
+    if queue_counts.get("Thank-You Card", 0) > 0:
+        return {
+            "title": "Send thank-you cards",
+            "why": f"{queue_counts.get('Thank-You Card', 0):,} favorable voter(s) should receive a thank-you postcard or candidate note.",
+            "button": "Export Follow-Up Queue",
+            "target": "Follow-Up Queue",
+        }
+    if total_voters and completed_voters < total_voters:
+        return {
+            "title": "Keep working the active walk list",
+            "why": f"{max(total_voters-completed_voters, 0):,} assigned voter(s) remain untouched. Continue the current door-to-door program before building more work.",
+            "button": "Go to Programs",
+            "target": "Programs",
+        }
+    if active_programs:
+        return {
+            "title": "Build the next voter contact list",
+            "why": "Your active programs are ready for the next outreach pass: door-to-door, phone, mail, text, or follow-up.",
+            "button": "Go to Programs",
+            "target": "Programs",
+        }
+    return {
+        "title": "Create your first outreach program",
+        "why": "Start by choosing the universe, contact method, team, and assignment structure. Then publish work to the field app.",
+        "button": "Create Program",
+        "target": "Programs",
+    }
+
+
+def _c46_recent_notes_rows(rows: list[dict], limit: int = 8) -> list[dict]:
+    out = []
+    sorted_rows = sorted(rows or [], key=lambda x: clean_value(x.get("created_at") or x.get("synced_at") or x.get("updated_at") or ""), reverse=True)
+    for r in sorted_rows:
+        note = clean_value(r.get("notes"))
+        if not note and len(out) >= 3:
+            continue
+        out.append({
+            "Result": _result_label_to_key(r.get("result")),
+            "Voter": _mobile_result_voter_label(r),
+            "Address": clean_value(r.get("household_address") or r.get("address") or r.get("Address")),
+            "Next Signal": ", ".join([x for x in [
+                "Yard sign" if _mobile_truthy(r.get("yard_sign")) else "",
+                "Follow-up" if (_mobile_truthy(r.get("follow_up")) or _mobile_truthy(r.get("needs_follow_up"))) else "",
+                "MB interest" if (_mobile_truthy(r.get("mail_ballot_interest")) or _mobile_truthy(r.get("mb_interest"))) else "",
+                "Volunteer" if (_mobile_truthy(r.get("volunteer_interest")) or _mobile_truthy(r.get("volunteer"))) else "",
+            ] if x]) or "—",
+            "Notes": note,
+            "Created": clean_value(r.get("created_at") or r.get("synced_at") or r.get("updated_at"))[:19],
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") -> None:
-    st.markdown("### Outreach Dashboard")
-    st.caption("High-level status for active voter contact programs, assignments, and field progress. Builders live on the other outreach pages.")
+    st.markdown("### Outreach Command Center")
+    st.caption("Plan outreach → contact voters → record results → trigger follow-up → complete the next interaction.")
 
     try:
         programs = load_outreach_programs_store(campaign_id).get("programs", []) or []
@@ -11878,45 +12001,119 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         packets_all = []
 
     active_ids = _active_program_ids_a21(programs)
-    list_by_program: dict[str, list] = {}
     list_program_lookup = {}
     for cl in contact_lists:
-        pid = clean_value(cl.get("program_id"))
         lid = clean_value(cl.get("list_id"))
         if lid:
-            list_program_lookup[lid] = pid
-        list_by_program.setdefault(pid, []).append(cl)
+            list_program_lookup[lid] = clean_value(cl.get("program_id"))
 
-    # A2.1: dashboard should show active-program work only. Orphan legacy assignments stay in Legacy Setup.
     assignments = [a for a in assignments_all if _assignment_program_id_a21(a, list_program_lookup) in active_ids]
     active_assignment_ids = {clean_value(a.get("assignment_id")) for a in assignments if clean_value(a.get("assignment_id"))}
     packets = [p for p in packets_all if clean_value(p.get("assignment_id")) in active_assignment_ids]
-
     active_programs = [p for p in programs if clean_value(p.get("program_id")) in active_ids]
-    status_counts = _assignment_status_counts(assignments)
-    total_voters, completed_voters, contact_results = _packet_progress_for_assignments(packets)
+
+    total_voters, completed_voters, package_results = _packet_progress_for_assignments(packets)
     remaining_voters = max(total_voters - completed_voters, 0)
     pct_complete = (completed_voters / total_voters * 100.0) if total_voters else 0.0
+    mobile = _c46_mobile_outreach_summary(campaign_id)
+    result_counts = mobile.get("result_counts") or {}
+    queue = mobile.get("queue") or []
+    queue_counts = _c46_queue_counts(queue)
+    next_action = _c46_top_next_action(mobile, active_programs, total_voters, completed_voters)
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Active Programs", f"{len(active_programs):,}")
-    with c2:
-        st.metric("Assigned Users", f"{len({uid for p in active_programs for uid in _program_user_ids(p)}):,}")
-    with c3:
-        st.metric("Assigned Voters", f"{total_voters:,}")
-    with c4:
-        st.metric("Progress", f"{pct_complete:.1f}%")
+    # Snapshot metrics — only the numbers a campaign manager needs first.
+    st.markdown("#### Campaign Outreach Snapshot")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1: st.metric("Active Programs", f"{len(active_programs):,}")
+    with k2: st.metric("Assigned Voters", f"{total_voters:,}")
+    with k3: st.metric("Field Results", f"{len(mobile.get('synced_rows') or []):,}")
+    with k4: st.metric("Open Follow-Ups", f"{len(queue):,}")
+    with k5: st.metric("Progress", f"{pct_complete:.1f}%")
 
-    st.markdown("#### Contact Results")
-    r1, r2, r3, r4, r5 = st.columns(5)
-    with r1: st.metric("Favorable", f"{contact_results.get('F',0):,}")
-    with r2: st.metric("Undecided", f"{contact_results.get('U',0):,}")
-    with r3: st.metric("Against", f"{contact_results.get('A',0):,}")
-    with r4: st.metric("Yard Sign", f"{contact_results.get('YS',0):,}")
-    with r5: st.metric("Not Home", f"{contact_results.get('NH',0):,}")
+    st.markdown("#### Recommended Next Step")
+    with st.container(border=True):
+        left, right = st.columns([3, 1])
+        with left:
+            st.markdown(f"##### {next_action['title']}")
+            st.write(next_action["why"])
+            st.caption(f"Go next: **{next_action['target']}**")
+        with right:
+            st.metric("Immediate Items", f"{len(queue):,}" if next_action["target"] == "Follow-Up Queue" else f"{remaining_voters:,}")
+            if st.button(next_action["button"], key=f"c46_next_action_{panel_id}", width="stretch"):
+                st.info(f"Use the **{next_action['target']}** tab above. Streamlit tabs cannot be switched automatically from inside a button, but this tells the user exactly where to go next.")
 
-    render_mobile_results_reader_c46(campaign_id, panel_id=panel_id)
+    st.markdown("#### Outreach Cycle")
+    s1, s2, s3, s4, s5 = st.columns(5)
+    with s1: st.info("1. Build\n\nProgram + list")
+    with s2: st.info("2. Assign\n\nWalk/call/text/mail")
+    with s3: st.info("3. Contact\n\nField interaction")
+    with s4: st.info("4. Follow Up\n\nSigns, cards, MB, revisit")
+    with s5: st.info("5. Continue\n\nNext conversation")
+
+    chart_left, chart_right = st.columns(2)
+    with chart_left:
+        st.markdown("#### Contact Results")
+        contact_df = pd.DataFrame([
+            {"Result": "Favorable", "Count": int(result_counts.get("Favorable", 0) or package_results.get("F", 0) or 0)},
+            {"Result": "Undecided", "Count": int(result_counts.get("Undecided", 0) or package_results.get("U", 0) or 0)},
+            {"Result": "Against", "Count": int(result_counts.get("Against", 0) or package_results.get("A", 0) or 0)},
+            {"Result": "Not Home", "Count": int(result_counts.get("Not Home", 0) or package_results.get("NH", 0) or 0)},
+        ])
+        if int(contact_df["Count"].sum()) > 0:
+            st.bar_chart(contact_df.set_index("Result"), height=260)
+        else:
+            st.info("No contact results yet. Publish a mobile assignment, knock doors, then sync field results.")
+    with chart_right:
+        st.markdown("#### Follow-Up Pipeline")
+        follow_df = pd.DataFrame([
+            {"Action": "Yard Signs", "Count": int(queue_counts.get("Yard Sign", 0))},
+            {"Action": "Thank-You Cards", "Count": int(queue_counts.get("Thank-You Card", 0))},
+            {"Action": "MB Follow-Up", "Count": int(queue_counts.get("Mail Ballot Follow-Up", 0))},
+            {"Action": "Volunteer", "Count": int(queue_counts.get("Volunteer Follow-Up", 0))},
+            {"Action": "Not-Home Revisit", "Count": int(queue_counts.get("Revisit Not Home", 0))},
+        ])
+        if int(follow_df["Count"].sum()) > 0:
+            st.bar_chart(follow_df.set_index("Action"), height=260)
+        else:
+            st.info("No follow-up actions have been triggered yet.")
+
+    st.markdown("#### Priority Action Queue")
+    action_rows = [
+        {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue and filter Yard Sign."},
+        {"Priority": "High", "Action": "Volunteer follow-up", "Open": int(queue_counts.get("Volunteer Follow-Up", 0)), "Next Step": "Call/text and add to Campaign Organization."},
+        {"Priority": "High", "Action": "Mail ballot follow-up", "Open": int(queue_counts.get("Mail Ballot Follow-Up", 0)), "Next Step": "Send instructions or assign a chase contact."},
+        {"Priority": "Medium", "Action": "Thank-you cards", "Open": int(queue_counts.get("Thank-You Card", 0)), "Next Step": "Export postcard list from Follow-Up Queue."},
+        {"Priority": "Medium", "Action": "Revisit not-home voters", "Open": int(queue_counts.get("Revisit Not Home", 0)), "Next Step": "Build a revisit walk/call list."},
+        {"Priority": "Planning", "Action": "Continue assigned outreach", "Open": int(remaining_voters), "Next Step": "Go to Programs and continue/build assignments."},
+    ]
+    action_df = pd.DataFrame(action_rows)
+    action_df = action_df[(action_df["Open"] > 0) | (action_df["Action"] == "Continue assigned outreach")]
+    st.dataframe(action_df, width="stretch", hide_index=True, key=f"c46_priority_actions_{panel_id}")
+
+    if queue:
+        qdf = pd.DataFrame(queue)
+        st.download_button(
+            "Download Follow-Up Queue CSV",
+            data=qdf.to_csv(index=False).encode("utf-8"),
+            file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            key=f"c46_dashboard_follow_up_download_{panel_id}",
+        )
+
+    st.markdown("#### Recent Field Notes")
+    recent_rows = _c46_recent_notes_rows(mobile.get("rows") or [], limit=8)
+    if recent_rows:
+        st.dataframe(pd.DataFrame(recent_rows), width="stretch", hide_index=True, key=f"c46_recent_notes_{panel_id}")
+    else:
+        st.caption("No synced field notes yet.")
+
+    with st.expander("Admin / Sync Health", expanded=False):
+        hc1, hc2, hc3, hc4 = st.columns(4)
+        with hc1: st.metric("Synced", f"{len(mobile.get('synced_rows') or []):,}")
+        with hc2: st.metric("Still Queued", f"{len(mobile.get('queued_rows') or []):,}")
+        with hc3: st.metric("Failed", f"{len(mobile.get('failed_rows') or []):,}")
+        with hc4: st.metric("Last Sync", mobile.get("last_sync") or "—")
+        st.caption(f"R2 path: app_state/mobile_results/{_ops_slug(campaign_id)}.json")
 
     st.markdown("#### Program Progress")
     if active_programs:
@@ -11947,45 +12144,7 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
             })
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, key=f"outreach_program_progress_{panel_id}")
     else:
-        st.info("No active outreach programs yet. Use the Programs page to create or activate your first outreach program.")
-
-    st.markdown("#### Assignment Status")
-    a1, a2, a3, a4 = st.columns(4)
-    with a1: st.metric("Assigned", f"{status_counts.get('Assigned',0):,}")
-    with a2: st.metric("In Progress", f"{status_counts.get('In Progress',0):,}")
-    with a3: st.metric("Complete", f"{status_counts.get('Complete',0):,}")
-    with a4: st.metric("Remaining Voters", f"{remaining_voters:,}")
-
-    if assignments:
-        try:
-            people_store = load_team_people_store(campaign_id) if 'load_team_people_store' in globals() else {"people": []}
-            people = people_store.get("people", []) if isinstance(people_store, dict) else []
-        except Exception:
-            people = []
-        people_lookup = {clean_value(p.get("person_id")): clean_value(p.get("name")) for p in people}
-        program_lookup = {clean_value(p.get("program_id")): clean_value(p.get("name")) for p in programs}
-        rows = []
-        packet_by_assignment: dict[str, list] = {}
-        for pck in packets:
-            packet_by_assignment.setdefault(clean_value(pck.get("assignment_id")), []).append(pck)
-        for a in assignments:
-            aid = clean_value(a.get("assignment_id"))
-            ap = packet_by_assignment.get(aid, [])
-            tv, cv, _ = _packet_progress_for_assignments(ap)
-            pid = _assignment_program_id_a21(a, list_program_lookup)
-            rows.append({
-                "Program": program_lookup.get(pid, clean_value(a.get("program_name")) or ""),
-                "Assignment": clean_value(a.get("name")) or "Unnamed Assignment",
-                "Assigned To": people_lookup.get(clean_value(a.get("person_id")), clean_value(a.get("team_member_name")) or "Unassigned"),
-                "Status": clean_value(a.get("status")) or "Assigned",
-                "Assigned Voters": tv,
-                "Complete": cv,
-                "Remaining": max(tv-cv, 0),
-                "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
-            })
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, key=f"outreach_assignment_status_{panel_id}")
-    else:
-        st.caption("No active-program assignments yet. Legacy/orphan assignments are hidden from this dashboard and remain under Legacy Setup until migrated or deleted.")
+        st.info("No active outreach programs yet. Use Programs to create the first outreach workflow.")
 
 def _program_channel_options() -> list[str]:
     return ["Door-to-Door", "Phone Bank", "Texting", "Mail", "Email", "Mail Ballot Chase", "Other"]
