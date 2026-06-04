@@ -12177,22 +12177,37 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         },
     }
 
-    # Compact clickable workflow: keep the ribbon as the visual guide, then use text tabs
-    # instead of red action buttons so the page stays clean and compact.
+    # Compact clickable workflow ribbon. Keep this as a one-glance navigation strip, not
+    # another full report. The detailed explanation lives in the hover tooltip and in the
+    # compact stage detail selector below the charts.
+    short_next = {
+        "1. Build": "Review lists",
+        "2. Assign": "Assign work",
+        "3. Contact": "Continue packet",
+        "4. Follow Up": "Deliver signs",
+        "5. Continue": "Cultivate",
+    }
     ribbon_cells = []
     for stage, data in stage_data.items():
+        val_text = str(data.get("value", "0"))
+        try:
+            val_num = int(val_text.replace(",", ""))
+        except Exception:
+            val_num = 0
+        value_color = "#9f151c" if val_num > 0 else "#6a7482"
+        stage_label = stage.split(". ", 1)[1] if ". " in stage else stage
+        hover = f"{stage}: {data.get('purpose','')} Next: {data.get('next','')}"
         ribbon_cells.append(
-            '<div title="' + html.escape(str(data.get("purpose") or "")) + '" '
-            'style="padding:10px 12px;border-right:1px solid #d8ccbc;min-height:70px;">'
-            f'<div style="font-size:15px;font-weight:950;color:#071d3a;margin-bottom:6px;">{html.escape(stage)}</div>'
-            f'<div style="font-size:22px;font-weight:950;color:#9f151c;line-height:1;display:inline-block;margin-right:8px;">{html.escape(str(data.get("value", "")))}</div>'
-            f'<span style="font-size:12px;font-weight:850;color:#5f6b7a;">{html.escape(str(data.get("sub", "")))}</span>'
-            f'<div style="font-size:12px;font-weight:900;color:#071d3a;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Next: {html.escape(str(data.get("next", "")))}</div>'
+            '<div title="' + html.escape(hover) + '" '
+            'style="padding:8px 10px;border-right:1px solid #d8ccbc;min-height:58px;min-width:0;overflow:hidden;">'
+            f'<div style="font-size:12px;font-weight:950;color:#071d3a;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(stage_label)}</div>'
+            f'<div style="font-size:22px;font-weight:950;color:{value_color};line-height:1.05;margin:3px 0 2px 0;">{html.escape(val_text)}</div>'
+            f'<div style="font-size:11px;font-weight:900;color:#5f6b7a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(short_next.get(stage, str(data.get("sub", ""))))} →</div>'
             '</div>'
         )
     st.markdown(
         '<div class="cc-card" style="padding:0!important;margin:0 0 8px 0!important;overflow:hidden;">'
-        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;">'
+        '<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;">'
         + ''.join(ribbon_cells) + '</div></div>',
         unsafe_allow_html=True,
     )
