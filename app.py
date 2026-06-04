@@ -46,6 +46,39 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
 <style>
+
+/* C4.6.12 — Global Streamlit multiselect chip readability fix */
+div[data-baseweb="select"] span[data-baseweb="tag"] {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+}
+
+div[data-baseweb="select"] span[data-baseweb="tag"] > span {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    text-align: left !important;
+    padding-left: 0.35rem !important;
+    padding-right: 0.25rem !important;
+}
+
+div[data-baseweb="select"] div[role="listbox"],
+div[data-baseweb="select"] div[data-baseweb="select"] {
+    overflow: visible !important;
+}
+
+div[data-baseweb="select"] input {
+    min-width: 2rem !important;
+}
+
+/* keep multiselect controls from crushing selected labels */
+.stMultiSelect div[data-baseweb="select"] > div {
+    min-height: 44px !important;
+    align-items: center !important;
+}
+
 /* login/setup card */
 div[data-testid="stForm"]{background:#f8f4ea!important;border:1px solid #b9ad99!important;border-radius:16px!important;box-shadow:0 12px 28px rgba(7,29,58,.12)!important;padding:22px 26px!important;}
 /* all normal action buttons */
