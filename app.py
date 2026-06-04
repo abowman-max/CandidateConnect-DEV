@@ -47,6 +47,26 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 st.markdown("""
 <style>
 
+/* C4.6.13 — Program setup: avoid unreadable multiselect chips by using checkbox selectors */
+.cc-program-selector-box {
+    border: 1px solid rgba(130, 109, 76, 0.35);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.55);
+    padding: 0.55rem 0.75rem 0.35rem 0.75rem;
+    margin-bottom: 0.35rem;
+}
+.cc-selected-summary {
+    font-size: 0.88rem;
+    color: #5f6b7a;
+    margin-top: -0.15rem;
+    margin-bottom: 0.55rem;
+    line-height: 1.25rem;
+}
+.cc-selected-summary strong {
+    color: #061c3a;
+}
+
+
 /* C4.6.12 — Global Streamlit multiselect chip readability fix */
 div[data-baseweb="select"] span[data-baseweb="tag"] {
     max-width: 100% !important;
@@ -1560,6 +1580,36 @@ def clean_value(value) -> str:
     if s.lower() in {"", "nan", "none", "null", "(blank)"}:
         return ""
     return s
+
+
+
+def cc_checkbox_multiselect(label, options, default=None, key_prefix="cc_multi", columns=2):
+    """Readable checkbox replacement for Streamlit multiselect chips."""
+    default = set(default or [])
+    options = list(options or [])
+    st.markdown(f"<div class='cc-program-selector-box'><strong>{label}</strong></div>", unsafe_allow_html=True)
+    selected = []
+    if not options:
+        st.caption("No options available.")
+        return selected
+    cols = st.columns(max(1, min(columns, len(options))))
+    for i, opt in enumerate(options):
+        with cols[i % len(cols)]:
+            safe = clean_value(opt) if "clean_value" in globals() else str(opt).replace(" ", "_").replace("-", "_")
+            checked = st.checkbox(str(opt), value=(opt in default), key=f"{key_prefix}_{safe}_{i}")
+            if checked:
+                selected.append(opt)
+    if selected:
+        st.markdown(
+            "<div class='cc-selected-summary'><strong>Selected:</strong> "
+            + ", ".join([str(x) for x in selected])
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div class='cc-selected-summary'><strong>Selected:</strong> None</div>", unsafe_allow_html=True)
+    return selected
+
 
 
 def smart_sort_key(v):
@@ -13474,9 +13524,9 @@ div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="tag
 
                 user_col, channel_col = st.columns([1.55, 1.0])
                 with user_col:
-                    e_users = st.multiselect("Program users", user_labels, default=current_user_labels, key=f"pm_c46_edit_users_{pid}")
+                    e_users = cc_checkbox_multiselect("Program users", user_labels, default=current_user_labels, key_prefix="program_users_setup", columns=1)
                 with channel_col:
-                    e_channels = st.multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key=f"pm_c46_edit_channels_{pid}")
+                    e_channels = cc_checkbox_multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key_prefix="program_channels_setup", columns=1)
 
                 e_notes = st.text_area("Notes", value=clean_value(current.get("notes")), height=70, key=f"pm_c46_edit_notes_{pid}")
                 save_overview = st.form_submit_button("Save Program Setup", type="primary")
@@ -13513,7 +13563,7 @@ div[data-testid="stForm"]:has(input[id*="pm_c46_edit_name_"]) [data-baseweb="tag
                 goal = st.text_input("Goal", placeholder="Persuade high-priority precinct voters", key=f"pm_c46_goal_{campaign_id}")
             with b:
                 status = st.selectbox("Status", status_options, index=status_options.index("Planning") if "Planning" in status_options else 0, key=f"pm_c46_status_{campaign_id}")
-                channels = st.multiselect("Channels", channel_options, default=["Door-to-Door"], key=f"pm_c46_channels_{campaign_id}")
+                channels = cc_checkbox_multiselect("Channels", channel_options, default=["Door-to-Door"], key_prefix="program_channels_setup", columns=1)
                 assigned_users = st.multiselect("Program users", user_labels, key=f"pm_c46_users_{campaign_id}")
             with c:
                 start_date = st.text_input("Start date", placeholder="2026-06-01", key=f"pm_c46_start_{campaign_id}")
