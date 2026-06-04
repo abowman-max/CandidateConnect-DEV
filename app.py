@@ -12047,27 +12047,26 @@ def _c46_workflow_stage_card(title: str, value: str, sub: str, active: bool = Fa
 def _c46_stage_snapshot_html(stage: str, data: dict) -> str:
     items = data.get("items") or []
     metric_html = ''.join(
-        '<div style="padding:6px 8px;border-radius:10px;background:#f6efe3;border:1px solid #d5c7b4;">'
-        f'<div style="font-size:11px;font-weight:900;color:#5f6b7a;">{html.escape(str(label))}</div>'
-        f'<div style="font-size:20px;font-weight:950;color:#071d3a;line-height:1.15;">{html.escape(str(value))}</div>'
+        '<div style="padding:5px 8px;border-radius:9px;background:#f6efe3;border:1px solid #d5c7b4;min-height:48px;">'
+        f'<div style="font-size:10px;font-weight:900;color:#5f6b7a;line-height:1.05;">{html.escape(str(label))}</div>'
+        f'<div style="font-size:18px;font-weight:950;color:#071d3a;line-height:1.1;margin-top:2px;">{html.escape(str(value))}</div>'
         '</div>'
         for label, value in items[:4]
     )
     return (
-        '<div class="cc-card" style="padding:10px 12px!important;margin:0 0 10px 0!important;">'
-        '<div style="display:grid;grid-template-columns:1.2fr 2fr 1.1fr;gap:12px;align-items:center;">'
+        '<div class="cc-card" style="padding:8px 10px!important;margin:0 0 8px 0!important;">'
+        '<div style="display:grid;grid-template-columns:1.2fr 2fr 1.1fr;gap:10px;align-items:center;">'
         '<div>'
-        f'<div style="font-size:18px;font-weight:950;color:#071d3a;">{html.escape(stage)}</div>'
-        f'<div style="font-size:12px;font-weight:850;color:#5f6b7a;line-height:1.25;">{html.escape(str(data.get("purpose") or ""))}</div>'
+        f'<div style="font-size:17px;font-weight:950;color:#071d3a;line-height:1.1;">{html.escape(stage)}</div>'
+        f'<div style="font-size:11px;font-weight:850;color:#5f6b7a;line-height:1.2;margin-top:3px;">{html.escape(str(data.get("purpose") or ""))}</div>'
         '</div>'
-        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;">{metric_html}</div>'
-        '<div>'
-        '<div style="font-size:11px;font-weight:950;color:#5f6b7a;text-transform:uppercase;letter-spacing:.04em;">Next best action</div>'
-        f'<div style="font-size:14px;font-weight:950;color:#9f151c;line-height:1.25;">{html.escape(str(data.get("next") or ""))}</div>'
+        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">{metric_html}</div>'
+        '<div style="border-left:1px solid #d8ccbc;padding-left:10px;">'
+        '<div style="font-size:10px;font-weight:950;color:#5f6b7a;text-transform:uppercase;letter-spacing:.04em;line-height:1.1;">Next best action</div>'
+        f'<div style="font-size:13px;font-weight:950;color:#9f151c;line-height:1.22;margin-top:3px;">{html.escape(str(data.get("next") or ""))}</div>'
         '</div>'
         '</div></div>'
     )
-
 
 def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") -> None:
     st.markdown("### Grassroots Command Center")
@@ -12177,40 +12176,13 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         },
     }
 
-    # Compact clickable workflow ribbon. Keep this as a one-glance navigation strip, not
-    # another full report. The detailed explanation lives in the hover tooltip and in the
-    # compact stage detail selector below the charts.
-    short_next = {
-        "1. Build": "Review lists",
-        "2. Assign": "Assign work",
-        "3. Contact": "Continue packet",
-        "4. Follow Up": "Deliver signs",
-        "5. Continue": "Cultivate",
-    }
-    ribbon_cells = []
-    for stage, data in stage_data.items():
-        val_text = str(data.get("value", "0"))
-        try:
-            val_num = int(val_text.replace(",", ""))
-        except Exception:
-            val_num = 0
-        value_color = "#9f151c" if val_num > 0 else "#6a7482"
-        stage_label = stage.split(". ", 1)[1] if ". " in stage else stage
-        hover = f"{stage}: {data.get('purpose','')} Next: {data.get('next','')}"
-        ribbon_cells.append(
-            '<div title="' + html.escape(hover) + '" '
-            'style="padding:8px 10px;border-right:1px solid #d8ccbc;min-height:58px;min-width:0;overflow:hidden;">'
-            f'<div style="font-size:12px;font-weight:950;color:#071d3a;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(stage_label)}</div>'
-            f'<div style="font-size:22px;font-weight:950;color:{value_color};line-height:1.05;margin:3px 0 2px 0;">{html.escape(val_text)}</div>'
-            f'<div style="font-size:11px;font-weight:900;color:#5f6b7a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(short_next.get(stage, str(data.get("sub", ""))))} →</div>'
-            '</div>'
-        )
-    st.markdown(
-        '<div class="cc-card" style="padding:0!important;margin:0 0 8px 0!important;overflow:hidden;">'
-        '<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;">'
-        + ''.join(ribbon_cells) + '</div></div>',
-        unsafe_allow_html=True,
-    )
+    # Workflow command ribbon: dashboard-level workflow navigation plus the compact
+    # snapshot for the selected stage. This replaces the old static ribbon and
+    # removes the duplicate workflow selector farther down the page.
+    workflow_tabs = st.tabs(list(stage_data.keys()))
+    for tab, (stage, data) in zip(workflow_tabs, stage_data.items()):
+        with tab:
+            st.markdown(_c46_stage_snapshot_html(stage, data), unsafe_allow_html=True)
 
     # Top of page: answer "where are we, what happened, what do I do next" without scrolling.
     top_left, top_mid, top_right = st.columns([1.1, 1.1, 1.35])
@@ -12242,12 +12214,6 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         + '</div>',
         unsafe_allow_html=True,
     )
-
-    workflow_tabs = st.tabs(list(stage_data.keys()))
-    for tab, (stage, data) in zip(workflow_tabs, stage_data.items()):
-        with tab:
-            st.markdown(_c46_stage_snapshot_html(stage, data), unsafe_allow_html=True)
-            st.caption(f"Use the {data.get('target', 'Programs')} tab above for the full workspace.")
 
     action_rows = [
         {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue; filter Yard Sign."},
