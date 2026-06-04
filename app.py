@@ -12032,6 +12032,43 @@ def _c46_html_table(rows: list[dict], columns: list[str], title: str | None = No
     )
 
 
+def _c46_workflow_stage_card(title: str, value: str, sub: str, active: bool = False) -> str:
+    border = "#9f151c" if active else "#cdbfae"
+    bg = "#fff8ed" if active else "#f6efe3"
+    return (
+        f'<div class="cc-card" style="padding:8px 10px!important;margin-bottom:4px!important;min-height:82px!important;border:2px solid {border}!important;background:{bg}!important;">'
+        f'<div style="font-size:14px;font-weight:950;color:#071d3a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(title)}</div>'
+        f'<div style="font-size:24px;font-weight:950;color:#9f151c;line-height:1.1;margin:3px 0;">{html.escape(str(value))}</div>'
+        f'<div style="font-size:11px;font-weight:850;color:#5f6b7a;line-height:1.2;">{html.escape(sub)}</div>'
+        '</div>'
+    )
+
+
+def _c46_stage_snapshot_html(stage: str, data: dict) -> str:
+    items = data.get("items") or []
+    metric_html = ''.join(
+        '<div style="padding:6px 8px;border-radius:10px;background:#f6efe3;border:1px solid #d5c7b4;">'
+        f'<div style="font-size:11px;font-weight:900;color:#5f6b7a;">{html.escape(str(label))}</div>'
+        f'<div style="font-size:20px;font-weight:950;color:#071d3a;line-height:1.15;">{html.escape(str(value))}</div>'
+        '</div>'
+        for label, value in items[:4]
+    )
+    return (
+        '<div class="cc-card" style="padding:10px 12px!important;margin:0 0 10px 0!important;">'
+        '<div style="display:grid;grid-template-columns:1.2fr 2fr 1.1fr;gap:12px;align-items:center;">'
+        '<div>'
+        f'<div style="font-size:18px;font-weight:950;color:#071d3a;">{html.escape(stage)}</div>'
+        f'<div style="font-size:12px;font-weight:850;color:#5f6b7a;line-height:1.25;">{html.escape(str(data.get("purpose") or ""))}</div>'
+        '</div>'
+        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;">{metric_html}</div>'
+        '<div>'
+        '<div style="font-size:11px;font-weight:950;color:#5f6b7a;text-transform:uppercase;letter-spacing:.04em;">Next best action</div>'
+        f'<div style="font-size:14px;font-weight:950;color:#9f151c;line-height:1.25;">{html.escape(str(data.get("next") or ""))}</div>'
+        '</div>'
+        '</div></div>'
+    )
+
+
 def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") -> None:
     st.markdown("### Grassroots Command Center")
     st.caption("One-glance status for the campaign contact cycle: plan → contact → record → follow up → continue.")
@@ -12124,17 +12161,73 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         unsafe_allow_html=True,
     )
 
-    cycle_html = (
-        '<div class="cc-card" style="padding:9px 12px!important;margin-bottom:10px!important;">'
-        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch;">'
-        '<div><b>1. Build</b><br><span style="font-size:12px;color:#5f6b7a;">Program + list</span></div>'
-        '<div><b>2. Assign</b><br><span style="font-size:12px;color:#5f6b7a;">Team + turf</span></div>'
-        '<div><b>3. Contact</b><br><span style="font-size:12px;color:#5f6b7a;">Doors / calls / texts</span></div>'
-        '<div><b>4. Follow up</b><br><span style="font-size:12px;color:#5f6b7a;">Signs / cards / MB</span></div>'
-        '<div><b>5. Continue</b><br><span style="font-size:12px;color:#5f6b7a;">Next conversation</span></div>'
-        '</div></div>'
-    )
-    st.markdown(cycle_html, unsafe_allow_html=True)
+    stage_data = {
+        "1. Build": {
+            "value": f"{len(active_programs):,}",
+            "sub": "active programs",
+            "purpose": "Create the contact strategy: program, universe, list, channel, and turf.",
+            "items": [("Programs", f"{len(active_programs):,}"), ("Lists", f"{len(contact_lists):,}"), ("Assigned", f"{total_voters:,}"), ("Unworked", f"{remaining_voters:,}")],
+            "next": "Create or refine the next program/list before assigning work." if not active_programs else "Review active lists and build the next contact pass.",
+            "button": "Go to Programs",
+            "target": "Programs",
+        },
+        "2. Assign": {
+            "value": f"{len(assignments):,}",
+            "sub": "active assignments",
+            "purpose": "Turn lists into work: packets, turf, team owners, and field-ready assignments.",
+            "items": [("Assignments", f"{len(assignments):,}"), ("Assigned voters", f"{total_voters:,}"), ("Completed", f"{completed_voters:,}"), ("Remaining", f"{remaining_voters:,}")],
+            "next": "Assign remaining voters or rebalance incomplete packets.",
+            "button": "Manage Assignments",
+            "target": "Programs",
+        },
+        "3. Contact": {
+            "value": f"{doors_attempted:,}",
+            "sub": "doors / contacts",
+            "purpose": "Execute the field plan through doors now, and later calls, texts, mail, and postcards.",
+            "items": [("Contacts", f"{doors_attempted:,}"), ("Conversations", f"{conversations:,}"), ("Favorable", f"{int(result_counts.get('Favorable', 0)):,}"), ("Not home", f"{int(result_counts.get('Not Home', 0)):,}")],
+            "next": "Continue the current assignment or open the next packet in the field app.",
+            "button": "Review Field Results",
+            "target": "Reporting",
+        },
+        "4. Follow Up": {
+            "value": f"{len(queue):,}",
+            "sub": "open follow-ups",
+            "purpose": "Convert conversations into action: signs, thank-you cards, MB help, volunteers, and revisits.",
+            "items": [("Yard signs", f"{int(queue_counts.get('Yard Sign', 0)):,}"), ("Thank-you", f"{int(queue_counts.get('Thank-You Card', 0)):,}"), ("MB", f"{int(queue_counts.get('Mail Ballot Follow-Up', 0)):,}"), ("Revisit", f"{int(queue_counts.get('Revisit Not Home', 0)):,}")],
+            "next": str(next_action.get("title") or "Work the highest-priority follow-up queue."),
+            "button": "Open Follow-Up Queue",
+            "target": "Follow-Up Queue",
+        },
+        "5. Continue": {
+            "value": f"{int(result_counts.get('Favorable', 0) + queue_counts.get('Volunteer Follow-Up', 0)):,}",
+            "sub": "relationships",
+            "purpose": "Keep the conversation going: supporters, volunteers, repeat contacts, events, and future asks.",
+            "items": [("Supporters", f"{int(result_counts.get('Favorable', 0)):,}"), ("Volunteers", f"{int(queue_counts.get('Volunteer Follow-Up', 0)):,}"), ("Yard signs", f"{int(queue_counts.get('Yard Sign', 0)):,}"), ("Notes", f"{len(_c46_recent_notes_rows(mobile.get('rows') or [], limit=99)):,}")],
+            "next": "Turn favorable contacts into visible support, volunteers, donors, hosts, or repeat conversations.",
+            "button": "Open Recent Notes",
+            "target": "Dashboard",
+        },
+    }
+
+    stage_key = f"c46_stage_{panel_id}"
+    if stage_key not in st.session_state:
+        st.session_state[stage_key] = "4. Follow Up" if len(queue) else ("3. Contact" if doors_attempted else "1. Build")
+
+    stage_cols = st.columns(5)
+    for idx, stage in enumerate(stage_data.keys()):
+        with stage_cols[idx]:
+            active = st.session_state.get(stage_key) == stage
+            data = stage_data[stage]
+            st.markdown(_c46_workflow_stage_card(stage, data["value"], data["sub"], active=active), unsafe_allow_html=True)
+            if st.button("Open", key=f"c46_stage_btn_{panel_id}_{idx}", width="stretch"):
+                st.session_state[stage_key] = stage
+                st.rerun()
+
+    selected_stage = st.session_state.get(stage_key) or "1. Build"
+    selected_data = stage_data.get(selected_stage) or stage_data["1. Build"]
+    st.markdown(_c46_stage_snapshot_html(selected_stage, selected_data), unsafe_allow_html=True)
+    if st.button(selected_data.get("button", "Open"), key=f"c46_stage_action_{panel_id}", width="stretch"):
+        st.info(f"Use the **{selected_data.get('target', 'Programs')}** tab above.")
 
     action_rows = [
         {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue; filter Yard Sign."},
