@@ -11688,12 +11688,104 @@ def _result_label_to_key(value) -> str:
     return clean_value(value) or "Other"
 
 
+def _mobile_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    v = clean_value(value).strip().lower()
+    return v in {"1", "true", "yes", "y", "checked", "x", "requested", "needed", "need", "interested"}
+
+
+def _mobile_result_voter_label(row: dict) -> str:
+    return (
+        clean_value(row.get("voter_name"))
+        or clean_value(row.get("FullName"))
+        or clean_value(row.get("full_name"))
+        or clean_value(row.get("name"))
+        or clean_value(row.get("voter_id"))
+        or clean_value(row.get("PAID"))
+    )
+
+
+def _build_follow_up_queue_c46(rows: list[dict]) -> list[dict]:
+    """Derive action-oriented follow-up work from synced mobile results.
+
+    This intentionally does not write back to voter records yet. It creates the C4.6
+    queue layer that reporting and future assignment builders can consume.
+    """
+    queue = []
+    seen = set()
+
+    def add(row: dict, queue_type: str, priority: str, action: str) -> None:
+        voter_id = clean_value(row.get("voter_id") or row.get("PAID") or row.get("VoterID"))
+        assignment_id = clean_value(row.get("assignment_id"))
+        created = clean_value(row.get("created_at") or row.get("synced_at") or row.get("updated_at"))
+        dedupe_key = (voter_id, assignment_id, queue_type, created[:19])
+        if dedupe_key in seen:
+            return
+        seen.add(dedupe_key)
+        queue.append({
+            "Priority": priority,
+            "Follow-Up Type": queue_type,
+            "Recommended Action": action,
+            "Voter": _mobile_result_voter_label(row),
+            "Voter ID": voter_id,
+            "Address": clean_value(row.get("household_address") or row.get("address") or row.get("Address")),
+            "Street": clean_value(row.get("street") or row.get("Street Name") or row.get("street_name")),
+            "Assignment": clean_value(row.get("assignment_name") or assignment_id),
+            "Field User": clean_value(row.get("username") or row.get("field_user") or row.get("user")),
+            "Result": _result_label_to_key(row.get("result")),
+            "Notes": clean_value(row.get("notes")),
+            "Created": created[:19],
+        })
+
+    for row in rows or []:
+        result = _result_label_to_key(row.get("result"))
+        result_l = result.lower()
+        if _mobile_truthy(row.get("yard_sign")) or "yard" in result_l:
+            add(row, "Yard Sign", "High", "Deliver yard sign and mark complete after placement.")
+        if result == "Favorable":
+            add(row, "Thank-You Card", "Medium", "Send thank-you postcard or candidate note.")
+        if _mobile_truthy(row.get("volunteer_interest")) or _mobile_truthy(row.get("volunteer")):
+            add(row, "Volunteer Follow-Up", "High", "Call/text within 24–48 hours and invite into campaign organization.")
+        if _mobile_truthy(row.get("mail_ballot_interest")) or _mobile_truthy(row.get("mb_interest")) or _mobile_truthy(row.get("mb_follow_up")):
+            add(row, "Mail Ballot Follow-Up", "High", "Send MB application/help instructions and track next contact.")
+        if _mobile_truthy(row.get("follow_up")) or _mobile_truthy(row.get("needs_follow_up")):
+            add(row, "General Follow-Up", "High", "Review notes and assign next best contact.")
+        if result == "Not Home":
+            add(row, "Revisit Not Home", "Medium", "Revisit at a different time or move to phone/mail follow-up.")
+    priority_order = {"High": 0, "Medium": 1, "Low": 2}
+    queue.sort(key=lambda r: (priority_order.get(r.get("Priority"), 9), clean_value(r.get("Created"))), reverse=False)
+    return queue
+
+
+def render_follow_up_queue_c46(rows: list[dict], panel_id: str = "dashboard") -> None:
+    synced = [r for r in rows or [] if clean_value(r.get("_bucket")) == "synced"] or (rows or [])
+    queue = _build_follow_up_queue_c46(synced)
+    st.markdown("##### Follow-Up Queue")
+    st.caption("Action queue generated automatically from mobile field results: yard signs, thank-you cards, volunteer follow-up, mail-ballot follow-up, and not-home revisits.")
+    if not queue:
+        st.info("No follow-up items have been triggered by synced field results yet.")
+        return
+    qdf = pd.DataFrame(queue)
+    q1, q2, q3, q4 = st.columns(4)
+    with q1: st.metric("Total Follow-Ups", f"{len(qdf):,}")
+    with q2: st.metric("High Priority", f"{int((qdf['Priority'] == 'High').sum()):,}")
+    with q3: st.metric("Yard Signs", f"{int((qdf['Follow-Up Type'] == 'Yard Sign').sum()):,}")
+    with q4: st.metric("Not-Home Revisits", f"{int((qdf['Follow-Up Type'] == 'Revisit Not Home').sum()):,}")
+    st.dataframe(qdf, width="stretch", hide_index=True, key=f"c46_follow_up_queue_{panel_id}")
+    st.download_button(
+        "Download Follow-Up Queue CSV",
+        data=qdf.to_csv(index=False).encode("utf-8"),
+        file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        key=f"c46_follow_up_queue_download_{panel_id}",
+    )
+
+
 def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboard') -> None:
     """Show field-app synced results in the web app. No voter-record writeback yet."""
     st.markdown("#### Field App Sync Results")
-    st.caption("C4.6 reads synced field-app results from R2. This does not update voter records yet.")
-
-    st.caption("Field results auto-refresh every 15 seconds. Use browser refresh if needed.")
+    st.caption("C4.6 reads synced field-app results from R2 automatically. This does not update voter records yet.")
 
     store = load_mobile_results_store(campaign_id)
     rows = _mobile_result_rows(store)
@@ -11721,10 +11813,10 @@ def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboar
         key = _result_label_to_key(r.get("result"))
         if key in result_counts:
             result_counts[key] += 1
-        yard += 1 if bool(r.get("yard_sign")) else 0
-        follow += 1 if bool(r.get("follow_up") or r.get("needs_follow_up")) else 0
-        mb += 1 if bool(r.get("mail_ballot_interest") or r.get("mb_interest")) else 0
-        volunteer += 1 if bool(r.get("volunteer_interest")) else 0
+        yard += 1 if _mobile_truthy(r.get("yard_sign")) else 0
+        follow += 1 if (_mobile_truthy(r.get("follow_up")) or _mobile_truthy(r.get("needs_follow_up"))) else 0
+        mb += 1 if (_mobile_truthy(r.get("mail_ballot_interest")) or _mobile_truthy(r.get("mb_interest"))) else 0
+        volunteer += 1 if _mobile_truthy(r.get("volunteer_interest")) else 0
 
     r1, r2, r3, r4 = st.columns(4)
     with r1: st.metric("Favorable", f"{result_counts.get('Favorable', 0):,}")
@@ -11745,25 +11837,26 @@ def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboar
             display_rows.append({
                 "Status": clean_value(r.get("_bucket")).title(),
                 "Result": _result_label_to_key(r.get("result")),
-                "Voter": clean_value(r.get("voter_name")) or clean_value(r.get("voter_id")),
+                "Voter": _mobile_result_voter_label(r),
                 "Address": clean_value(r.get("household_address")),
                 "Assignment": clean_value(r.get("assignment_name")),
                 "Field User": clean_value(r.get("username")),
-                "Yard Sign": "Y" if r.get("yard_sign") else "",
-                "Follow Up": "Y" if (r.get("follow_up") or r.get("needs_follow_up")) else "",
-                "MB Interest": "Y" if (r.get("mail_ballot_interest") or r.get("mb_interest")) else "",
-                "Volunteer": "Y" if r.get("volunteer_interest") else "",
+                "Yard Sign": "Y" if _mobile_truthy(r.get("yard_sign")) else "",
+                "Follow Up": "Y" if (_mobile_truthy(r.get("follow_up")) or _mobile_truthy(r.get("needs_follow_up"))) else "",
+                "MB Interest": "Y" if (_mobile_truthy(r.get("mail_ballot_interest")) or _mobile_truthy(r.get("mb_interest"))) else "",
+                "Volunteer": "Y" if _mobile_truthy(r.get("volunteer_interest")) else "",
                 "Notes": clean_value(r.get("notes")),
                 "Created": clean_value(r.get("created_at"))[:19],
             })
         if display_rows:
             st.markdown("##### Recent Field Results")
-            st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True, key=f"c46_recent_field_results_{panel_id}")
+            render_follow_up_queue_c46(rows, panel_id=panel_id)
     except Exception as exc:
         st.warning(f"Could not render field results table: {exc}")
 
 
-def render_outreach_dashboard_v1(campaign_id: str) -> None:
+def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") -> None:
     st.markdown("### Outreach Dashboard")
     st.caption("High-level status for active voter contact programs, assignments, and field progress. Builders live on the other outreach pages.")
 
@@ -11823,7 +11916,7 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
     with r4: st.metric("Yard Sign", f"{contact_results.get('YS',0):,}")
     with r5: st.metric("Not Home", f"{contact_results.get('NH',0):,}")
 
-    render_mobile_results_reader_c46(campaign_id, panel_id='dashboard')
+    render_mobile_results_reader_c46(campaign_id, panel_id=panel_id)
 
     st.markdown("#### Program Progress")
     if active_programs:
@@ -11852,7 +11945,7 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
                 "Remaining": max(tv-cv, 0),
                 "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
             })
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, key=f"outreach_program_progress_{panel_id}")
     else:
         st.info("No active outreach programs yet. Use the Programs page to create or activate your first outreach program.")
 
@@ -11890,7 +11983,7 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
                 "Remaining": max(tv-cv, 0),
                 "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
             })
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, key=f"outreach_assignment_status_{panel_id}")
     else:
         st.caption("No active-program assignments yet. Legacy/orphan assignments are hidden from this dashboard and remain under Legacy Setup until migrated or deleted.")
 
@@ -13102,17 +13195,22 @@ def render_voter_outreach_workspace():
     st.markdown("## Voter Outreach")
     st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results now live inside each program.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
-    tab_dash, tab_programs, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Reporting", "Legacy Setup"])
+    tab_dash, tab_programs, tab_followups, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Follow-Up Queue", "Reporting", "Legacy Setup"])
     with tab_dash:
-        render_outreach_dashboard_v1(campaign_id)
+        render_outreach_dashboard_v1(campaign_id, panel_id="dashboard")
     with tab_programs:
         render_program_manager_a2(campaign_id)
+    with tab_followups:
+        st.markdown("### Follow-Up Queue")
+        store = load_mobile_results_store(campaign_id)
+        render_follow_up_queue_c46(_mobile_result_rows(store), panel_id="workspace")
     with tab_reporting:
         st.markdown("### Campaign Reporting")
         st.caption("Campaign-wide outreach reporting across active programs. Program-specific results stay inside each Program workspace.")
-        render_outreach_dashboard_v1(campaign_id)
+        render_outreach_dashboard_v1(campaign_id, panel_id="reporting")
     with tab_legacy:
         st.markdown("### Legacy Setup")
+        st.warning("Use only for older outreach records. The simplified workflow is Dashboard → Programs → Follow-Up Queue.")
         st.caption("Temporary holding area while old contact-program/list/assignment tools are migrated into Program workspaces.")
         legacy_programs, legacy_lists, legacy_assign = st.tabs(["Contact Programs", "Contact Lists", "Assignments"] )
         with legacy_programs:
