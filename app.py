@@ -12129,37 +12129,6 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         ("Revisit", int(queue_counts.get("Revisit Not Home", 0))),
     ]
 
-    # Top of page: answer "where are we, what happened, what do I do next" without scrolling.
-    top_left, top_mid, top_right = st.columns([1.1, 1.1, 1.35])
-    with top_left:
-        st.markdown(_c46_hbar_chart("Contact Results", contact_rows), unsafe_allow_html=True)
-    with top_mid:
-        st.markdown(_c46_hbar_chart("Follow-Up Pipeline", follow_rows), unsafe_allow_html=True)
-    with top_right:
-        st.markdown(
-            '<div class="cc-card" style="padding:12px!important;margin-bottom:8px!important;min-height:198px!important;">'
-            '<div style="font-size:17px;font-weight:950;color:#071d3a;margin-bottom:4px;">Recommended Next Step</div>'
-            f'<div style="font-size:19px;font-weight:950;color:#9f151c;margin-bottom:6px;">{html.escape(str(next_action["title"]))}</div>'
-            f'<div style="font-size:13px;line-height:1.35;color:#071d3a;margin-bottom:8px;">{html.escape(str(next_action["why"]))}</div>'
-            f'<div style="display:inline-block;border:1px solid #9f151c;border-radius:999px;padding:5px 10px;background:#f3eadc;color:#071d3a;font-weight:900;font-size:12px;">Go next: {html.escape(str(next_action["target"]))}</div>'
-            f'<div style="margin-top:10px;font-size:12px;color:#5f6b7a;font-weight:850;">Immediate items: {immediate_items:,} &nbsp; | &nbsp; Open follow-ups: {len(queue):,}</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(f"Use the {next_action['target']} tab above when ready.")
-
-    st.markdown(
-        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:2px 0 8px 0;">'
-        + _c46_compact_metric("Active Programs", f"{len(active_programs):,}")
-        + _c46_compact_metric("Assigned Voters", f"{total_voters:,}")
-        + _c46_compact_metric("Doors / Contacts", f"{doors_attempted:,}")
-        + _c46_compact_metric("Conversations", f"{conversations:,}")
-        + _c46_compact_metric("Open Follow-Ups", f"{len(queue):,}")
-        + _c46_compact_metric("Progress", f"{pct_complete:.1f}%")
-        + '</div>',
-        unsafe_allow_html=True,
-    )
-
     stage_data = {
         "1. Build": {
             "value": f"{len(active_programs):,}",
@@ -12225,6 +12194,37 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         '<div class="cc-card" style="padding:0!important;margin:0 0 8px 0!important;overflow:hidden;">'
         '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;">'
         + ''.join(ribbon_cells) + '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Top of page: answer "where are we, what happened, what do I do next" without scrolling.
+    top_left, top_mid, top_right = st.columns([1.1, 1.1, 1.35])
+    with top_left:
+        st.markdown(_c46_hbar_chart("Contact Results", contact_rows), unsafe_allow_html=True)
+    with top_mid:
+        st.markdown(_c46_hbar_chart("Follow-Up Pipeline", follow_rows), unsafe_allow_html=True)
+    with top_right:
+        st.markdown(
+            '<div class="cc-card" style="padding:12px!important;margin-bottom:8px!important;min-height:198px!important;">'
+            '<div style="font-size:17px;font-weight:950;color:#071d3a;margin-bottom:4px;">Recommended Next Step</div>'
+            f'<div style="font-size:19px;font-weight:950;color:#9f151c;margin-bottom:6px;">{html.escape(str(next_action["title"]))}</div>'
+            f'<div style="font-size:13px;line-height:1.35;color:#071d3a;margin-bottom:8px;">{html.escape(str(next_action["why"]))}</div>'
+            f'<div style="display:inline-block;border:1px solid #9f151c;border-radius:999px;padding:5px 10px;background:#f3eadc;color:#071d3a;font-weight:900;font-size:12px;">Go next: {html.escape(str(next_action["target"]))}</div>'
+            f'<div style="margin-top:10px;font-size:12px;color:#5f6b7a;font-weight:850;">Immediate items: {immediate_items:,} &nbsp; | &nbsp; Open follow-ups: {len(queue):,}</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Use the {next_action['target']} tab above when ready.")
+
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:2px 0 8px 0;">'
+        + _c46_compact_metric("Active Programs", f"{len(active_programs):,}")
+        + _c46_compact_metric("Assigned Voters", f"{total_voters:,}")
+        + _c46_compact_metric("Doors / Contacts", f"{doors_attempted:,}")
+        + _c46_compact_metric("Conversations", f"{conversations:,}")
+        + _c46_compact_metric("Open Follow-Ups", f"{len(queue):,}")
+        + _c46_compact_metric("Progress", f"{pct_complete:.1f}%")
+        + '</div>',
         unsafe_allow_html=True,
     )
 
@@ -13507,6 +13507,35 @@ def render_voter_outreach_workspace():
     st.markdown("## Grassroots Center")
     st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results live inside each program.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
+    # Make the page-level navigation read as navigation tabs, visually distinct from the
+    # in-dashboard Grassroots cycle ribbon. Scoped as broadly as Streamlit allows, but
+    # still uses the Candidate Connect beige/red/navy palette.
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stTabs"] > div[role="tablist"] {
+            gap: 4px;
+            border-bottom: 2px solid #b9aa96;
+            margin-bottom: 10px;
+        }
+        div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] {
+            border: 1px solid #b9aa96 !important;
+            border-bottom: 0 !important;
+            border-radius: 10px 10px 0 0 !important;
+            background: #f8f1e6 !important;
+            padding: 8px 14px !important;
+            color: #071d3a !important;
+            font-weight: 900 !important;
+        }
+        div[data-testid="stTabs"] > div[role="tablist"] button[aria-selected="true"] {
+            background: #fffaf1 !important;
+            color: #9f151c !important;
+            border-top: 4px solid #9f151c !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     tab_dash, tab_programs, tab_followups, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Follow-Up Queue", "Reporting", "Legacy Setup"])
     with tab_dash:
         render_outreach_dashboard_v1(campaign_id, panel_id="dashboard")
