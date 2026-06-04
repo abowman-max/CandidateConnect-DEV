@@ -12146,8 +12146,7 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
             '</div>',
             unsafe_allow_html=True,
         )
-        if st.button(next_action["button"], key=f"c46_next_action_{panel_id}", width="stretch"):
-            st.info(f"Use the **{next_action['target']}** tab above.")
+        st.caption(f"Use the {next_action['target']} tab above when ready.")
 
     st.markdown(
         '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:2px 0 8px 0;">'
@@ -12209,25 +12208,31 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         },
     }
 
-    stage_key = f"c46_stage_{panel_id}"
-    if stage_key not in st.session_state:
-        st.session_state[stage_key] = "4. Follow Up" if len(queue) else ("3. Contact" if doors_attempted else "1. Build")
+    # Compact clickable workflow: keep the ribbon as the visual guide, then use text tabs
+    # instead of red action buttons so the page stays clean and compact.
+    ribbon_cells = []
+    for stage, data in stage_data.items():
+        ribbon_cells.append(
+            '<div title="' + html.escape(str(data.get("purpose") or "")) + '" '
+            'style="padding:10px 12px;border-right:1px solid #d8ccbc;min-height:70px;">'
+            f'<div style="font-size:15px;font-weight:950;color:#071d3a;margin-bottom:6px;">{html.escape(stage)}</div>'
+            f'<div style="font-size:22px;font-weight:950;color:#9f151c;line-height:1;display:inline-block;margin-right:8px;">{html.escape(str(data.get("value", "")))}</div>'
+            f'<span style="font-size:12px;font-weight:850;color:#5f6b7a;">{html.escape(str(data.get("sub", "")))}</span>'
+            f'<div style="font-size:12px;font-weight:900;color:#071d3a;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Next: {html.escape(str(data.get("next", "")))}</div>'
+            '</div>'
+        )
+    st.markdown(
+        '<div class="cc-card" style="padding:0!important;margin:0 0 8px 0!important;overflow:hidden;">'
+        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;">'
+        + ''.join(ribbon_cells) + '</div></div>',
+        unsafe_allow_html=True,
+    )
 
-    stage_cols = st.columns(5)
-    for idx, stage in enumerate(stage_data.keys()):
-        with stage_cols[idx]:
-            active = st.session_state.get(stage_key) == stage
-            data = stage_data[stage]
-            st.markdown(_c46_workflow_stage_card(stage, data["value"], data["sub"], active=active), unsafe_allow_html=True)
-            if st.button("Open", key=f"c46_stage_btn_{panel_id}_{idx}", width="stretch"):
-                st.session_state[stage_key] = stage
-                st.rerun()
-
-    selected_stage = st.session_state.get(stage_key) or "1. Build"
-    selected_data = stage_data.get(selected_stage) or stage_data["1. Build"]
-    st.markdown(_c46_stage_snapshot_html(selected_stage, selected_data), unsafe_allow_html=True)
-    if st.button(selected_data.get("button", "Open"), key=f"c46_stage_action_{panel_id}", width="stretch"):
-        st.info(f"Use the **{selected_data.get('target', 'Programs')}** tab above.")
+    workflow_tabs = st.tabs(list(stage_data.keys()))
+    for tab, (stage, data) in zip(workflow_tabs, stage_data.items()):
+        with tab:
+            st.markdown(_c46_stage_snapshot_html(stage, data), unsafe_allow_html=True)
+            st.caption(f"Use the {data.get('target', 'Programs')} tab above for the full workspace.")
 
     action_rows = [
         {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue; filter Yard Sign."},
@@ -12243,14 +12248,15 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
     with lower_left:
         st.markdown(_c46_html_table(visible_actions, ["Priority", "Action", "Open", "Next Step"], "Priority Action Queue", max_rows=6), unsafe_allow_html=True)
         if queue:
-            qdf = pd.DataFrame(queue)
-            st.download_button(
-                "Download Follow-Up Queue CSV",
-                data=qdf.to_csv(index=False).encode("utf-8"),
-                file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                key=f"c46_dashboard_follow_up_download_{panel_id}",
-            )
+            with st.expander("Download follow-up export", expanded=False):
+                qdf = pd.DataFrame(queue)
+                st.download_button(
+                    "Download Follow-Up Queue CSV",
+                    data=qdf.to_csv(index=False).encode("utf-8"),
+                    file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    key=f"c46_dashboard_follow_up_download_{panel_id}",
+                )
     with lower_right:
         recent_rows = _c46_recent_notes_rows(mobile.get("rows") or [], limit=5)
         note_cols = ["Result", "Voter", "Next Signal", "Notes"]
