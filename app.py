@@ -1584,14 +1584,42 @@ def clean_value(value) -> str:
 
 
 def cc_checkbox_multiselect(label, options, default=None, key_prefix="cc_multi", columns=2):
-    """Readable checkbox replacement for Streamlit multiselect chips."""
+    """Readable checkbox replacement for Streamlit multiselect chips with collision-proof keys."""
     default = set(default or [])
     options = list(options or [])
-    st.markdown(f"<div class='cc-program-selector-box'><strong>{label}</strong></div>", unsafe_allow_html=True)
+    import hashlib
+    # Include Streamlit run/context counter so duplicate rendered blocks do not collide.
+    instance_key = f"_cc_multi_instance_{key_prefix}_{label}"
+    st.session_state[instance_key] = st.session_state.get(instance_key, 0) + 1
+    instance_num = st.session_state[instance_key]
     selected = []
+    st.markdown(f"<div class='cc-program-selector-box'><strong>{label}</strong></div>", unsafe_allow_html=True)
     if not options:
         st.caption("No options available.")
         return selected
+    cols = st.columns(max(1, min(columns, len(options))))
+    for i, opt in enumerate(options):
+        raw = str(opt)
+        digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:10]
+        with cols[i % len(cols)]:
+            checked = st.checkbox(
+                raw,
+                value=(opt in default),
+                key=f"{key_prefix}_{instance_num}_{digest}_{i}"
+            )
+            if checked:
+                selected.append(opt)
+    if selected:
+        st.markdown(
+            "<div class='cc-selected-summary'><strong>Selected:</strong> "
+            + ", ".join([str(x) for x in selected])
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div class='cc-selected-summary'><strong>Selected:</strong> None</div>", unsafe_allow_html=True)
+    return selected
+
     cols = st.columns(max(1, min(columns, len(options))))
     for i, opt in enumerate(options):
         with cols[i % len(cols)]:
