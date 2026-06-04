@@ -1,5 +1,5 @@
 # Candidate Connect LIVE
-# C4.6 WEB MOBILE RESULTS READER — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
+# C4.6.1 WEB MOBILE RESULTS READER - duplicate key fix — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 # v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
@@ -11688,12 +11688,12 @@ def _result_label_to_key(value) -> str:
     return clean_value(value) or "Other"
 
 
-def render_mobile_results_reader_c46(campaign_id: str) -> None:
+def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboard') -> None:
     """Show field-app synced results in the web app. No voter-record writeback yet."""
     st.markdown("#### Field App Sync Results")
     st.caption("C4.6 reads synced field-app results from R2. This does not update voter records yet.")
 
-    if st.button("Refresh Field Results", key=f"refresh_mobile_results_c46_{_ops_slug(campaign_id)}"):
+    if st.button("Refresh Field Results", key=f"refresh_mobile_results_c46_{panel_id}_{_ops_slug(campaign_id)}"):
         try:
             load_mobile_results_store.clear()
         except Exception:
@@ -11828,7 +11828,7 @@ def render_outreach_dashboard_v1(campaign_id: str) -> None:
     with r4: st.metric("Yard Sign", f"{contact_results.get('YS',0):,}")
     with r5: st.metric("Not Home", f"{contact_results.get('NH',0):,}")
 
-    render_mobile_results_reader_c46(campaign_id)
+    render_mobile_results_reader_c46(campaign_id, panel_id='dashboard')
 
     st.markdown("#### Program Progress")
     if active_programs:
