@@ -1704,6 +1704,87 @@ def cc_mobile_hierarchy_from_voters(voters):
     return precincts
 
 
+
+
+# C4.6.18 — strict active work-item export for mobile
+def cc_c46_is_visible_active_work_item(item):
+    if not isinstance(item, dict):
+        return False
+    status = clean_value(item.get("status")).strip().lower()
+    if status in {"deleted", "removed", "archived", "inactive", "cancelled", "canceled"}:
+        return False
+    for k in ["deleted", "is_deleted", "_deleted", "archived", "is_archived", "remove_from_mobile"]:
+        if bool(item.get(k)):
+            return False
+    return True
+
+
+def cc_c46_active_work_items_from_store(store):
+    """
+    Return only active saved work items. This is the source of truth for mobile export.
+    The mobile package should not publish stale/deleted files left in R2.
+    """
+    if not isinstance(store, dict):
+        return []
+    possible_lists = []
+    for k in ["work_items", "assignments", "door_work_items", "saved_work_items", "packages"]:
+        if isinstance(store.get(k), list):
+            possible_lists.append(store.get(k) or [])
+    # Some stores nest work items under door_to_door or programs.
+    for k in ["door_to_door", "a3", "programs_store"]:
+        sub = store.get(k)
+        if isinstance(sub, dict):
+            for sk in ["work_items", "assignments", "saved_work_items", "packages"]:
+                if isinstance(sub.get(sk), list):
+                    possible_lists.append(sub.get(sk) or [])
+    out = []
+    seen = set()
+    for rows in possible_lists:
+        for item in rows:
+            if not cc_c46_is_visible_active_work_item(item):
+                continue
+            iid = clean_value(item.get("work_item_id") or item.get("assignment_id") or item.get("package_id") or item.get("id"))
+            if not iid:
+                iid = clean_value(item.get("name") or item.get("title")) + "|" + clean_value(item.get("assigned_to") or item.get("assignee")) + "|" + clean_value(item.get("street_area") or item.get("area"))
+            if iid in seen:
+                continue
+            seen.add(iid)
+            out.append(item)
+    return out
+
+
+def cc_c46_force_precinct_first_mobile(item, voters=None):
+    """
+    Force mobile to show Assignment -> Precincts -> Streets for any whole-universe
+    or multi-precinct assignment.
+    """
+    if not isinstance(item, dict):
+        return item
+    item = dict(item)
+    voters = voters if voters is not None else item.get("voters", [])
+    try:
+        hierarchy = item.get("precincts") or item.get("hierarchy") or cc_mobile_hierarchy_from_voters(voters)
+    except Exception:
+        try:
+            hierarchy = cc_mobile_hierarchy_from_voters(voters)
+        except Exception:
+            hierarchy = []
+    if isinstance(hierarchy, list):
+        item["precincts"] = hierarchy
+        item["hierarchy"] = hierarchy
+        item["precinct_count"] = len(hierarchy)
+        item["street_count"] = sum(int(p.get("street_count") or len(p.get("streets") or [])) for p in hierarchy if isinstance(p, dict))
+        item["household_count"] = sum(int(p.get("household_count") or 0) for p in hierarchy if isinstance(p, dict))
+        item["voter_count"] = sum(int(p.get("voter_count") or 0) for p in hierarchy if isinstance(p, dict)) or len(voters or [])
+    area = clean_value(item.get("street_area") or item.get("area") or item.get("package_type") or item.get("name")).lower()
+    if "whole universe" in area or int(item.get("precinct_count") or 0) > 1:
+        item["mobile_open_mode"] = "precinct_first"
+        item["mobile_group_by"] = "precinct"
+    else:
+        item["mobile_open_mode"] = item.get("mobile_open_mode") or "street_first"
+    return item
+
+
 def cc_attach_mobile_precinct_hierarchy(package, voters=None):
     """Attach mobile precinct hierarchy to a package/assignment dict without breaking older mobile fields."""
     if not isinstance(package, dict):
@@ -11625,7 +11706,7 @@ def render_assignments_workspace(campaign_id: str | None = None):
     st.markdown("### Assignments")
     st.caption("Assign contact lists to team members for field work, phone banks, mail-ballot chase, or future mobile download.")
     c1, c2, c3 = st.columns(3)
-    with c1: st.metric("Assignments", len(assignments))
+    with c1: st.metric("Assignments", len(cc_filter_active_mobile_assignments(assignments)))
     with c2: st.metric("Active", sum(1 for x in assignments if str(x.get("status", "")).lower() in {"assigned", "in progress", "active"}))
     with c3: st.metric("Completed", sum(1 for x in assignments if str(x.get("status", "")).lower() == "completed"))
 
@@ -11866,6 +11947,7 @@ def _program_related_assignment_ids_a21(campaign_id: str, program_id: str) -> tu
     except Exception:
         assignments = []
     assignment_ids = set()
+    assignments = [cc_c46_force_precinct_first_mobile(x, x.get("voters", [])) for x in cc_filter_active_mobile_assignments(assignments)]
     for a in assignments:
         aid = clean_value(a.get("assignment_id"))
         if not aid:
@@ -12393,10 +12475,10 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
             "target": "Programs",
         },
         "2. Assign": {
-            "value": f"{len(assignments):,}",
+            "value": f"{len(cc_filter_active_mobile_assignments(assignments)):,}",
             "sub": "active assignments",
             "purpose": "Turn lists into work: packets, turf, team owners, and field-ready assignments.",
-            "items": [("Assignments", f"{len(assignments):,}"), ("Assigned voters", f"{total_voters:,}"), ("Completed", f"{completed_voters:,}"), ("Remaining", f"{remaining_voters:,}")],
+            "items": [("Assignments", f"{len(cc_filter_active_mobile_assignments(assignments)):,}"), ("Assigned voters", f"{total_voters:,}"), ("Completed", f"{completed_voters:,}"), ("Remaining", f"{remaining_voters:,}")],
             "next": "Assign remaining voters or rebalance incomplete packets.",
             "button": "Manage Assignments",
             "target": "Programs",
@@ -12506,6 +12588,7 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
         st.caption(f"R2 path: app_state/mobile_results/{_ops_slug(campaign_id)}.json")
         if active_programs:
             assign_by_program: dict[str, list] = {}
+            assignments = [cc_c46_force_precinct_first_mobile(x, x.get("voters", [])) for x in cc_filter_active_mobile_assignments(assignments)]
             for a in assignments:
                 assign_by_program.setdefault(_assignment_program_id_a21(a, list_program_lookup), []).append(a)
             packet_by_assignment: dict[str, list] = {}
@@ -12667,6 +12750,7 @@ def _replace_program_user_assignments_a21(campaign_id: str, program_id: str, old
     changed = 0
     closed_status = {"complete", "completed", "archived", "deleted"}
     updated_assignments = []
+    assignments = [cc_c46_force_precinct_first_mobile(x, x.get("voters", [])) for x in cc_filter_active_mobile_assignments(assignments)]
     for a in assignments:
         belongs = clean_value(a.get("program_id")) == program_id or clean_value(a.get("list_id")) in list_ids
         is_old = clean_value(a.get("person_id")) == old_user_id
@@ -12697,6 +12781,7 @@ def _unassign_program_user_assignments_a21(campaign_id: str, program_id: str, us
     changed = 0
     closed_status = {"complete", "completed", "archived", "deleted"}
     out = []
+    assignments = [cc_c46_force_precinct_first_mobile(x, x.get("voters", [])) for x in cc_filter_active_mobile_assignments(assignments)]
     for a in assignments:
         belongs = clean_value(a.get("program_id")) == program_id or clean_value(a.get("list_id")) in list_ids
         is_user = clean_value(a.get("person_id")) == user_id
