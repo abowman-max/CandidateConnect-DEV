@@ -11979,9 +11979,62 @@ def _c46_recent_notes_rows(rows: list[dict], limit: int = 8) -> list[dict]:
     return out
 
 
+
+def _c46_compact_metric(label: str, value, sub: str = "") -> str:
+    return (
+        '<div class="cc-metric" style="padding:10px 12px!important;margin-bottom:8px!important;min-height:70px!important;">'
+        f'<div class="label">{html.escape(str(label))}</div>'
+        f'<div class="value">{html.escape(str(value))}</div>'
+        f'<div class="sub">{html.escape(str(sub or ""))}</div>'
+        '</div>'
+    )
+
+
+def _c46_hbar_chart(title: str, rows: list[tuple[str, int]], max_rows: int = 7) -> str:
+    cleaned = [(str(k), int(v or 0)) for k, v in rows]
+    cleaned = cleaned[:max_rows]
+    mx = max([v for _, v in cleaned] + [1])
+    body = []
+    for label, val in cleaned:
+        pct = max(3, min(100, round(val / mx * 100))) if val else 0
+        body.append(
+            '<div style="display:grid;grid-template-columns:110px 1fr 50px;gap:8px;align-items:center;margin:6px 0;">'
+            f'<div style="font-weight:850;font-size:12px;color:#071d3a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(label)}</div>'
+            '<div style="height:14px;border-radius:999px;background:#eadfce;overflow:hidden;border:1px solid #d4c7b5;">'
+            f'<div style="height:100%;width:{pct}%;background:linear-gradient(90deg,#7f1016,#b0121b,#d14a51);border-radius:999px;"></div>'
+            '</div>'
+            f'<div style="font-weight:950;text-align:right;color:#071d3a;">{val:,}</div>'
+            '</div>'
+        )
+    if not body:
+        body.append('<div class="cc-empty-table" style="margin:0!important;">No activity yet.</div>')
+    return (
+        '<div class="cc-card" style="padding:12px!important;margin-bottom:8px!important;">'
+        f'<div style="font-size:17px;font-weight:950;color:#071d3a;margin-bottom:6px;">{html.escape(title)}</div>'
+        + ''.join(body) + '</div>'
+    )
+
+
+def _c46_html_table(rows: list[dict], columns: list[str], title: str | None = None, max_rows: int = 6) -> str:
+    use_rows = rows[:max_rows] if rows else []
+    title_html = f'<div style="font-size:17px;font-weight:950;color:#071d3a;margin:6px 0 8px 0;">{html.escape(title)}</div>' if title else ''
+    if not use_rows:
+        return title_html + '<div class="cc-empty-table">No rows to display.</div>'
+    head = ''.join(f'<th>{html.escape(str(c))}</th>' for c in columns)
+    body = []
+    for r in use_rows:
+        body.append('<tr>' + ''.join(f'<td>{html.escape(str(r.get(c, "") or ""))}</td>' for c in columns) + '</tr>')
+    return (
+        title_html
+        + '<div class="cc-table-wrap" style="margin:0 0 10px 0!important;">'
+        + '<table class="cc-html-table"><thead><tr>' + head + '</tr></thead><tbody>'
+        + ''.join(body) + '</tbody></table></div>'
+    )
+
+
 def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") -> None:
-    st.markdown("### Outreach Command Center")
-    st.caption("Plan outreach → contact voters → record results → trigger follow-up → complete the next interaction.")
+    st.markdown("### Grassroots Command Center")
+    st.caption("One-glance status for the campaign contact cycle: plan → contact → record → follow up → continue.")
 
     try:
         programs = load_outreach_programs_store(campaign_id).get("programs", []) or []
@@ -12021,130 +12074,131 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
     queue_counts = _c46_queue_counts(queue)
     next_action = _c46_top_next_action(mobile, active_programs, total_voters, completed_voters)
 
-    # Snapshot metrics — only the numbers a campaign manager needs first.
-    st.markdown("#### Campaign Outreach Snapshot")
-    k1, k2, k3, k4, k5 = st.columns(5)
-    with k1: st.metric("Active Programs", f"{len(active_programs):,}")
-    with k2: st.metric("Assigned Voters", f"{total_voters:,}")
-    with k3: st.metric("Field Results", f"{len(mobile.get('synced_rows') or []):,}")
-    with k4: st.metric("Open Follow-Ups", f"{len(queue):,}")
-    with k5: st.metric("Progress", f"{pct_complete:.1f}%")
+    doors_attempted = int(len(mobile.get("synced_rows") or []) or completed_voters or 0)
+    conversations = int(result_counts.get("Favorable", 0) + result_counts.get("Undecided", 0) + result_counts.get("Against", 0))
+    immediate_items = int(queue_counts.get("Yard Sign", 0) + queue_counts.get("Mail Ballot Follow-Up", 0) + queue_counts.get("Volunteer Follow-Up", 0))
 
-    st.markdown("#### Recommended Next Step")
-    with st.container(border=True):
-        left, right = st.columns([3, 1])
-        with left:
-            st.markdown(f"##### {next_action['title']}")
-            st.write(next_action["why"])
-            st.caption(f"Go next: **{next_action['target']}**")
-        with right:
-            st.metric("Immediate Items", f"{len(queue):,}" if next_action["target"] == "Follow-Up Queue" else f"{remaining_voters:,}")
-            if st.button(next_action["button"], key=f"c46_next_action_{panel_id}", width="stretch"):
-                st.info(f"Use the **{next_action['target']}** tab above. Streamlit tabs cannot be switched automatically from inside a button, but this tells the user exactly where to go next.")
-
-    st.markdown("#### Outreach Cycle")
-    s1, s2, s3, s4, s5 = st.columns(5)
-    with s1: st.info("1. Build\n\nProgram + list")
-    with s2: st.info("2. Assign\n\nWalk/call/text/mail")
-    with s3: st.info("3. Contact\n\nField interaction")
-    with s4: st.info("4. Follow Up\n\nSigns, cards, MB, revisit")
-    with s5: st.info("5. Continue\n\nNext conversation")
-
-    chart_left, chart_right = st.columns(2)
-    with chart_left:
-        st.markdown("#### Contact Results")
-        contact_df = pd.DataFrame([
-            {"Result": "Favorable", "Count": int(result_counts.get("Favorable", 0) or package_results.get("F", 0) or 0)},
-            {"Result": "Undecided", "Count": int(result_counts.get("Undecided", 0) or package_results.get("U", 0) or 0)},
-            {"Result": "Against", "Count": int(result_counts.get("Against", 0) or package_results.get("A", 0) or 0)},
-            {"Result": "Not Home", "Count": int(result_counts.get("Not Home", 0) or package_results.get("NH", 0) or 0)},
-        ])
-        if int(contact_df["Count"].sum()) > 0:
-            st.bar_chart(contact_df.set_index("Result"), height=260)
-        else:
-            st.info("No contact results yet. Publish a mobile assignment, knock doors, then sync field results.")
-    with chart_right:
-        st.markdown("#### Follow-Up Pipeline")
-        follow_df = pd.DataFrame([
-            {"Action": "Yard Signs", "Count": int(queue_counts.get("Yard Sign", 0))},
-            {"Action": "Thank-You Cards", "Count": int(queue_counts.get("Thank-You Card", 0))},
-            {"Action": "MB Follow-Up", "Count": int(queue_counts.get("Mail Ballot Follow-Up", 0))},
-            {"Action": "Volunteer", "Count": int(queue_counts.get("Volunteer Follow-Up", 0))},
-            {"Action": "Not-Home Revisit", "Count": int(queue_counts.get("Revisit Not Home", 0))},
-        ])
-        if int(follow_df["Count"].sum()) > 0:
-            st.bar_chart(follow_df.set_index("Action"), height=260)
-        else:
-            st.info("No follow-up actions have been triggered yet.")
-
-    st.markdown("#### Priority Action Queue")
-    action_rows = [
-        {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue and filter Yard Sign."},
-        {"Priority": "High", "Action": "Volunteer follow-up", "Open": int(queue_counts.get("Volunteer Follow-Up", 0)), "Next Step": "Call/text and add to Campaign Organization."},
-        {"Priority": "High", "Action": "Mail ballot follow-up", "Open": int(queue_counts.get("Mail Ballot Follow-Up", 0)), "Next Step": "Send instructions or assign a chase contact."},
-        {"Priority": "Medium", "Action": "Thank-you cards", "Open": int(queue_counts.get("Thank-You Card", 0)), "Next Step": "Export postcard list from Follow-Up Queue."},
-        {"Priority": "Medium", "Action": "Revisit not-home voters", "Open": int(queue_counts.get("Revisit Not Home", 0)), "Next Step": "Build a revisit walk/call list."},
-        {"Priority": "Planning", "Action": "Continue assigned outreach", "Open": int(remaining_voters), "Next Step": "Go to Programs and continue/build assignments."},
+    contact_rows = [
+        ("Favorable", int(result_counts.get("Favorable", 0) or package_results.get("F", 0) or 0)),
+        ("Undecided", int(result_counts.get("Undecided", 0) or package_results.get("U", 0) or 0)),
+        ("Against", int(result_counts.get("Against", 0) or package_results.get("A", 0) or 0)),
+        ("Not Home", int(result_counts.get("Not Home", 0) or package_results.get("NH", 0) or 0)),
     ]
-    action_df = pd.DataFrame(action_rows)
-    action_df = action_df[(action_df["Open"] > 0) | (action_df["Action"] == "Continue assigned outreach")]
-    st.dataframe(action_df, width="stretch", hide_index=True, key=f"c46_priority_actions_{panel_id}")
+    follow_rows = [
+        ("Yard signs", int(queue_counts.get("Yard Sign", 0))),
+        ("Thank-you", int(queue_counts.get("Thank-You Card", 0))),
+        ("MB follow-up", int(queue_counts.get("Mail Ballot Follow-Up", 0))),
+        ("Volunteer", int(queue_counts.get("Volunteer Follow-Up", 0))),
+        ("Revisit", int(queue_counts.get("Revisit Not Home", 0))),
+    ]
 
-    if queue:
-        qdf = pd.DataFrame(queue)
-        st.download_button(
-            "Download Follow-Up Queue CSV",
-            data=qdf.to_csv(index=False).encode("utf-8"),
-            file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            key=f"c46_dashboard_follow_up_download_{panel_id}",
+    # Top of page: answer "where are we, what happened, what do I do next" without scrolling.
+    top_left, top_mid, top_right = st.columns([1.1, 1.1, 1.35])
+    with top_left:
+        st.markdown(_c46_hbar_chart("Contact Results", contact_rows), unsafe_allow_html=True)
+    with top_mid:
+        st.markdown(_c46_hbar_chart("Follow-Up Pipeline", follow_rows), unsafe_allow_html=True)
+    with top_right:
+        st.markdown(
+            '<div class="cc-card" style="padding:12px!important;margin-bottom:8px!important;min-height:198px!important;">'
+            '<div style="font-size:17px;font-weight:950;color:#071d3a;margin-bottom:4px;">Recommended Next Step</div>'
+            f'<div style="font-size:19px;font-weight:950;color:#9f151c;margin-bottom:6px;">{html.escape(str(next_action["title"]))}</div>'
+            f'<div style="font-size:13px;line-height:1.35;color:#071d3a;margin-bottom:8px;">{html.escape(str(next_action["why"]))}</div>'
+            f'<div style="display:inline-block;border:1px solid #9f151c;border-radius:999px;padding:5px 10px;background:#f3eadc;color:#071d3a;font-weight:900;font-size:12px;">Go next: {html.escape(str(next_action["target"]))}</div>'
+            f'<div style="margin-top:10px;font-size:12px;color:#5f6b7a;font-weight:850;">Immediate items: {immediate_items:,} &nbsp; | &nbsp; Open follow-ups: {len(queue):,}</div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
+        if st.button(next_action["button"], key=f"c46_next_action_{panel_id}", width="stretch"):
+            st.info(f"Use the **{next_action['target']}** tab above.")
 
-    st.markdown("#### Recent Field Notes")
-    recent_rows = _c46_recent_notes_rows(mobile.get("rows") or [], limit=8)
-    if recent_rows:
-        st.dataframe(pd.DataFrame(recent_rows), width="stretch", hide_index=True, key=f"c46_recent_notes_{panel_id}")
-    else:
-        st.caption("No synced field notes yet.")
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:2px 0 8px 0;">'
+        + _c46_compact_metric("Active Programs", f"{len(active_programs):,}")
+        + _c46_compact_metric("Assigned Voters", f"{total_voters:,}")
+        + _c46_compact_metric("Doors / Contacts", f"{doors_attempted:,}")
+        + _c46_compact_metric("Conversations", f"{conversations:,}")
+        + _c46_compact_metric("Open Follow-Ups", f"{len(queue):,}")
+        + _c46_compact_metric("Progress", f"{pct_complete:.1f}%")
+        + '</div>',
+        unsafe_allow_html=True,
+    )
 
-    with st.expander("Admin / Sync Health", expanded=False):
+    cycle_html = (
+        '<div class="cc-card" style="padding:9px 12px!important;margin-bottom:10px!important;">'
+        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch;">'
+        '<div><b>1. Build</b><br><span style="font-size:12px;color:#5f6b7a;">Program + list</span></div>'
+        '<div><b>2. Assign</b><br><span style="font-size:12px;color:#5f6b7a;">Team + turf</span></div>'
+        '<div><b>3. Contact</b><br><span style="font-size:12px;color:#5f6b7a;">Doors / calls / texts</span></div>'
+        '<div><b>4. Follow up</b><br><span style="font-size:12px;color:#5f6b7a;">Signs / cards / MB</span></div>'
+        '<div><b>5. Continue</b><br><span style="font-size:12px;color:#5f6b7a;">Next conversation</span></div>'
+        '</div></div>'
+    )
+    st.markdown(cycle_html, unsafe_allow_html=True)
+
+    action_rows = [
+        {"Priority": "High", "Action": "Deliver yard signs", "Open": int(queue_counts.get("Yard Sign", 0)), "Next Step": "Open Follow-Up Queue; filter Yard Sign."},
+        {"Priority": "High", "Action": "Volunteer follow-up", "Open": int(queue_counts.get("Volunteer Follow-Up", 0)), "Next Step": "Call/text; add to Campaign Organization."},
+        {"Priority": "High", "Action": "Mail ballot follow-up", "Open": int(queue_counts.get("Mail Ballot Follow-Up", 0)), "Next Step": "Send instructions or assign chase contact."},
+        {"Priority": "Medium", "Action": "Thank-you cards", "Open": int(queue_counts.get("Thank-You Card", 0)), "Next Step": "Export postcard list."},
+        {"Priority": "Medium", "Action": "Revisit not-home voters", "Open": int(queue_counts.get("Revisit Not Home", 0)), "Next Step": "Build revisit list."},
+        {"Priority": "Planning", "Action": "Continue assigned outreach", "Open": int(remaining_voters), "Next Step": "Go to Programs."},
+    ]
+    visible_actions = [r for r in action_rows if int(r.get("Open", 0) or 0) > 0 or r.get("Action") == "Continue assigned outreach"]
+
+    lower_left, lower_right = st.columns([1.25, 1])
+    with lower_left:
+        st.markdown(_c46_html_table(visible_actions, ["Priority", "Action", "Open", "Next Step"], "Priority Action Queue", max_rows=6), unsafe_allow_html=True)
+        if queue:
+            qdf = pd.DataFrame(queue)
+            st.download_button(
+                "Download Follow-Up Queue CSV",
+                data=qdf.to_csv(index=False).encode("utf-8"),
+                file_name=f"candidate_connect_follow_up_queue_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                key=f"c46_dashboard_follow_up_download_{panel_id}",
+            )
+    with lower_right:
+        recent_rows = _c46_recent_notes_rows(mobile.get("rows") or [], limit=5)
+        note_cols = ["Result", "Voter", "Next Signal", "Notes"]
+        st.markdown(_c46_html_table(recent_rows, note_cols, "Recent Field Notes", max_rows=5), unsafe_allow_html=True)
+
+    with st.expander("Program Progress and Sync Health", expanded=False):
         hc1, hc2, hc3, hc4 = st.columns(4)
         with hc1: st.metric("Synced", f"{len(mobile.get('synced_rows') or []):,}")
         with hc2: st.metric("Still Queued", f"{len(mobile.get('queued_rows') or []):,}")
         with hc3: st.metric("Failed", f"{len(mobile.get('failed_rows') or []):,}")
         with hc4: st.metric("Last Sync", mobile.get("last_sync") or "—")
         st.caption(f"R2 path: app_state/mobile_results/{_ops_slug(campaign_id)}.json")
-
-    st.markdown("#### Program Progress")
-    if active_programs:
-        assign_by_program: dict[str, list] = {}
-        for a in assignments:
-            assign_by_program.setdefault(_assignment_program_id_a21(a, list_program_lookup), []).append(a)
-        packet_by_assignment: dict[str, list] = {}
-        for pck in packets:
-            packet_by_assignment.setdefault(clean_value(pck.get("assignment_id")), []).append(pck)
-        rows = []
-        for pr in active_programs:
-            pid = clean_value(pr.get("program_id"))
-            pr_assignments = assign_by_program.get(pid, [])
-            pr_packets = []
-            for a in pr_assignments:
-                pr_packets.extend(packet_by_assignment.get(clean_value(a.get("assignment_id")), []))
-            tv, cv, _res = _packet_progress_for_assignments(pr_packets)
-            channels = pr.get("channels") if isinstance(pr.get("channels"), list) else []
-            rows.append({
-                "Program": clean_value(pr.get("name")) or "Unnamed Program",
-                "Channels": ", ".join([clean_value(c) for c in channels if clean_value(c)]) or clean_value(pr.get("program_type")),
-                "Status": clean_value(pr.get("status")) or "Planning",
-                "Users": len(_program_user_ids(pr)),
-                "Assigned Voters": tv,
-                "Complete": cv,
-                "Remaining": max(tv-cv, 0),
-                "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
-            })
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, key=f"outreach_program_progress_{panel_id}")
-    else:
-        st.info("No active outreach programs yet. Use Programs to create the first outreach workflow.")
+        if active_programs:
+            assign_by_program: dict[str, list] = {}
+            for a in assignments:
+                assign_by_program.setdefault(_assignment_program_id_a21(a, list_program_lookup), []).append(a)
+            packet_by_assignment: dict[str, list] = {}
+            for pck in packets:
+                packet_by_assignment.setdefault(clean_value(pck.get("assignment_id")), []).append(pck)
+            rows = []
+            for pr in active_programs:
+                pid = clean_value(pr.get("program_id"))
+                pr_assignments = assign_by_program.get(pid, [])
+                pr_packets = []
+                for a in pr_assignments:
+                    pr_packets.extend(packet_by_assignment.get(clean_value(a.get("assignment_id")), []))
+                tv, cv, _res = _packet_progress_for_assignments(pr_packets)
+                channels = pr.get("channels") if isinstance(pr.get("channels"), list) else []
+                rows.append({
+                    "Program": clean_value(pr.get("name")) or "Unnamed Program",
+                    "Channels": ", ".join([clean_value(c) for c in channels if clean_value(c)]) or clean_value(pr.get("program_type")),
+                    "Status": clean_value(pr.get("status")) or "Planning",
+                    "Users": len(_program_user_ids(pr)),
+                    "Assigned Voters": tv,
+                    "Complete": cv,
+                    "Remaining": max(tv-cv, 0),
+                    "% Complete": round((cv/tv*100.0), 1) if tv else 0.0,
+                })
+            st.markdown(_c46_html_table(rows, ["Program", "Channels", "Status", "Users", "Assigned Voters", "Complete", "Remaining", "% Complete"], "Active Program Progress", max_rows=8), unsafe_allow_html=True)
+        else:
+            st.info("No active grassroots programs yet. Use Programs to create the first outreach workflow.")
 
 def _program_channel_options() -> list[str]:
     return ["Door-to-Door", "Phone Bank", "Texting", "Mail", "Email", "Mail Ballot Chase", "Other"]
@@ -13351,8 +13405,8 @@ def render_program_manager_a2(campaign_id: str | None = None):
                         st.error(msg)
 
 def render_voter_outreach_workspace():
-    st.markdown("## Voter Outreach")
-    st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results now live inside each program.")
+    st.markdown("## Grassroots Center")
+    st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results live inside each program.")
     campaign_id = _select_ops_campaign_control("voter_outreach")
     tab_dash, tab_programs, tab_followups, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Follow-Up Queue", "Reporting", "Legacy Setup"])
     with tab_dash:
@@ -13369,7 +13423,7 @@ def render_voter_outreach_workspace():
         render_outreach_dashboard_v1(campaign_id, panel_id="reporting")
     with tab_legacy:
         st.markdown("### Legacy Setup")
-        st.warning("Use only for older outreach records. The simplified workflow is Dashboard → Programs → Follow-Up Queue.")
+        st.warning("Use only for older grassroots records. The simplified workflow is Dashboard → Programs → Follow-Up Queue.")
         st.caption("Temporary holding area while old contact-program/list/assignment tools are migrated into Program workspaces.")
         legacy_programs, legacy_lists, legacy_assign = st.tabs(["Contact Programs", "Contact Lists", "Assignments"] )
         with legacy_programs:
@@ -13588,7 +13642,7 @@ with st.sidebar:
     # A3.4 navigation cleanup: Voter Outreach is now a direct nav button.
     # The duplicate inner Voter Outreach button was removed because the section
     # itself should open the Outreach Dashboard by default.
-    if st.button("📣 Voter Outreach", width="stretch", key="nav_voter_outreach_main"):
+    if st.button("📣 Grassroots Center", width="stretch", key="nav_voter_outreach_main"):
         st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
@@ -13687,7 +13741,7 @@ with st.sidebar:
         st.markdown("### Campaign Organization")
         st.caption("Manage team members, volunteers, roles, and assignment readiness.")
     elif st.session_state.get("left_section") == "voter_outreach":
-        st.markdown("### Voter Outreach")
+        st.markdown("### Grassroots Center")
         st.caption("Plan door-to-door, phone, postcard, text, email, and mail-ballot chase programs.")
     elif st.session_state.get("left_section") == "election_day":
         st.markdown("### Election Day")
