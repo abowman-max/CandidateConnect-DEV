@@ -1583,6 +1583,149 @@ def clean_value(value) -> str:
 
 
 
+
+# C4.6.17 — Mobile package active-assignment and precinct grouping helpers
+def cc_is_active_mobile_assignment(rec):
+    """Return True only for assignments/work items that should be exported to mobile."""
+    if not isinstance(rec, dict):
+        return False
+    status = clean_value(rec.get("status")).lower()
+    deleted_flags = [
+        rec.get("deleted"),
+        rec.get("is_deleted"),
+        rec.get("_deleted"),
+        rec.get("archived"),
+        rec.get("is_archived"),
+    ]
+    if any(bool(x) for x in deleted_flags):
+        return False
+    if status in {"deleted", "archive", "archived", "removed", "inactive", "cancelled", "canceled"}:
+        return False
+    return True
+
+
+def cc_precinct_value_from_record(rec):
+    """Best-effort precinct field resolver used by mobile package hierarchy."""
+    if not isinstance(rec, dict):
+        return ""
+    for key in [
+        "Precinct", "PRECINCT", "precinct",
+        "PrecinctName", "precinct_name",
+        "Voting Precinct", "voting_precinct",
+        "CountyPrecinct", "county_precinct",
+    ]:
+        val = clean_value(rec.get(key))
+        if val:
+            return val
+    return "Unassigned Precinct"
+
+
+def cc_street_value_from_record(rec):
+    """Best-effort street field resolver used by mobile package hierarchy."""
+    if not isinstance(rec, dict):
+        return ""
+    for key in [
+        "StreetName", "street_name", "Street", "street",
+        "STREET_NAME", "AddressStreet", "address_street",
+    ]:
+        val = clean_value(rec.get(key))
+        if val:
+            return val
+    address = clean_value(rec.get("Address") or rec.get("address") or rec.get("FullAddress") or rec.get("full_address"))
+    if address:
+        parts = address.split()
+        if len(parts) > 1 and parts[0].replace("-", "").isdigit():
+            return " ".join(parts[1:])
+        return address
+    return "Unknown Street"
+
+
+def cc_household_key_from_record(rec):
+    """Best-effort household grouping key."""
+    if not isinstance(rec, dict):
+        return ""
+    for key in ["HouseholdID", "household_id", "household_key", "HH_ID", "hh_id"]:
+        val = clean_value(rec.get(key))
+        if val:
+            return val
+    address = clean_value(rec.get("Address") or rec.get("address") or rec.get("FullAddress") or rec.get("full_address"))
+    return address or clean_value(rec.get("PA_ID") or rec.get("VoterID") or rec.get("voter_id"))
+
+
+def cc_mobile_hierarchy_from_voters(voters):
+    """
+    Build Assignment -> Precinct -> Street -> Household -> Voter hierarchy.
+    This is what the mobile app needs so a whole-universe assignment does not become one giant street list.
+    """
+    voters = voters or []
+    precinct_map = {}
+    for rec in voters:
+        if not isinstance(rec, dict):
+            continue
+        precinct = cc_precinct_value_from_record(rec)
+        street = cc_street_value_from_record(rec)
+        hh_key = cc_household_key_from_record(rec)
+
+        p = precinct_map.setdefault(precinct, {"precinct": precinct, "streets": {}, "households": 0, "voters": 0})
+        s = p["streets"].setdefault(street, {"street": street, "households": {}, "household_count": 0, "voter_count": 0})
+        h = s["households"].setdefault(hh_key, {
+            "household_id": hh_key,
+            "address": clean_value(rec.get("Address") or rec.get("address") or rec.get("FullAddress") or rec.get("full_address")),
+            "voters": [],
+        })
+        h["voters"].append(rec)
+        p["voters"] += 1
+        s["voter_count"] += 1
+
+    precincts = []
+    for p_name in sorted(precinct_map.keys()):
+        p = precinct_map[p_name]
+        streets = []
+        hh_total = 0
+        for s_name in sorted(p["streets"].keys()):
+            s = p["streets"][s_name]
+            households = list(s["households"].values())
+            households.sort(key=lambda x: clean_value(x.get("address")))
+            s_out = {
+                "street": s["street"],
+                "households": households,
+                "household_count": len(households),
+                "voter_count": s["voter_count"],
+            }
+            hh_total += len(households)
+            streets.append(s_out)
+        precincts.append({
+            "precinct": p["precinct"],
+            "streets": streets,
+            "household_count": hh_total,
+            "voter_count": p["voters"],
+            "street_count": len(streets),
+        })
+    return precincts
+
+
+def cc_attach_mobile_precinct_hierarchy(package, voters=None):
+    """Attach mobile precinct hierarchy to a package/assignment dict without breaking older mobile fields."""
+    if not isinstance(package, dict):
+        return package
+    voters = voters if voters is not None else package.get("voters", [])
+    hierarchy = cc_mobile_hierarchy_from_voters(voters)
+    package["mobile_hierarchy_version"] = "precinct_street_household_v1"
+    package["precincts"] = hierarchy
+    package["hierarchy"] = hierarchy
+    package["precinct_count"] = len(hierarchy)
+    package["street_count"] = sum(int(p.get("street_count") or 0) for p in hierarchy)
+    package["household_count"] = sum(int(p.get("household_count") or 0) for p in hierarchy)
+    package["voter_count"] = sum(int(p.get("voter_count") or 0) for p in hierarchy)
+    return package
+
+
+def cc_filter_active_mobile_assignments(assignments):
+    """Keep only assignments that should remain visible on mobile refresh."""
+    return [a for a in (assignments or []) if cc_is_active_mobile_assignment(a)]
+
+
+
 def cc_checkbox_multiselect(label, options, default=None, key_prefix="cc_multi", columns=2):
     """Readable checkbox replacement for Streamlit multiselect chips with collision-proof keys."""
     default = set(default or [])
@@ -12921,7 +13064,7 @@ def _c433_mobile_assignment_item_from_a34_package(package: dict) -> dict:
         "streets": package.get("streets") if isinstance(package.get("streets"), list) else [],
         "households": households,
         "voters": voters,
-        "package": package,
+        "package": cc_attach_mobile_precinct_hierarchy(package, voters),
     }
 
 
@@ -13405,6 +13548,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
             m1, m2 = st.columns(2)
             with m1:
+    # C4.6.17: mobile export removes deleted assignments and groups whole-universe work by precinct.
+
                 if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{key_suffix}"):
                     ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
