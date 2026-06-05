@@ -42,6 +42,45 @@ EXPORT_ROW_LIMIT = 250_000
 
 st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sidebar_state="expanded")
 
+# C4.6.32 — Preserve selected web section across browser refresh
+def _cc632_qget(name: str, default: str = "") -> str:
+    try:
+        val = st.query_params.get(name, default)
+        if isinstance(val, list):
+            return str(val[0] if val else default)
+        return str(val if val is not None else default)
+    except Exception:
+        return default
+
+def _cc632_set_section(section: str | None, view: str | None = None) -> None:
+    try:
+        if section:
+            st.query_params["cc_section"] = str(section)
+        else:
+            st.query_params.pop("cc_section", None)
+        if view:
+            st.query_params["cc_view"] = str(view)
+        else:
+            st.query_params.pop("cc_view", None)
+    except Exception:
+        pass
+    st.session_state["left_section"] = section
+    if view is not None:
+        st.session_state["view"] = view
+
+def _cc632_restore_section_from_url() -> None:
+    section = _cc632_qget("cc_section", "").strip()
+    view = _cc632_qget("cc_view", "").strip()
+    allowed = {
+        "create_universe", "voter_lookup", "mail_ballot_center", "area_intelligence",
+        "campaign_organization", "voter_outreach", "election_day", "account_admin", "my_account"
+    }
+    if section in allowed and not st.session_state.get("left_section"):
+        st.session_state["left_section"] = section
+    if view and not st.session_state.get("view"):
+        st.session_state["view"] = view
+
+
 
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
@@ -14238,42 +14277,41 @@ with st.sidebar:
     # v28 DEV-only navigation cleanup:
     # Keep Dashboard top-level, then group operational areas into collapsible rollups.
     # This is navigation/UI only. It does not change data, auth, filters, saved universes, shards, or R2 behavior.
-    _current_section = st.session_state.get("left_section")
+    _current_section = st.session_state.get("left_section") or _cc632_qget("cc_section", "").strip()
 
     if st.button("🏠 Dashboard", width="stretch"):
-        st.session_state["left_section"] = None
-        st.session_state["view"] = "dashboard"
+        _cc632_set_section(None, "dashboard")
         st.rerun()
 
     with st.expander("🧠 Voter Intelligence", expanded=_current_section in {"create_universe", "voter_lookup", "mail_ballot_center", "area_intelligence"}):
         if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
-            st.session_state["left_section"]="create_universe"; st.session_state["view"]="targeting"; st.rerun()
+            _cc632_set_section("create_universe", "targeting"); st.rerun()
         if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
-            st.session_state["left_section"]="voter_lookup"; st.session_state["view"]="dashboard"; st.rerun()
+            _cc632_set_section("voter_lookup", "dashboard"); st.rerun()
         if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
-            st.session_state["left_section"]="mail_ballot_center"; st.session_state["view"]="dashboard"; st.rerun()
+            _cc632_set_section("mail_ballot_center", "dashboard"); st.rerun()
         if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
-            st.session_state["left_section"]="area_intelligence"; st.session_state["view"]="dashboard"; st.rerun()
+            _cc632_set_section("area_intelligence", "dashboard"); st.rerun()
 
     with st.expander("👥 Campaign Organization", expanded=_current_section in {"campaign_organization"}):
         if st.button("👥 Team / Volunteers", width="stretch"):
-            st.session_state["left_section"]="campaign_organization"; st.session_state["view"]="organization"; st.rerun()
+            _cc632_set_section("campaign_organization", "organization"); st.rerun()
 
     # A3.4 navigation cleanup: Voter Outreach is now a direct nav button.
     # The duplicate inner Voter Outreach button was removed because the section
     # itself should open the Outreach Dashboard by default.
     if st.button("📣 Grassroots Center", width="stretch", key="nav_voter_outreach_main"):
-        st.session_state["left_section"]="voter_outreach"; st.session_state["view"]="outreach"; st.rerun()
+        _cc632_set_section("voter_outreach", "outreach"); st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
         if st.button("🗳️ Election Day Operations", width="stretch"):
-            st.session_state["left_section"]="election_day"; st.session_state["view"]="election_day"; st.rerun()
+            _cc632_set_section("election_day", "election_day"); st.rerun()
 
     with st.expander("⚙️ Administration", expanded=_current_section in {"my_account", "account_admin"}):
         if st.button("👤 My Account", width="stretch"):
-            st.session_state["left_section"]="my_account"; st.session_state["view"]="account"; st.rerun()
+            _cc632_set_section("my_account", "account"); st.rerun()
         if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
-            st.session_state["left_section"]="account_admin"; st.session_state["view"]="security"; st.rerun()
+            _cc632_set_section("account_admin", "security"); st.rerun()
 
     if st.button("Log Out", width="stretch"):
         _cc_logout_current_browser(load_security_store())
