@@ -17,6 +17,34 @@ import string
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# C4.6.34 — browser refresh section restore helpers
+def cc634_get_qp(name: str, default: str = "") -> str:
+    try:
+        val = st.query_params.get(name, default)
+        if isinstance(val, list):
+            return str(val[0]) if val else default
+        return str(val) if val is not None else default
+    except Exception:
+        return default
+
+def cc634_set_section(section: str | None) -> None:
+    try:
+        if section:
+            st.query_params["cc_section"] = section
+        elif "cc_section" in st.query_params:
+            del st.query_params["cc_section"]
+    except Exception:
+        pass
+    st.session_state["left_section"] = section
+
+def cc634_restore_section() -> None:
+    try:
+        section = cc634_get_qp("cc_section", "")
+        if section and not st.session_state.get("left_section"):
+            st.session_state["left_section"] = section
+    except Exception:
+        pass
+
 import pandas as pd
 import duckdb
 import requests
@@ -14089,33 +14117,8 @@ try:
 except Exception as e:
     st.error("Could not load the filter layer."); st.exception(e); st.stop()
 
-
-# C4.6.33 — preserve current left navigation section through browser refresh
-def cc633_get_web_section(default=None):
-    try:
-        sec = st.query_params.get("cc_section", "")
-        if isinstance(sec, list):
-            sec = sec[0] if sec else ""
-        if sec != "":
-            return str(sec)
-    except Exception:
-        pass
-    return default
-
-def cc633_set_web_section(section):
-    try:
-        if section is None:
-            st.query_params["cc_section"] = ""
-        else:
-            st.query_params["cc_section"] = str(section)
-    except Exception:
-        pass
-    st.session_state["left_section"] = section
-
 if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_token"] = 0
-if "left_section" not in st.session_state:
-    _cc633_sec = cc633_get_web_section(None)
-    st.session_state["left_section"] = (_cc633_sec if _cc633_sec not in {"", "None", "none", "null"} else None)
+if "left_section" not in st.session_state: st.session_state["left_section"] = None
 _filter_suffix = st.session_state["filter_reset_token"]
 
 
@@ -14252,6 +14255,8 @@ button[title*="sidebar" i] {
 </style>
 """, unsafe_allow_html=True)
 
+cc634_restore_section()
+
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
@@ -14266,39 +14271,39 @@ with st.sidebar:
     _current_section = st.session_state.get("left_section")
 
     if st.button("🏠 Dashboard", width="stretch"):
-        cc633_set_web_section(None)
+        cc634_set_section(None)
         st.session_state["view"] = "dashboard"
         st.rerun()
 
     with st.expander("🧠 Voter Intelligence", expanded=_current_section in {"create_universe", "voter_lookup", "mail_ballot_center", "area_intelligence"}):
         if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
-            cc633_set_web_section("create_universe"); st.session_state["view"]="targeting"; st.rerun()
+            cc634_set_section("create_universe"); st.session_state["view"]="targeting"; st.rerun()
         if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
-            cc633_set_web_section("voter_lookup"); st.session_state["view"]="dashboard"; st.rerun()
+            cc634_set_section("voter_lookup"); st.session_state["view"]="dashboard"; st.rerun()
         if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
-            cc633_set_web_section("mail_ballot_center"); st.session_state["view"]="dashboard"; st.rerun()
+            cc634_set_section("mail_ballot_center"); st.session_state["view"]="dashboard"; st.rerun()
         if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
-            cc633_set_web_section("area_intelligence"); st.session_state["view"]="dashboard"; st.rerun()
+            cc634_set_section("area_intelligence"); st.session_state["view"]="dashboard"; st.rerun()
 
     with st.expander("👥 Campaign Organization", expanded=_current_section in {"campaign_organization"}):
         if st.button("👥 Team / Volunteers", width="stretch"):
-            cc633_set_web_section("campaign_organization"); st.session_state["view"]="organization"; st.rerun()
+            cc634_set_section("campaign_organization"); st.session_state["view"]="organization"; st.rerun()
 
     # A3.4 navigation cleanup: Voter Outreach is now a direct nav button.
     # The duplicate inner Voter Outreach button was removed because the section
     # itself should open the Outreach Dashboard by default.
     if st.button("📣 Grassroots Center", width="stretch", key="nav_voter_outreach_main"):
-        cc633_set_web_section("voter_outreach"); st.session_state["view"]="outreach"; st.rerun()
+        cc634_set_section("voter_outreach"); st.session_state["view"]="outreach"; st.rerun()
 
     with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
         if st.button("🗳️ Election Day Operations", width="stretch"):
-            cc633_set_web_section("election_day"); st.session_state["view"]="election_day"; st.rerun()
+            cc634_set_section("election_day"); st.session_state["view"]="election_day"; st.rerun()
 
     with st.expander("⚙️ Administration", expanded=_current_section in {"my_account", "account_admin"}):
         if st.button("👤 My Account", width="stretch"):
-            cc633_set_web_section("my_account"); st.session_state["view"]="account"; st.rerun()
+            cc634_set_section("my_account"); st.session_state["view"]="account"; st.rerun()
         if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
-            cc633_set_web_section("account_admin"); st.session_state["view"]="security"; st.rerun()
+            cc634_set_section("account_admin"); st.session_state["view"]="security"; st.rerun()
 
     if st.button("Log Out", width="stretch"):
         _cc_logout_current_browser(load_security_store())
@@ -14672,7 +14677,6 @@ button[aria-label*="full screen"] {
 
 active = active_filters()
 section = st.session_state.get("left_section")
-cc633_set_web_section(section)
 
 def render_enhanced_home():
     render_statewide_snapshot()
