@@ -13805,7 +13805,11 @@ def _program_manager_top_workers_c46(counts: dict, people_lookup: dict, user_id_
     for rec in workers.values():
         assigned = int(rec.get("Assigned") or 0)
         completed = int(rec.get("Completed") or 0)
-        pct = (completed / assigned * 100.0) if assigned else (100.0 if completed else 0.0)
+        # C4.6.40: if the assignment record did not carry an assigned voter count,
+        # fall back to the campaign/program assigned total so completed contacts do not render as 100%.
+        if assigned <= 0:
+            assigned = int((counts or {}).get("total_voters") or (counts or {}).get("assigned_voters") or 0)
+        pct = (completed / assigned * 100.0) if assigned else 0.0
         rows.append({
             "Worker": clean_value(rec.get("Worker")) or "Unassigned",
             "Program": clean_value(rec.get("Program")) or "—",
