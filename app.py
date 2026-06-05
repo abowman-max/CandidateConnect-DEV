@@ -11973,7 +11973,7 @@ def _active_program_ids_a21(programs: list[dict]) -> set[str]:
 
 
 # C4.6 Web Mobile Results Reader
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=3, show_spinner=False)
 def load_mobile_results_store(campaign_id: str) -> dict:
     """Read synced field-app results from R2 app_state/mobile_results/<campaign_id>.json."""
     cid = _ops_slug(campaign_id or "")
@@ -11994,11 +11994,12 @@ def load_mobile_results_store(campaign_id: str) -> dict:
 
 
 def _mobile_result_rows(store: dict) -> list[dict]:
-    """Flatten mobile result store into display/countable rows."""
+    """Flatten mobile result store into display/countable rows, de-duped by voter result key."""
     if not isinstance(store, dict):
         return []
-    rows = []
-    for status_bucket in ["synced", "queued", "failed"]:
+    by_key = {}
+    failed = []
+    for status_bucket in ["synced", "queued"]:
         items = store.get(status_bucket) or []
         if not isinstance(items, list):
             continue
@@ -12007,7 +12008,21 @@ def _mobile_result_rows(store: dict) -> list[dict]:
                 continue
             row = dict(item)
             row["_bucket"] = status_bucket
-            rows.append(row)
+            key = "|".join([
+                clean_value(row.get("campaign_id")),
+                clean_value(row.get("assignment_id")),
+                clean_value(row.get("household_key")),
+                clean_value(row.get("voter_id")),
+            ])
+            if key.strip("|"):
+                by_key[key] = row
+    for item in store.get("failed") or []:
+        if isinstance(item, dict):
+            row = dict(item)
+            row["_bucket"] = "failed"
+            failed.append(row)
+    rows = list(by_key.values()) + failed
+    rows.sort(key=lambda r: clean_value(r.get("updated_at") or r.get("created_at") or r.get("synced_at")), reverse=True)
     return rows
 
 
@@ -12122,6 +12137,12 @@ def render_mobile_results_reader_c46(campaign_id: str, panel_id: str = 'dashboar
     """Show field-app synced results in the web app. No voter-record writeback yet."""
     st.markdown("#### Field App Sync Results")
     st.caption("C4.6 reads synced field-app results from R2 automatically. This does not update voter records yet.")
+    if st.button("Refresh Field Results", key=f"refresh_field_results_{panel_id}_{campaign_id}"):
+        try:
+            load_mobile_results_store.clear()
+        except Exception:
+            pass
+        st.rerun()
 
     store = load_mobile_results_store(campaign_id)
     rows = _mobile_result_rows(store)
