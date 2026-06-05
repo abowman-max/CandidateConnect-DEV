@@ -14040,6 +14040,324 @@ def render_program_manager_a2(campaign_id: str | None = None):
             render_program_door_to_door_a3(campaign_id, current, people_lookup, user_id_to_label, key_suffix="build_assign")
 
 
+
+
+# C4.7.1 — Grassroots Management Reporting
+def _gr_clean(value) -> str:
+    try:
+        return "" if value is None else str(value).strip()
+    except Exception:
+        return ""
+
+def _gr_int(value) -> int:
+    try:
+        if value is None or value == "":
+            return 0
+        return int(float(str(value).replace(",", "")))
+    except Exception:
+        return 0
+
+def _gr_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _gr_clean(value).lower() in {"1", "true", "yes", "y", "x", "checked", "on"}
+
+def _gr_age_group(age) -> str:
+    a = _gr_int(age)
+    if a <= 0:
+        return "Unknown"
+    if a < 30:
+        return "18-29"
+    if a < 45:
+        return "30-44"
+    if a < 60:
+        return "45-59"
+    if a < 75:
+        return "60-74"
+    return "75+"
+
+def _gr_result_label(value) -> str:
+    raw = _gr_clean(value).lower()
+    if raw in {"f", "fav", "favorable", "support", "supporter", "friendly"}:
+        return "Favorable"
+    if raw in {"u", "undecided", "unknown", "persuadable"}:
+        return "Undecided"
+    if raw in {"a", "against", "oppose", "opposed"}:
+        return "Against"
+    if raw in {"nh", "not home", "not_home", "no answer", "noanswer"}:
+        return "Not Home"
+    return _gr_clean(value) or "Other"
+
+def _gr_row_program(row: dict) -> str:
+    return (
+        _gr_clean(row.get("program_name"))
+        or _gr_clean(row.get("program"))
+        or _gr_clean(row.get("assignment_name")).split(" — ")[0]
+        or "Unassigned"
+    )
+
+def _gr_row_area(row: dict) -> str:
+    return (
+        _gr_clean(row.get("precinct"))
+        or _gr_clean(row.get("Precinct"))
+        or _gr_clean(row.get("precinct_name"))
+        or _gr_clean(row.get("assignment_name")).split(" — ")[-1]
+        or "Unknown"
+    )
+
+def _gr_row_party(row: dict) -> str:
+    raw = _gr_clean(row.get("party") or row.get("Party")).upper()
+    if raw.startswith("D"):
+        return "Democrat"
+    if raw.startswith("R"):
+        return "Republican"
+    if raw:
+        return "Other"
+    return "Unknown"
+
+def _gr_row_gender(row: dict) -> str:
+    raw = _gr_clean(row.get("gender") or row.get("Gender")).upper()
+    if raw.startswith("F"):
+        return "Female"
+    if raw.startswith("M"):
+        return "Male"
+    return "Unknown"
+
+def _gr_row_worker(row: dict) -> str:
+    return _gr_clean(row.get("username") or row.get("field_user") or row.get("user") or row.get("created_by")) or "Unknown"
+
+def _gr_contact_key(row: dict) -> str:
+    parts = [
+        _gr_clean(row.get("campaign_id")),
+        _gr_clean(row.get("assignment_id")),
+        _gr_clean(row.get("household_key") or row.get("household_address") or row.get("address")),
+        _gr_clean(row.get("voter_id") or row.get("voter_name")),
+    ]
+    key = "|".join(parts).strip("|")
+    return key or str(id(row))
+
+def _gr_dedupe_rows(rows: list[dict]) -> list[dict]:
+    by_key = {}
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        by_key[_gr_contact_key(r)] = r
+    return list(by_key.values())
+
+def _gr_count_by(rows: list[dict], getter, limit: int = 10) -> list[tuple[str, int]]:
+    counts = {}
+    for r in rows or []:
+        label = getter(r)
+        label = _gr_clean(label) or "Unknown"
+        counts[label] = counts.get(label, 0) + 1
+    return sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+
+def _gr_percent(n, d) -> str:
+    n = _gr_int(n)
+    d = _gr_int(d)
+    if d <= 0:
+        return "0.0%"
+    return f"{(n / d) * 100:.1f}%"
+
+def _gr_management_recommendations(total_assigned: int, contacted: int, result_counts: dict, queue_count: int, weak_areas: list[dict]) -> list[dict]:
+    remaining = max(_gr_int(total_assigned) - _gr_int(contacted), 0)
+    rows = []
+    if remaining > 0:
+        rows.append({"Priority": "High", "Finding": "Uncontacted universe remains", "What it means": f"{remaining:,} assigned voter(s) have not been contacted yet.", "Recommended move": "Push another door/call pass into the largest unfinished areas."})
+    if queue_count > 0:
+        rows.append({"Priority": "High", "Finding": "Follow-up is building", "What it means": f"{queue_count:,} follow-up item(s) are open.", "Recommended move": "Export/work the follow-up list before starting too many new contacts."})
+    if _gr_int(result_counts.get("Not Home")) > 0:
+        rows.append({"Priority": "Medium", "Finding": "Not-home revisit opportunity", "What it means": f"{_gr_int(result_counts.get('Not Home')):,} not-home result(s) recorded.", "Recommended move": "Schedule a second pass at different times or move them to phone/text/mail."})
+    if weak_areas:
+        rows.append({"Priority": "Medium", "Finding": "Coverage is uneven", "What it means": f"{weak_areas[0].get('Area', 'One area')} has the largest visible contact load.", "Recommended move": "Assign top workers or candidate time to that area next."})
+    if not rows:
+        rows.append({"Priority": "Planning", "Finding": "No major issue detected yet", "What it means": "There is not enough field data to diagnose the program.", "Recommended move": "Get the first assignment completed and synced, then review this page."})
+    return rows[:5]
+
+def _gr_breakdown_rows(rows: list[dict], label: str, getter, total_assigned: int | None = None) -> list[dict]:
+    counted = _gr_count_by(rows, getter, limit=99)
+    out = []
+    for name, contacts in counted:
+        out.append({
+            label: name,
+            "Contacts": f"{contacts:,}",
+            "Share": _gr_percent(contacts, len(rows)),
+        })
+    if total_assigned is not None and total_assigned > len(rows):
+        out.append({label: "Not contacted / remaining", "Contacts": f"{max(total_assigned - len(rows), 0):,}", "Share": _gr_percent(max(total_assigned - len(rows), 0), total_assigned)})
+    return out
+
+def _gr_worker_rows(rows: list[dict]) -> list[dict]:
+    workers = {}
+    for r in rows or []:
+        w = _gr_row_worker(r)
+        rec = workers.setdefault(w, {"Worker": w, "Contacts": 0, "Favorable": 0, "Not Home": 0, "Follow-Ups": 0})
+        rec["Contacts"] += 1
+        if _gr_result_label(r.get("result")) == "Favorable":
+            rec["Favorable"] += 1
+        if _gr_result_label(r.get("result")) == "Not Home":
+            rec["Not Home"] += 1
+        if _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")):
+            rec["Follow-Ups"] += 1
+    out = []
+    for rec in workers.values():
+        out.append({
+            "Worker": rec["Worker"],
+            "Contacts": f'{rec["Contacts"]:,}',
+            "Favorable": f'{rec["Favorable"]:,}',
+            "Not Home": f'{rec["Not Home"]:,}',
+            "Follow-Ups": f'{rec["Follow-Ups"]:,}',
+        })
+    return sorted(out, key=lambda x: _gr_int(x["Contacts"]), reverse=True)
+
+def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
+    areas = {}
+    for r in rows or []:
+        area = _gr_row_area(r)
+        rec = areas.setdefault(area, {"Area": area, "Contacts": 0, "Favorable": 0, "Not Home": 0, "Follow-Ups": 0})
+        rec["Contacts"] += 1
+        if _gr_result_label(r.get("result")) == "Favorable":
+            rec["Favorable"] += 1
+        if _gr_result_label(r.get("result")) == "Not Home":
+            rec["Not Home"] += 1
+        if _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")):
+            rec["Follow-Ups"] += 1
+    out = []
+    for rec in areas.values():
+        out.append({
+            "Area": rec["Area"],
+            "Contacts": f'{rec["Contacts"]:,}',
+            "Favorable": f'{rec["Favorable"]:,}',
+            "Not Home": f'{rec["Not Home"]:,}',
+            "Follow-Ups": f'{rec["Follow-Ups"]:,}',
+            "Contact Share": _gr_percent(rec["Contacts"], len(rows)),
+        })
+    return sorted(out, key=lambda x: _gr_int(x["Contacts"]), reverse=True)
+
+def _gr_recent_notes(rows: list[dict], limit: int = 8) -> list[dict]:
+    noted = []
+    for r in rows or []:
+        notes = _gr_clean(r.get("notes") or r.get("Notes"))
+        if not notes:
+            continue
+        noted.append({
+            "Result": _gr_result_label(r.get("result")),
+            "Voter": _gr_clean(r.get("voter_name") or r.get("Name")),
+            "Area": _gr_row_area(r),
+            "Worker": _gr_row_worker(r),
+            "Notes": notes[:80],
+        })
+    return noted[-limit:][::-1]
+
+def render_grassroots_reporting_v1(campaign_id: str) -> None:
+    st.markdown("### Grassroots Reporting")
+    st.caption("Management report for campaign leadership: coverage, contact results, follow-up load, worker production, and where to push next.")
+
+    try:
+        store = load_outreach_programs_store(campaign_id)
+        programs = store.get("programs") or []
+    except Exception:
+        programs = []
+    counts = _program_manager_counts_c46(campaign_id, programs)
+    mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
+    rows_all = _gr_dedupe_rows(mobile.get("synced_rows") or mobile.get("rows") or [])
+    total_assigned_all = _gr_int(counts.get("total_voters"))
+
+    program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
+    selected_program = st.selectbox("Program scope", program_names if program_names else ["All Programs"], key=f"gr_report_program_{campaign_id}")
+    if selected_program != "All Programs":
+        rows = [r for r in rows_all if _gr_row_program(r) == selected_program]
+        total_assigned = total_assigned_all
+    else:
+        rows = rows_all
+        total_assigned = total_assigned_all
+
+    contacted = len(rows)
+    remaining = max(total_assigned - contacted, 0) if total_assigned else 0
+    result_counts = {}
+    for r in rows:
+        result_counts[_gr_result_label(r.get("result"))] = result_counts.get(_gr_result_label(r.get("result")), 0) + 1
+    queue_count = len(_build_follow_up_queue_c46(rows)) if "_build_follow_up_queue_c46" in globals() else 0
+    contact_rate = _gr_percent(contacted, total_assigned) if total_assigned else "—"
+
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:4px 0 8px 0;">'
+        + _c46_compact_metric("Assigned Universe", f"{total_assigned:,}" if total_assigned else "—")
+        + _c46_compact_metric("Contacted", f"{contacted:,}")
+        + _c46_compact_metric("Not Contacted", f"{remaining:,}" if total_assigned else "—")
+        + _c46_compact_metric("Contact Rate", contact_rate)
+        + _c46_compact_metric("Favorable", f"{_gr_int(result_counts.get('Favorable')):,}")
+        + _c46_compact_metric("Follow-Ups", f"{queue_count:,}")
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
+    weak_areas = _gr_area_rows(rows, total_assigned)[:5]
+    recs = _gr_management_recommendations(total_assigned, contacted, result_counts, queue_count, weak_areas)
+    st.markdown(_c46_html_table(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Management Readout", max_rows=5), unsafe_allow_html=True)
+
+    left, right = st.columns([1, 1])
+    with left:
+        result_rows = [(k, v) for k, v in sorted(result_counts.items(), key=lambda x: x[1], reverse=True)]
+        st.markdown(_c46_hbar_chart("Contact Results", result_rows, max_rows=6), unsafe_allow_html=True)
+    with right:
+        follow_rows = [
+            ("Yard Signs", sum(1 for r in rows if _gr_truthy(r.get("yard_sign")))),
+            ("Follow-Up Needed", sum(1 for r in rows if _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")))),
+            ("MB Interest", sum(1 for r in rows if _gr_truthy(r.get("mail_ballot_interest")) or _gr_truthy(r.get("mb_interest")))),
+            ("Volunteer Interest", sum(1 for r in rows if _gr_truthy(r.get("volunteer_interest")))),
+            ("Not Home", _gr_int(result_counts.get("Not Home"))),
+        ]
+        st.markdown(_c46_hbar_chart("Action Signals", follow_rows, max_rows=6), unsafe_allow_html=True)
+
+    breakdown_tab, coverage_tab, workers_tab, notes_tab = st.tabs(["Voter Breakdowns", "Area / Coverage", "Workers", "Notes & Export"])
+
+    with breakdown_tab:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Party", _gr_row_party), ["Party", "Contacts", "Share"], title="Contacts by Party", max_rows=10), unsafe_allow_html=True)
+            st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Age Group", lambda r: _gr_age_group(r.get("age") or r.get("Age"))), ["Age Group", "Contacts", "Share"], title="Contacts by Age", max_rows=10), unsafe_allow_html=True)
+        with c2:
+            st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Gender", _gr_row_gender), ["Gender", "Contacts", "Share"], title="Contacts by Gender", max_rows=10), unsafe_allow_html=True)
+            st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Result", lambda r: _gr_result_label(r.get("result"))), ["Result", "Contacts", "Share"], title="Contacts by Result", max_rows=10), unsafe_allow_html=True)
+
+    with coverage_tab:
+        area_rows = _gr_area_rows(rows, total_assigned)
+        st.markdown(_c46_html_table(area_rows, ["Area", "Contacts", "Favorable", "Not Home", "Follow-Ups", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
+        remaining_row = [{"Metric": "Not contacted / remaining", "Count": f"{remaining:,}" if total_assigned else "—", "Manager interpretation": "Use this to decide whether the next push should be a new contact pass or follow-up/recontact work."}]
+        st.markdown(_c46_html_table(remaining_row, ["Metric", "Count", "Manager interpretation"], title="Uncontacted Universe", max_rows=1), unsafe_allow_html=True)
+
+    with workers_tab:
+        worker_rows = _gr_worker_rows(rows)
+        st.markdown(_c46_html_table(worker_rows, ["Worker", "Contacts", "Favorable", "Not Home", "Follow-Ups"], title="Worker Production", max_rows=15), unsafe_allow_html=True)
+
+    with notes_tab:
+        recent = _gr_recent_notes(rows, limit=10)
+        st.markdown(_c46_html_table(recent, ["Result", "Voter", "Area", "Worker", "Notes"], title="Recent Field Notes", max_rows=10), unsafe_allow_html=True)
+        if rows:
+            import pandas as pd
+            export_rows = []
+            for r in rows:
+                export_rows.append({
+                    "program": _gr_row_program(r),
+                    "assignment": _gr_clean(r.get("assignment_name")),
+                    "area": _gr_row_area(r),
+                    "worker": _gr_row_worker(r),
+                    "voter": _gr_clean(r.get("voter_name")),
+                    "party": _gr_row_party(r),
+                    "gender": _gr_row_gender(r),
+                    "age_group": _gr_age_group(r.get("age") or r.get("Age")),
+                    "result": _gr_result_label(r.get("result")),
+                    "yard_sign": _gr_truthy(r.get("yard_sign")),
+                    "follow_up": _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")),
+                    "mb_interest": _gr_truthy(r.get("mail_ballot_interest")) or _gr_truthy(r.get("mb_interest")),
+                    "volunteer_interest": _gr_truthy(r.get("volunteer_interest")),
+                    "notes": _gr_clean(r.get("notes") or r.get("Notes")),
+                })
+            csv = pd.DataFrame(export_rows).to_csv(index=False).encode("utf-8")
+            st.download_button("Download Grassroots Reporting CSV", data=csv, file_name=f"grassroots_reporting_{campaign_id}.csv", mime="text/csv", key=f"gr_report_csv_{campaign_id}")
+
+
 def render_voter_outreach_workspace():
     st.markdown("## Grassroots Center")
     st.caption("Dashboard first; Programs are the command center. Door-to-door, phone, text, mail, assignments, and results live inside each program.")
@@ -14083,9 +14401,7 @@ def render_voter_outreach_workspace():
         store = load_mobile_results_store(campaign_id)
         render_follow_up_queue_c46(_mobile_result_rows(store), panel_id="workspace")
     with tab_reporting:
-        st.markdown("### Campaign Reporting")
-        st.caption("Campaign-wide outreach reporting across active programs. Program-specific results stay inside each Program workspace.")
-        render_outreach_dashboard_v1(campaign_id, panel_id="reporting")
+        render_grassroots_reporting_v1(campaign_id)
     with tab_legacy:
         st.markdown("### Legacy Setup")
         st.warning("Use only for older grassroots records. The simplified workflow is Dashboard → Programs → Follow-Up Queue.")
