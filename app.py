@@ -17,6 +17,19 @@ import string
 from datetime import datetime, timedelta
 from pathlib import Path
 
+
+# C4.6.39 — web completion math guard
+def cc639_safe_completion_pct(completed, assigned_total):
+    try:
+        completed = int(completed or 0)
+        assigned_total = int(assigned_total or 0)
+        if assigned_total <= 0:
+            return "0%"
+        return f"{(completed / assigned_total) * 100:.1f}%"
+    except Exception:
+        return "0%"
+
+
 # C4.6.34 — browser refresh section restore helpers
 def cc634_get_qp(name: str, default: str = "") -> str:
     try:
