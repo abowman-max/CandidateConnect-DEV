@@ -18,6 +18,29 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+# C4.7.17 — readable sidebar filter summaries
+def cc417_sidebar_filter_summary(label, values, max_items=5):
+    try:
+        vals = list(values or [])
+    except Exception:
+        vals = []
+    if not vals:
+        return
+    shown = ", ".join(str(v) for v in vals[:max_items])
+    if len(vals) > max_items:
+        shown += f", +{len(vals)-max_items} more"
+    st.markdown(
+        f"""
+        <div class="cc417-filter-summary">
+            <span class="cc417-filter-summary-label">{html.escape(str(label))}:</span>
+            <span>{html.escape(shown)}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
 
 # C4.6.39 — web completion math guard
 def cc639_safe_completion_pct(completed, assigned_total):
@@ -91,6 +114,106 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
+
+
+
+# C4.7.17 — sidebar filter control readability fix
+st.markdown("""
+<style>
+/* Sidebar filter controls: compact one-line height */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    margin-bottom: 4px !important;
+}
+
+/* Compact the BaseWeb select box itself */
+section[data-testid="stSidebar"] div[data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 36px !important;
+    height: 36px !important;
+    max-height: 36px !important;
+    overflow: hidden !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    min-height: 36px !important;
+    height: 36px !important;
+    max-height: 36px !important;
+    padding: 0 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+}
+
+/* Hide the clipped internal placeholder/chips in sidebar only */
+section[data-testid="stSidebar"] div[data-baseweb="select"] input {
+    color: transparent !important;
+    caret-color: transparent !important;
+    min-width: 1px !important;
+    width: 1px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="tag"] {
+    display: none !important;
+}
+
+/* Provide a clean visible placeholder over the compact select box */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] div[data-baseweb="select"]::before {
+    content: "Choose options";
+    color: #071d3a;
+    font-size: 13px;
+    line-height: 36px;
+    padding-left: 10px;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* Keep dropdown arrow visible on the right */
+section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
+    display: block !important;
+}
+
+/* Readable selected-value summary under controls */
+.cc417-filter-summary {
+    max-width: 350px;
+    margin: -1px 0 6px 0;
+    padding: 5px 8px;
+    border: 1px solid #d8c7b5;
+    border-radius: 7px;
+    background: #f8f1e6;
+    color: #071d3a;
+    font-size: 12px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+.cc417-filter-summary-label {
+    font-weight: 800;
+    color: #5f6b7a;
+}
+
+/* Final sidebar width remains usable */
+section[data-testid="stSidebar"] {
+    min-width: 390px !important;
+    width: 390px !important;
+    max-width: 390px !important;
+    flex: 0 0 390px !important;
+}
+section[data-testid="stSidebar"] .block-container,
+section[data-testid="stSidebar"] > div:first-child {
+    min-width: 390px !important;
+    width: 390px !important;
+    max-width: 390px !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    box-sizing: border-box !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
