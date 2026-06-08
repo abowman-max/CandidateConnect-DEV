@@ -16742,3 +16742,192 @@ div[data-testid="stDataFrame"] [role="gridcell"] {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# C4.7.9 FINAL sidebar override — loaded last so old v29/v30 sidebar CSS cannot override it
+st.markdown("""
+<style>
+/* FINAL sidebar lane size. This deliberately wins over older v29/v30 250px rules. */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"][aria-expanded="true"],
+section[data-testid="stSidebar"][aria-expanded="true"] {
+    width: 390px !important;
+    min-width: 390px !important;
+    max-width: 390px !important;
+    flex-basis: 390px !important;
+    flex-shrink: 0 !important;
+    overflow-x: hidden !important;
+    background: #e6ddcc !important;
+    border-right: 2px solid #9f151c !important;
+}
+[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebarContent"],
+[data-testid="stSidebar"] .block-container,
+section[data-testid="stSidebar"] .block-container {
+    width: 390px !important;
+    min-width: 390px !important;
+    max-width: 390px !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
+/* All sidebar navigation buttons: left-aligned, readable, never centered. */
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] [data-testid="stButton"] {
+    width: 100% !important;
+    max-width: 360px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] [data-testid="stButton"] > button,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"],
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"],
+[data-testid="stSidebar"] button[kind="secondary"],
+[data-testid="stSidebar"] button[kind="primary"] {
+    width: 100% !important;
+    max-width: 360px !important;
+    min-width: 0 !important;
+    min-height: 34px !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 6px 12px !important;
+    margin: 2px 0 4px 0 !important;
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+    box-sizing: border-box !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] [data-testid="stButton"] > button *,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] *,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"] * {
+    justify-content: flex-start !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-size: 14px !important;
+}
+
+/* Expander cards/header labels: left aligned and wide enough to read. */
+[data-testid="stSidebar"] details {
+    width: 100% !important;
+    max-width: 360px !important;
+    margin: 5px 0 7px 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+[data-testid="stSidebar"] details summary {
+    width: 100% !important;
+    max-width: 360px !important;
+    min-height: 34px !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 7px 12px !important;
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
+    font-weight: 900 !important;
+    box-sizing: border-box !important;
+}
+[data-testid="stSidebar"] details summary *,
+[data-testid="stSidebar"] details summary p,
+[data-testid="stSidebar"] details summary span {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-size: 14px !important;
+}
+[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+    width: 100% !important;
+    max-width: 360px !important;
+    padding: 8px 10px 10px 10px !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+}
+
+/* Filter labels and text compact/readable. */
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] label p,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] {
+    font-size: 14px !important;
+    line-height: 1.18 !important;
+}
+
+/* Multiselect/select controls: wide enough and not clipped. */
+[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 340px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    width: 100% !important;
+    max-width: 340px !important;
+    min-height: 38px !important;
+    height: auto !important;
+    padding-left: 14px !important;
+    padding-right: 10px !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+}
+
+/* Do NOT hide selected chips. Make them readable and prevent first-character clipping. */
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+    display: inline-flex !important;
+    max-width: 285px !important;
+    min-width: 0 !important;
+    margin: 2px 4px 2px 0 !important;
+    padding-left: 12px !important;
+    padding-right: 6px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"] span,
+[data-testid="stSidebar"] [data-baseweb="tag"] div {
+    max-width: 240px !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+}
+
+/* Placeholder/input text should not start under the left border. */
+[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
+    padding-left: 8px !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
+    min-width: 140px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
