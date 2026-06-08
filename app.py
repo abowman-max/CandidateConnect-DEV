@@ -15792,11 +15792,11 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:520px!important;width:520px!important;max-width:520px!important;flex:0 0 520px!important;overflow-x:hidden!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:300px!important;width:300px!important;max-width:300px!important;overflow-x:hidden!important;}
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
-[data-testid="stSidebar"] .stButton>button{height:auto!important;min-height:34px!important;max-height:none!important;width:100%!important;max-width:480px!important;margin:0 0 4px 0!important;padding:6px 12px!important;border-radius:8px!important;text-align:left!important;justify-content:flex-start!important;white-space:normal!important;overflow:visible!important;}
+[data-testid="stSidebar"] .stButton>button{height:auto!important;min-height:30px!important;max-height:none!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 8px!important;border-radius:8px!important;text-align:left!important;justify-content:flex-start!important;white-space:normal!important;overflow:visible!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
@@ -15820,53 +15820,100 @@ header[data-testid="stHeader"]{visibility:visible!important;height:auto!importan
 </style>
 """, unsafe_allow_html=True)
 
-# C4.7.24 — EARLY active sidebar filter repair, after production CSS lock
+# C4.7.25 — compact sidebar fix inside real lane
 st.markdown("""
 <style>
-/* Active left sidebar width */
+/* Do not over-widen: fit inside the actual left lane */
 [data-testid="stSidebar"], section[data-testid="stSidebar"] {
-  min-width: 520px !important;
-  width: 520px !important;
-  max-width: 520px !important;
-  flex: 0 0 520px !important;
+  min-width: 300px !important;
+  width: 300px !important;
+  max-width: 300px !important;
   overflow-x: hidden !important;
+  background: #e6ddcc !important;
 }
 [data-testid="stSidebar"] > div:first-child,
 [data-testid="stSidebar"] .block-container,
 section[data-testid="stSidebar"] > div:first-child,
 section[data-testid="stSidebar"] .block-container {
-  min-width: 520px !important;
-  width: 520px !important;
-  max-width: 520px !important;
-  padding-left: 16px !important;
-  padding-right: 16px !important;
+  min-width: 300px !important;
+  width: 300px !important;
+  max-width: 300px !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
   box-sizing: border-box !important;
   overflow-x: hidden !important;
 }
 
-/* Menu and submenu buttons */
+/* Sidebar nav compact + left aligned */
 [data-testid="stSidebar"] .stButton > button,
 section[data-testid="stSidebar"] .stButton > button {
-  max-width: 480px !important;
+  max-width: 280px !important;
   width: 100% !important;
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 5px 8px !important;
   text-align: left !important;
   justify-content: flex-start !important;
   white-space: normal !important;
   overflow: visible !important;
+  font-size: 12.5px !important;
+  line-height: 1.1 !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+section[data-testid="stSidebar"] .stButton > button * {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  font-size: 12.5px !important;
+  line-height: 1.1 !important;
 }
 
-/* Remove wrapper halos, keep actual button/header borders */
+/* Remove extra wrapper halos */
 [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
 section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
 [data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
 section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+  box-shadow: none !important;
   border: 0 !important;
   outline: 0 !important;
-  box-shadow: none !important;
   background: transparent !important;
 }
 
-/* Filter dropdowns: functional, wide, white, readable */
+/* Expander headers compact */
+[data-testid="stSidebar"] details,
+section[data-testid="stSidebar"] details {
+  max-width: 280px !important;
+  width: 100% !important;
+  margin: 4px 0 !important;
+  overflow: hidden !important;
+}
+[data-testid="stSidebar"] details > summary,
+section[data-testid="stSidebar"] details > summary {
+  max-width: 280px !important;
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 5px 8px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  font-size: 12.5px !important;
+  line-height: 1.1 !important;
+}
+[data-testid="stSidebar"] details > summary *,
+section[data-testid="stSidebar"] details > summary * {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  font-size: 12.5px !important;
+}
+
+/* Filter labels compact */
+[data-testid="stSidebar"] label p,
+section[data-testid="stSidebar"] label p {
+  font-size: 12.5px !important;
+  line-height: 1.1 !important;
+}
+
+/* Native select/multiselect: fit lane, white bg, dark text, vertically readable */
 [data-testid="stSidebar"] [data-testid="stMultiSelect"],
 [data-testid="stSidebar"] [data-testid="stSelectbox"],
 [data-testid="stSidebar"] [data-baseweb="select"],
@@ -15874,29 +15921,29 @@ section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"],
 section[data-testid="stSidebar"] [data-baseweb="select"] {
   width: 100% !important;
-  max-width: 470px !important;
+  max-width: 270px !important;
   min-width: 0 !important;
-  box-sizing: border-box !important;
   overflow: visible !important;
+  box-sizing: border-box !important;
 }
 [data-testid="stSidebar"] [data-baseweb="select"] > div,
 section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-  min-height: 52px !important;
-  height: 52px !important;
-  max-height: 52px !important;
-  max-width: 470px !important;
+  max-width: 270px !important;
   width: 100% !important;
-  padding: 0 14px 0 24px !important;
+  min-height: 42px !important;
+  height: 42px !important;
+  max-height: 42px !important;
+  padding: 0 8px 0 12px !important;
   display: flex !important;
   align-items: center !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
   background: #ffffff !important;
   color: #071d3a !important;
   -webkit-text-fill-color: #071d3a !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
 }
 
-/* BaseWeb current versions use these internal wrappers */
+/* Current BaseWeb internals */
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="InputContainer"],
@@ -15905,11 +15952,11 @@ section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContai
 section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
 section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="InputContainer"],
 section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="input-container"] {
-  min-height: 46px !important;
-  height: 46px !important;
+  min-height: 38px !important;
+  height: 38px !important;
   display: flex !important;
   align-items: center !important;
-  padding-left: 18px !important;
+  padding-left: 10px !important;
   margin-left: 0 !important;
   overflow: visible !important;
   background: #ffffff !important;
@@ -15917,22 +15964,20 @@ section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="input-conta
   -webkit-text-fill-color: #071d3a !important;
 }
 
-/* Placeholder/input */
 [data-testid="stSidebar"] [data-baseweb="select"] input,
 section[data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 330px !important;
-  height: 32px !important;
-  line-height: 32px !important;
-  padding-left: 18px !important;
+  min-width: 185px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  padding-left: 12px !important;
   margin-left: 0 !important;
-  text-indent: 0 !important;
   transform: none !important;
-  overflow: visible !important;
-  font-size: 14px !important;
-  background: transparent !important;
+  text-indent: 0 !important;
   color: #071d3a !important;
   -webkit-text-fill-color: #071d3a !important;
-  opacity: 1 !important;
+  caret-color: #071d3a !important;
+  background: transparent !important;
+  font-size: 12.5px !important;
 }
 [data-testid="stSidebar"] [data-baseweb="select"] input::placeholder,
 section[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder {
@@ -15941,17 +15986,17 @@ section[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder {
   opacity: 1 !important;
 }
 
-/* Selected chips */
+/* Selected chips fit */
 [data-testid="stSidebar"] [data-baseweb="tag"],
 section[data-testid="stSidebar"] [data-baseweb="tag"] {
   display: inline-flex !important;
   align-items: center !important;
-  min-height: 28px !important;
-  height: 28px !important;
-  max-width: 380px !important;
-  margin: 8px 4px 8px 10px !important;
-  padding-left: 14px !important;
-  padding-right: 6px !important;
+  max-width: 220px !important;
+  min-height: 24px !important;
+  height: 24px !important;
+  margin: 5px 2px 5px 4px !important;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
   overflow: visible !important;
   background: #f1e7d6 !important;
   color: #071d3a !important;
