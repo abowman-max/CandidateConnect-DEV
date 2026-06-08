@@ -320,6 +320,141 @@ section[data-testid="stSidebar"] details summary * {
 """, unsafe_allow_html=True)
 
 
+# C4.7.14 — final filter expander + multiselect height/readability fix
+st.markdown("""
+<style>
+/* Remove the extra rounded boxes around filter groups */
+section[data-testid="stSidebar"] details,
+section[data-testid="stSidebar"] details > div,
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] div[data-testid="stElementContainer"] {
+    box-shadow: none !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    outline: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 8px 8px 10px 8px !important;
+}
+
+/* Keep expander header as the only visible header card */
+section[data-testid="stSidebar"] details > summary {
+    border-radius: 8px !important;
+    min-height: 32px !important;
+    padding: 5px 10px !important;
+}
+
+/* Force sidebar multiselect/select controls to a normal compact height */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    margin-bottom: 6px !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    padding: 0 10px 0 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    border-radius: 8px !important;
+}
+
+/* BaseWeb internal containers: center text vertically and stop clipping first letters */
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    padding: 0 0 0 16px !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Placeholder/input visible and vertically centered */
+section[data-testid="stSidebar"] div[data-baseweb="select"] input {
+    height: 24px !important;
+    line-height: 24px !important;
+    min-width: 190px !important;
+    padding: 0 0 0 10px !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    text-indent: 0 !important;
+}
+
+/* For selected tags: compact, readable, no first-letter clipping */
+section[data-testid="stSidebar"] div[data-baseweb="tag"] {
+    display: inline-flex !important;
+    align-items: center !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    max-height: 26px !important;
+    margin: 6px 4px 6px 8px !important;
+    padding-left: 12px !important;
+    padding-right: 6px !important;
+    max-width: 280px !important;
+    overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] div {
+    max-width: 235px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+}
+
+/* Remove giant white empty vertical space from multiselect value area */
+section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+    line-height: 1.15 !important;
+}
+
+/* Sidebar menu labels remain left-aligned */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stButton > button *,
+section[data-testid="stSidebar"] details summary,
+section[data-testid="stSidebar"] details summary * {
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+
 
 # C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
 st.markdown("""
