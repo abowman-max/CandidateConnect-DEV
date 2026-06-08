@@ -86,52 +86,54 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-# C4.7.6 — hard sidebar containment and nav alignment repair
+
+
+# C4.7.7 — sidebar reset, wider lane, compact text, readable multiselects
 st.markdown("""
 <style>
-/* Hard contain the sidebar so controls cannot bleed into the main pane */
+/* Wider, stable left pane. Stop squeezing controls until text clips. */
 section[data-testid="stSidebar"] {
-    width: 285px !important;
-    min-width: 285px !important;
-    max-width: 285px !important;
-    flex: 0 0 285px !important;
+    width: 380px !important;
+    min-width: 380px !important;
+    max-width: 380px !important;
+    flex: 0 0 380px !important;
     overflow-x: hidden !important;
 }
 
-section[data-testid="stSidebar"] > div,
+section[data-testid="stSidebar"] > div:first-child,
 section[data-testid="stSidebar"] .block-container {
-    width: 285px !important;
-    min-width: 285px !important;
-    max-width: 285px !important;
-    padding-left: 6px !important;
-    padding-right: 6px !important;
+    width: 380px !important;
+    min-width: 380px !important;
+    max-width: 380px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
     overflow-x: hidden !important;
     box-sizing: border-box !important;
 }
 
-/* Everything inside sidebar must stay inside the sidebar lane */
-section[data-testid="stSidebar"] * {
-    box-sizing: border-box !important;
+/* Sidebar text scale: smaller and consistent. */
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div {
+    font-size: 13px !important;
+    line-height: 1.18 !important;
 }
 
-section[data-testid="stSidebar"] [data-testid="stButton"],
-section[data-testid="stSidebar"] [data-testid="stButton"] > button,
-section[data-testid="stSidebar"] button,
-section[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] details > summary,
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-section[data-testid="stSidebar"] [data-baseweb="select"] {
+/* Top-level nav buttons: centered, same width, no bleed. */
+section[data-testid="stSidebar"] [data-testid="stButton"] {
     width: 100% !important;
-    max-width: 270px !important;
-    min-width: 0 !important;
+    max-width: 356px !important;
     overflow: hidden !important;
 }
 
-/* Consistent nav button sizing/alignment */
 section[data-testid="stSidebar"] [data-testid="stButton"] > button {
-    height: 34px !important;
+    width: 100% !important;
+    max-width: 356px !important;
+    min-width: 0 !important;
     min-height: 34px !important;
+    height: 34px !important;
     padding: 4px 10px !important;
     margin: 2px 0 !important;
     display: flex !important;
@@ -139,69 +141,106 @@ section[data-testid="stSidebar"] [data-testid="stButton"] > button {
     justify-content: center !important;
     text-align: center !important;
     white-space: nowrap !important;
-    text-overflow: ellipsis !important;
     overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
 }
 
-/* Expander headers: keep section headers left-aligned, nav buttons centered */
+/* Section headers / expanders: left aligned and contained. */
+section[data-testid="stSidebar"] details {
+    width: 100% !important;
+    max-width: 356px !important;
+    margin: 5px 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
 section[data-testid="stSidebar"] details > summary {
+    width: 100% !important;
+    max-width: 356px !important;
     min-height: 34px !important;
-    padding: 5px 8px !important;
+    padding: 5px 10px !important;
     display: flex !important;
     align-items: center !important;
+    justify-content: flex-start !important;
     text-align: left !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
 }
 
 section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    padding: 7px 7px 9px 7px !important;
+    width: 100% !important;
+    max-width: 356px !important;
+    padding: 8px 8px 10px 8px !important;
     overflow-x: hidden !important;
+    box-sizing: border-box !important;
 }
 
-/* Select/multiselect boxes: reduce height and prevent oversized white blocks */
-section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-    min-height: 36px !important;
-    max-height: 40px !important;
-    padding-left: 8px !important;
-    padding-right: 6px !important;
-    overflow: hidden !important;
-    border-radius: 7px !important;
-}
-
-/* Fix clipped selected values/tags. The previous issue was left padding/overflow. */
-section[data-testid="stSidebar"] [data-baseweb="tag"] {
-    max-width: 220px !important;
-    margin: 2px 2px 2px 0 !important;
-    padding-left: 12px !important;
-    padding-right: 4px !important;
+/* Select and multiselect controls: full sidebar width, not oversized, not clipped. */
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+section[data-testid="stSidebar"] [data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 340px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
     overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    width: 100% !important;
+    max-width: 340px !important;
+    min-height: 36px !important;
+    padding: 4px 8px !important;
+    border-radius: 8px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Fix selected multiselect tag clipping: give the chip room and left padding. */
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+    max-width: 285px !important;
+    min-width: 0 !important;
+    margin-left: 8px !important;
+    margin-right: 4px !important;
+    padding-left: 12px !important;
+    padding-right: 6px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
 }
 
 section[data-testid="stSidebar"] [data-baseweb="tag"] span,
 section[data-testid="stSidebar"] [data-baseweb="tag"] div {
-    max-width: 180px !important;
+    max-width: 245px !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
+    padding-left: 0 !important;
 }
 
-/* BaseWeb internal value area sometimes overlays the first character. */
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"] {
-    padding-left: 4px !important;
+/* Placeholder and selected values should start normally, not under the left edge. */
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
+    padding-left: 6px !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
 }
 
-/* Compact labels */
+/* Keep labels compact. */
+section[data-testid="stSidebar"] label {
+    margin-bottom: 2px !important;
+}
 section[data-testid="stSidebar"] label p {
-    font-size: 14px !important;
-    line-height: 1.15 !important;
+    font-size: 13px !important;
+    line-height: 1.12 !important;
 }
 
-/* Keep the main pane safely to the right of the sidebar */
-div[data-testid="stAppViewContainer"] > .main {
-    min-width: 0 !important;
+/* Avoid old sidebar/main overlap artifacts. */
+section[data-testid="stSidebar"] * {
+    box-sizing: border-box !important;
 }
 </style>
 """, unsafe_allow_html=True)
