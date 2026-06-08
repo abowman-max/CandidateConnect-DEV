@@ -18,6 +18,24 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+# C4.7.8 helper — readable selected values for sidebar multiselects
+def cc_sidebar_selection_summary(label: str, values, limit: int = 6):
+    try:
+        vals = list(values or [])
+    except Exception:
+        vals = []
+    if not vals:
+        return
+    shown = ", ".join(str(v) for v in vals[:limit])
+    if len(vals) > limit:
+        shown += f", +{len(vals)-limit} more"
+    st.markdown(
+        f'<div class="cc-sidebar-selection-summary"><b>{html.escape(str(label))}:</b> {html.escape(shown)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+
 # C4.6.39 — web completion math guard
 def cc639_safe_completion_pct(completed, assigned_total):
     try:
@@ -88,162 +106,151 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-# C4.7.7 — sidebar reset, wider lane, compact text, readable multiselects
+
+
+# C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
 st.markdown("""
 <style>
-/* Wider, stable left pane. Stop squeezing controls until text clips. */
+/* Sidebar width: normal/wide enough, not clipped */
 section[data-testid="stSidebar"] {
-    width: 380px !important;
-    min-width: 380px !important;
-    max-width: 380px !important;
-    flex: 0 0 380px !important;
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+    flex: 0 0 360px !important;
     overflow-x: hidden !important;
 }
 
 section[data-testid="stSidebar"] > div:first-child,
 section[data-testid="stSidebar"] .block-container {
-    width: 380px !important;
-    min-width: 380px !important;
-    max-width: 380px !important;
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    overflow-x: hidden !important;
     box-sizing: border-box !important;
+    overflow-x: hidden !important;
 }
 
-/* Sidebar text scale: smaller and consistent. */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] span,
-section[data-testid="stSidebar"] div {
-    font-size: 13px !important;
-    line-height: 1.18 !important;
-}
-
-/* Top-level nav buttons: centered, same width, no bleed. */
-section[data-testid="stSidebar"] [data-testid="stButton"] {
+/* Important: all sidebar menu buttons left aligned, no centering */
+section[data-testid="stSidebar"] [data-testid="stButton"],
+section[data-testid="stSidebar"] [data-testid="stButton"] > button {
     width: 100% !important;
-    max-width: 356px !important;
-    overflow: hidden !important;
+    max-width: 336px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
 }
 
 section[data-testid="stSidebar"] [data-testid="stButton"] > button {
-    width: 100% !important;
-    max-width: 356px !important;
-    min-width: 0 !important;
-    min-height: 34px !important;
-    height: 34px !important;
-    padding: 4px 10px !important;
-    margin: 2px 0 !important;
-    display: flex !important;
+    display: block !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
     align-items: center !important;
-    justify-content: center !important;
-    text-align: center !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    box-sizing: border-box !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 6px 12px !important;
+    margin: 2px 0 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
 }
 
-/* Section headers / expanders: left aligned and contained. */
+/* Expander headers left aligned and readable */
 section[data-testid="stSidebar"] details {
     width: 100% !important;
-    max-width: 356px !important;
-    margin: 5px 0 !important;
-    overflow: hidden !important;
+    max-width: 336px !important;
     box-sizing: border-box !important;
+    overflow: hidden !important;
+    margin: 5px 0 !important;
 }
 
 section[data-testid="stSidebar"] details > summary {
     width: 100% !important;
-    max-width: 356px !important;
+    max-width: 336px !important;
     min-height: 34px !important;
-    padding: 5px 10px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: flex-start !important;
-    text-align: left !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    height: auto !important;
+    padding: 6px 12px !important;
     box-sizing: border-box !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
 }
 
 section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
     width: 100% !important;
-    max-width: 356px !important;
+    max-width: 336px !important;
     padding: 8px 8px 10px 8px !important;
-    overflow-x: hidden !important;
     box-sizing: border-box !important;
+    overflow-x: hidden !important;
 }
 
-/* Select and multiselect controls: full sidebar width, not oversized, not clipped. */
+/* Sidebar labels compact but readable */
+section[data-testid="stSidebar"] label p,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    font-size: 14px !important;
+    line-height: 1.18 !important;
+}
+
+/* Multiselect/select: contained but not crushed */
 section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"],
 section[data-testid="stSidebar"] [data-baseweb="select"] {
     width: 100% !important;
-    max-width: 340px !important;
+    max-width: 320px !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
-    overflow: visible !important;
 }
 
 section[data-testid="stSidebar"] [data-baseweb="select"] > div {
     width: 100% !important;
-    max-width: 340px !important;
-    min-height: 36px !important;
-    padding: 4px 8px !important;
-    border-radius: 8px !important;
-    overflow: visible !important;
+    max-width: 320px !important;
+    min-height: 38px !important;
+    height: auto !important;
+    padding-left: 10px !important;
+    padding-right: 8px !important;
     box-sizing: border-box !important;
-}
-
-/* Fix selected multiselect tag clipping: give the chip room and left padding. */
-section[data-testid="stSidebar"] [data-baseweb="tag"] {
-    max-width: 285px !important;
-    min-width: 0 !important;
-    margin-left: 8px !important;
-    margin-right: 4px !important;
-    padding-left: 12px !important;
-    padding-right: 6px !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="tag"] span,
-section[data-testid="stSidebar"] [data-baseweb="tag"] div {
-    max-width: 245px !important;
     overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-    padding-left: 0 !important;
 }
 
-/* Placeholder and selected values should start normally, not under the left edge. */
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
-    padding-left: 6px !important;
+/* Hide Streamlit/BaseWeb selected tags in sidebar because they clip first letters.
+   We will show selected values as readable text below the control from Python. */
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+    display: none !important;
+}
+
+/* Keep placeholder/input text visible and not shifted left under the border */
+section[data-testid="stSidebar"] [data-baseweb="select"] input {
+    padding-left: 4px !important;
     margin-left: 0 !important;
-    overflow: visible !important;
+    min-width: 120px !important;
 }
 
-/* Keep labels compact. */
-section[data-testid="stSidebar"] label {
-    margin-bottom: 2px !important;
+/* Sidebar readable selection summary injected below multiselects */
+.cc-sidebar-selection-summary {
+    max-width: 320px;
+    font-size: 12px;
+    line-height: 1.2;
+    color: #071d3a;
+    background: #f8f1e6;
+    border: 1px solid #d8c7b5;
+    border-radius: 7px;
+    padding: 5px 7px;
+    margin: -2px 0 7px 0;
+    overflow-wrap: anywhere;
 }
-section[data-testid="stSidebar"] label p {
-    font-size: 13px !important;
-    line-height: 1.12 !important;
-}
-
-/* Avoid old sidebar/main overlap artifacts. */
-section[data-testid="stSidebar"] * {
-    box-sizing: border-box !important;
+.cc-sidebar-selection-summary b {
+    color: #5f6b7a;
 }
 </style>
 """, unsafe_allow_html=True)
+
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
 <style>
