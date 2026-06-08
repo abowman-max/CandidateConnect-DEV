@@ -18,47 +18,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-# C4.7.29 — compatibility helper for legacy output-center metric summary
-def render_metric_summary(summary):
-    """Render a compact metric summary if the legacy helper is missing."""
-    try:
-        if summary is None:
-            return
-        if not isinstance(summary, dict):
-            st.write(summary)
-            return
-
-        items = list(summary.items())
-        if not items:
-            return
-
-        cols = st.columns(min(len(items), 4))
-        for i, (key, value) in enumerate(items):
-            label = str(key).replace("_", " ").title()
-            try:
-                if isinstance(value, (int, float)):
-                    display_value = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.1f}"
-                else:
-                    display_value = str(value)
-                with cols[i % len(cols)]:
-                    st.metric(label, display_value)
-            except Exception:
-                with cols[i % len(cols)]:
-                    st.markdown(f"**{label}**")
-                    st.write(value)
-    except Exception as e:
-        st.warning(f"Metric summary unavailable: {e}")
-
-
-
-# C4.7.28 — defensive fallback for legacy filter_options references
-try:
-    filter_options
-except NameError:
-    filter_options = {}
-
-
-
 
 # C4.6.39 — web completion math guard
 def cc639_safe_completion_pct(completed, assigned_total):
@@ -136,230 +95,323 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-
-
-# C4.7.27 — one consolidated CSS layer after removing conflicts
+# C4.7.18 — working sidebar filter visual repair only
 st.markdown("""
 <style>
-:root {
-  --cc-bg: #efe8d8;
-  --cc-card: #f8f4ea;
-  --cc-blue: #071d3a;
-  --cc-red: #9f151c;
-  --cc-line: rgba(159,21,28,.28);
-  color-scheme: light !important;
-}
+/* Keep the working sidebar layout from C4.7.16, but repair filter readability. */
 
-html, body, .stApp, [data-testid="stAppViewContainer"] {
-  background: var(--cc-bg) !important;
-  color: var(--cc-blue) !important;
-}
-
-.block-container {
-  max-width: 1280px !important;
-  margin-left: 0 !important;
-  margin-right: auto !important;
-  padding-top: 7.5rem !important;
-  padding-left: 1.25rem !important;
-  padding-right: 1.25rem !important;
-}
-
-h1, h2, h3, h4, h5, h6, p, label, span {
-  color: var(--cc-blue) !important;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-  background: #e6ddcc !important;
-  border-right: 2px solid var(--cc-red) !important;
-  width: 340px !important;
-  min-width: 340px !important;
-  max-width: 340px !important;
-  flex: 0 0 340px !important;
-  overflow-x: hidden !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container {
-  width: 340px !important;
-  min-width: 340px !important;
-  max-width: 340px !important;
-  padding: 7.5rem 10px 1rem 10px !important;
-  box-sizing: border-box !important;
-  overflow-x: hidden !important;
-}
-
-/* Sidebar nav */
-section[data-testid="stSidebar"] .stButton > button,
-section[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button {
-  width: 100% !important;
-  max-width: 316px !important;
-  min-height: 32px !important;
-  height: auto !important;
-  padding: 6px 10px !important;
-  margin: 2px 0 5px 0 !important;
-  border-radius: 9px !important;
-  border: 1px solid var(--cc-line) !important;
-  background: rgba(248,244,234,.78) !important;
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  font-weight: 850 !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  line-height: 1.15 !important;
-}
-
-section[data-testid="stSidebar"] .stButton > button *,
-section[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button * {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  text-align: left !important;
-  white-space: normal !important;
-}
-
-/* Expanders */
-section[data-testid="stSidebar"] details {
-  width: 100% !important;
-  max-width: 316px !important;
-  margin: 5px 0 !important;
-  border: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-}
-
-section[data-testid="stSidebar"] details > summary {
-  min-height: 32px !important;
-  padding: 6px 10px !important;
-  border-radius: 9px !important;
-  border: 1px solid var(--cc-line) !important;
-  background: rgba(248,244,234,.78) !important;
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  font-weight: 850 !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  line-height: 1.15 !important;
-}
-
-section[data-testid="stSidebar"] details > summary * {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  text-align: left !important;
-}
-
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
-  border: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 6px 4px 8px 4px !important;
-}
-
-/* Sidebar filters: do not overstyle BaseWeb internals */
-section[data-testid="stSidebar"] label p {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  font-size: 13px !important;
-  line-height: 1.15 !important;
-  margin-bottom: 2px !important;
-}
-
+/* Sidebar filter controls should be real dropdowns, compact, and clickable */
 section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    margin-bottom: 8px !important;
+    overflow: visible !important;
+}
+
+/* Compact one-line control height */
 section[data-testid="stSidebar"] div[data-baseweb="select"] {
-  width: 100% !important;
-  max-width: 304px !important;
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 40px !important;
+    height: auto !important;
+    overflow: visible !important;
 }
 
 section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-  background: #ffffff !important;
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  border: 1px solid #111 !important;
-  border-radius: 8px !important;
-  min-height: 42px !important;
-  height: auto !important;
-  padding: 4px 8px !important;
-  box-sizing: border-box !important;
-  overflow: visible !important;
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 10px 0 18px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    border-radius: 8px !important;
+}
+
+/* Value container/input: restore visible placeholder, fix first-letter clipping */
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
+    height: 38px !important;
+    min-height: 38px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding-left: 14px !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
 }
 
 section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  caret-color: var(--cc-blue) !important;
-  background: transparent !important;
-  min-width: 185px !important;
-  height: 26px !important;
-  line-height: 26px !important;
-  padding-left: 6px !important;
-  margin-left: 0 !important;
-  text-indent: 0 !important;
-  transform: none !important;
-  font-size: 13px !important;
+    color: #071d3a !important;
+    caret-color: #071d3a !important;
+    min-width: 220px !important;
+    width: auto !important;
+    height: 24px !important;
+    line-height: 24px !important;
+    padding-left: 14px !important;
+    margin-left: 0 !important;
+    text-indent: 0 !important;
+    transform: translateX(8px) !important;
+    overflow: visible !important;
+    font-size: 14px !important;
 }
 
+/* Placeholder text should be readable */
 section[data-testid="stSidebar"] div[data-baseweb="select"] input::placeholder {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  opacity: 1 !important;
+    color: #071d3a !important;
+    opacity: 1 !important;
 }
 
+/* Selected chips stay visible and readable; do not hide the real control */
 section[data-testid="stSidebar"] div[data-baseweb="tag"] {
-  background: #f1e7d6 !important;
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  max-width: 245px !important;
-  overflow: hidden !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    min-height: 24px !important;
+    height: 24px !important;
+    max-height: 24px !important;
+    margin: 5px 4px 5px 10px !important;
+    padding-left: 14px !important;
+    padding-right: 6px !important;
+    max-width: 290px !important;
+    overflow: visible !important;
 }
 
-/* Inputs */
-input, textarea, [data-baseweb="input"] input {
-  background: #ffffff !important;
-  color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  caret-color: #000000 !important;
+section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] div {
+    max-width: 245px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
 }
 
-/* Main buttons only outside sidebar */
-main .stButton > button:not(:disabled),
-main .stFormSubmitButton button:not(:disabled),
-main div[data-testid="stDownloadButton"] button:not(:disabled) {
-  background: linear-gradient(180deg,#b01822,#9f151c) !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  border: 1px solid #6f0d13 !important;
-  border-radius: 9px !important;
-  font-weight: 900 !important;
+/* Remove remaining doubled expander/body border, but leave each header/button border */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+    box-shadow: none !important;
 }
 
-/* Tabs */
-div[data-testid="stTabs"] button,
-div[data-testid="stTabs"] button *,
-[role="tab"], [role="tab"] * {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
-  font-weight: 900 !important;
-}
-
-/* Dataframes */
-[data-testid="stDataFrame"] {
-  background: #ffffff !important;
-  border: 1px solid var(--cc-red) !important;
-  border-radius: 10px !important;
+/* Make menu alignment consistent */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stButton > button *,
+section[data-testid="stSidebar"] details summary,
+section[data-testid="stSidebar"] details summary * {
+    text-align: left !important;
+    justify-content: flex-start !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# C4.7.18 — working sidebar filter visual repair only
+
 # C4.7.19 — sidebar width + selectbox vertical fit correction
+st.markdown("""
+<style>
+/* Wider sidebar so filters are not cut off left/right */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+    min-width: 460px !important;
+    width: 460px !important;
+    max-width: 460px !important;
+    flex: 0 0 460px !important;
+    overflow-x: hidden !important;
+}
+
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+    min-width: 460px !important;
+    width: 460px !important;
+    max-width: 460px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
+/* Give all sidebar controls enough width */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+section[data-testid="stSidebar"] div[data-baseweb="select"],
+[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+[data-testid="stSidebar"] div[data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 410px !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Fix vertical clipping: controls need more height */
+section[data-testid="stSidebar"] div[data-baseweb="select"],
+[data-testid="stSidebar"] div[data-baseweb="select"] {
+    min-height: 50px !important;
+    height: 50px !important;
+    max-height: 50px !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    min-height: 50px !important;
+    height: 50px !important;
+    max-height: 50px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 14px 0 22px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    border-radius: 8px !important;
+}
+
+/* BaseWeb internal value container: center placeholder/selected text vertically */
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
+    min-height: 46px !important;
+    height: 46px !important;
+    max-height: 46px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 0 0 18px !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Placeholder/input text: no top/bottom clipping, no first-letter clipping */
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+[data-testid="stSidebar"] div[data-baseweb="select"] input {
+    height: 30px !important;
+    min-height: 30px !important;
+    line-height: 30px !important;
+    min-width: 260px !important;
+    width: auto !important;
+    padding: 0 0 0 18px !important;
+    margin: 0 !important;
+    transform: none !important;
+    text-indent: 0 !important;
+    overflow: visible !important;
+    font-size: 14px !important;
+    color: #071d3a !important;
+}
+
+/* Selected chips: fit in the taller box */
+section[data-testid="stSidebar"] div[data-baseweb="tag"],
+[data-testid="stSidebar"] div[data-baseweb="tag"] {
+    display: inline-flex !important;
+    align-items: center !important;
+    min-height: 28px !important;
+    height: 28px !important;
+    max-height: 28px !important;
+    margin: 8px 4px 8px 10px !important;
+    padding-left: 14px !important;
+    padding-right: 6px !important;
+    max-width: 330px !important;
+    overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] div,
+[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+[data-testid="stSidebar"] div[data-baseweb="tag"] div {
+    max-width: 285px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+/* Keep sidebar menu readable within new width */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] details summary,
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] details summary {
+    max-width: 410px !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # Early hard CSS fixes: loaded before any st.stop() branches.
+st.markdown("""
+<style>
+
+/* C4.6.13 — Program setup: avoid unreadable multiselect chips by using checkbox selectors */
+.cc-program-selector-box {
+    border: 1px solid rgba(130, 109, 76, 0.35);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.55);
+    padding: 0.55rem 0.75rem 0.35rem 0.75rem;
+    margin-bottom: 0.35rem;
+}
+.cc-selected-summary {
+    font-size: 0.88rem;
+    color: #5f6b7a;
+    margin-top: -0.15rem;
+    margin-bottom: 0.55rem;
+    line-height: 1.25rem;
+}
+.cc-selected-summary strong {
+    color: #061c3a;
+}
+
+
+/* C4.6.12 — Global Streamlit multiselect chip readability fix */
+div[data-baseweb="select"] span[data-baseweb="tag"] {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+}
+
+div[data-baseweb="select"] span[data-baseweb="tag"] > span {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    text-align: left !important;
+    padding-left: 0.35rem !important;
+    padding-right: 0.25rem !important;
+}
+
+div[data-baseweb="select"] div[role="listbox"],
+div[data-baseweb="select"] div[data-baseweb="select"] {
+    overflow: visible !important;
+}
+
+div[data-baseweb="select"] input {
+    min-width: 2rem !important;
+}
+
+/* keep multiselect controls from crushing selected labels */
+.stMultiSelect div[data-baseweb="select"] > div {
+    min-height: 44px !important;
+    align-items: center !important;
+}
+
+/* login/setup card */
+div[data-testid="stForm"]{background:#f8f4ea!important;border:1px solid #b9ad99!important;border-radius:16px!important;box-shadow:0 12px 28px rgba(7,29,58,.12)!important;padding:22px 26px!important;}
+/* all normal action buttons */
+.stButton button:not(:disabled),.stFormSubmitButton button:not(:disabled),div[data-testid="stFormSubmitButton"] button:not(:disabled),div[data-testid="stDownloadButton"] button:not(:disabled),button[data-testid*="baseButton"]:not(:disabled){background:linear-gradient(180deg,#b01822,#9f151c)!important;background-color:#9f151c!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid #6f0d13!important;font-weight:900!important;opacity:1!important;text-shadow:none!important;}
+.stButton button:not(:disabled) *,.stFormSubmitButton button:not(:disabled) *,div[data-testid="stFormSubmitButton"] button:not(:disabled) *,div[data-testid="stDownloadButton"] button:not(:disabled) *,button[data-testid*="baseButton"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;fill:#fff!important;opacity:1!important;}
+/* disabled buttons */
+.stButton button:disabled,.stFormSubmitButton button:disabled,div[data-testid="stFormSubmitButton"] button:disabled,div[data-testid="stDownloadButton"] button:disabled{background:#d8cfc0!important;background-color:#d8cfc0!important;color:#222!important;-webkit-text-fill-color:#222!important;border:1px solid #b9ad99!important;opacity:.8!important;}
+.stButton button:disabled *,.stFormSubmitButton button:disabled *,div[data-testid="stFormSubmitButton"] button:disabled *,div[data-testid="stDownloadButton"] button:disabled *{color:#222!important;-webkit-text-fill-color:#222!important;}
+/* password eye: readable, not red */
+button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;background-color:#fff!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;border:0!important;border-left:1px solid #d0c7b7!important;opacity:1!important;}
+button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *,[data-baseweb="input"] button *{color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;fill:#071d3a!important;opacity:1!important;}
+/* leave tab buttons alone */
+div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;font-weight:900!important;}
+</style>
+""", unsafe_allow_html=True)
 try:
     st.set_option("runner.magicEnabled", False)
 except Exception:
@@ -368,10 +420,555 @@ except Exception:
 
 def inject_clean_theme_css():
     """Single Candidate Connect theme. Avoid broad global selectors that resize unrelated widgets."""
+    st.markdown("""
+<style>
+:root { color-scheme: light !important; }
+
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    background: #efe8d8 !important;
+    color: #071d3a !important;
+    font-size: 10pt !important;
+}
+
+.block-container {
+    max-width: 1280px !important;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+    padding: 9.0rem 1.25rem 1.25rem 1.5rem !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #071d3a !important;
+    font-weight: 900 !important;
+}
+
+p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
+
+/* fixed brand header */
+.cc-header { display: none !important; }
+
+.cc-global-header {
+    position: fixed !important;
+    inset: 0 0 auto 0 !important;
+    height: 142px !important;
+    z-index: 999999 !important;
+    background: #efe8d8 !important;
+    border-bottom: 2px solid #9f151c !important;
+    box-shadow: 0 6px 18px rgba(7,29,58,.16) !important;
+}
+
+.cc-global-sidebar-fill { display: none !important; }
+
+.cc-global-header-inner {
+    width: 100vw !important;
+    box-sizing: border-box !important;
+    padding: 10px 28px 12px 28px !important;
+}
+
+.cc-global-redbar {
+    height: 14px !important;
+    border-radius: 999px !important;
+    background: #940d14 !important;
+    border: 1px solid #5d0b10 !important;
+    margin-bottom: 6px !important;
+    box-shadow: 0 6px 14px rgba(7,29,58,.22) !important;
+}
+
+.cc-global-brand-row {
+    min-height: 108px !important;
+    display: grid !important;
+    grid-template-columns: 240px minmax(320px,1fr) 230px !important;
+    align-items: center !important;
+    gap: 18px !important;
+}
+
+.cc-global-tagline {
+    justify-self: start !important;
+    display: flex !important;
+    flex-direction: column !important;
+    color: #071d3a !important;
+    font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
+    font-size: 27px !important;
+    line-height: .92 !important;
+    letter-spacing: .02em !important;
+    text-transform: uppercase !important;
+    padding-left: 18px !important;
+}
+
+.cc-global-tagline span {
+    color: #071d3a !important;
+    text-shadow: 2px 2px 0 #f8f4ea, 3px 3px 5px rgba(7,29,58,.35) !important;
+}
+
+.cc-global-logo-center-wrap {
+    justify-self: center !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.cc-global-logo-center {
+    height: 96px !important;
+    max-width: 380px !important;
+    object-fit: contain !important;
+}
+
+.cc-global-logo-right {
+    justify-self: end !important;
+    height: 76px !important;
+    max-width: 230px !important;
+    object-fit: contain !important;
+}
+
+/* sidebar */
+[data-testid="stSidebar"] {
+    background: #e6ddcc !important;
+    border-right: 2px solid #9f151c !important;
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
+}
+
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 8.6rem !important;
+}
+
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
+
+[data-testid="stSidebar"] .stButton > button {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    width: 100% !important;
+    padding: 5px 9px !important;
+    margin: 0 0 4px 0 !important;
+    border-radius: 8px !important;
+    font-size: 10pt !important;
+    line-height: 1.1 !important;
+}
+
+/* real action buttons */
+.stButton > button,
+div[data-testid="stDownloadButton"] > button,
+[data-testid="stFileUploader"] button {
+    background: linear-gradient(180deg, #b01822, #8f1119) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #7a0d14 !important;
+    border-radius: 9px !important;
+    font-weight: 850 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    min-height: 34px !important;
+    padding: 6px 12px !important;
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+}
+
+.stButton > button *,
+div[data-testid="stDownloadButton"] > button *,
+[data-testid="stFileUploader"] button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+    background: #d8cfc0 !important;
+    color: #7a0d14 !important;
+    -webkit-text-fill-color: #7a0d14 !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: 1 !important;
+}
+
+/* controls */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+textarea,
+input {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    border-color: #8b8171 !important;
+    font-size: 10pt !important;
+}
+
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+
+[role="option"],
+[role="option"] * {
+    background: #ffffff !important;
+    color: #071d3a !important;
+}
+
+[role="option"]:hover,
+[role="option"][aria-selected="true"] {
+    background: #f1e7d6 !important;
+    color: #071d3a !important;
+}
+
+[data-baseweb="tag"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+}
+
+[data-baseweb="tag"] * {
+    color: #ffffff !important;
+}
+
+/* tabs: never style them like action buttons */
+div[data-testid="stTabs"] button,
+button[data-baseweb="tab"],
+[role="tab"] {
+    background: transparent !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    font-weight: 900 !important;
+}
+
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"] *,
+[role="tab"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: #b0121b !important;
+    height: 4px !important;
+}
+
+/* cards and dashboard elements */
+.cc-card,
+.cc-home-card,
+.cc-metric,
+.cc-icon-metric {
+    background: #f8f4ea !important;
+    color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 18px rgba(7,29,58,.12) !important;
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+}
+
+.cc-home-title {
+    font-size: 21pt !important;
+    font-weight: 950 !important;
+    letter-spacing: .05em !important;
+    text-transform: uppercase !important;
+    color: #071d3a !important;
+    margin: 6px 0 12px 0 !important;
+}
+
+.cc-icon-metric {
+    min-height: 70px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+.cc-icon-dot {
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 999px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%) !important;
+    color: #ffffff !important;
+}
+
+.cc-icon-dot.blue { background: radial-gradient(circle at 35% 20%, #60a5fa, #1d4ed8 72%) !important; }
+.cc-icon-dot.green { background: radial-gradient(circle at 35% 20%, #86efac, #3f8f27 72%) !important; }
+.cc-icon-dot.gold { background: radial-gradient(circle at 35% 20%, #fde68a, #b7791f 72%) !important; }
+
+.cc-icon-label,
+.cc-metric .label {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+    font-weight: 900 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .06em !important;
+}
+
+.cc-icon-value,
+.cc-metric .value {
+    color: #071d3a !important;
+    font-size: 19pt !important;
+    font-weight: 950 !important;
+    line-height: 1.05 !important;
+}
+
+.cc-icon-sub,
+.cc-metric .sub {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+}
+
+/* donut / charts */
+.cc-donut-wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 18px !important;
+    flex-wrap: wrap !important;
+    min-height: 190px !important;
+}
+
+.cc-donut {
+    width: 150px !important;
+    height: 150px !important;
+    border-radius: 50% !important;
+    position: relative !important;
+    flex: 0 0 auto !important;
+}
+
+.cc-donut:after {
+    content: '' !important;
+    position: absolute !important;
+    inset: 40px !important;
+    border-radius: 50% !important;
+    background: #071d3a !important;
+}
+
+.cc-donut-center,
+.cc-donut-center * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+    position: relative !important;
+    z-index: 2 !important;
+}
+
+.cc-legend-row {
+    display: grid !important;
+    grid-template-columns: 14px minmax(120px, 1fr) auto !important;
+    gap: 8px !important;
+    align-items: center !important;
+    margin: 8px 0 !important;
+    color: #071d3a !important;
+    font-size: 10pt !important;
+}
+
+.cc-swatch {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 999px !important;
+}
+
+.cc-age-row {
+    display: grid !important;
+    grid-template-columns: 64px 1fr 72px !important;
+    gap: 10px !important;
+    align-items: center !important;
+    margin: 7px 0 !important;
+    font-size: 10pt !important;
+}
+
+.cc-age-bar-bg {
+    height: 14px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+}
+
+.cc-age-bar {
+    height: 100% !important;
+    border-radius: 999px !important;
+    background: linear-gradient(90deg, #8b0d13, #ef4444) !important;
+}
+
+/* tables */
+.cc-table-wrap,
+.cc-scroll-table {
+    overflow: auto !important;
+    border: 1px solid #9f151c !important;
+    border-radius: 10px !important;
+    background: #ffffff !important;
+    margin: 8px 0 16px 0 !important;
+}
+
+.cc-html-table,
+.cc-home-table {
+    width: 100% !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+}
+
+.cc-html-table th,
+.cc-home-table th {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    text-align: center !important;
+    font-weight: 900 !important;
+    padding: 8px 10px !important;
+}
+
+.cc-html-table td,
+.cc-home-table td {
+    color: #000000 !important;
+    text-align: center !important;
+    padding: 7px 10px !important;
+    border-bottom: 1px solid #e7dfd2 !important;
+    vertical-align: middle !important;
+}
+
+.cc-html-table tbody tr:nth-child(even) td,
+.cc-home-table tbody tr:nth-child(even) td {
+    background: #f3eadc !important;
+}
+
+.cc-empty-table,
+.cc-note,
+.cc-verify {
+    border: 1px solid #8aa3bf !important;
+    background: #d9e8f8 !important;
+    color: #071d3a !important;
+    border-radius: 10px !important;
+    padding: 11px 13px !important;
+    margin: 10px 0 14px 0 !important;
+}
+
+/* login/setup */
+.cc-login-spacer { height: 2rem !important; }
+
+.cc-login-title {
+    text-align: center !important;
+    color: #071d3a !important;
+    font-size: 18pt !important;
+    font-weight: 950 !important;
+    margin-bottom: .25rem !important;
+}
+
+.cc-login-subtitle {
+    text-align: center !important;
+    color: #5f6b7a !important;
+    font-size: 10pt !important;
+    margin-bottom: 1rem !important;
+}
+
+div[data-testid="stForm"] {
+    max-width: 430px;
+}
+
+[data-testid="stFileUploader"] section {
+    background: #fbf7ee !important;
+    border: 1px solid rgba(170,20,30,.35) !important;
+    border-radius: 12px !important;
+}
+
+/* keep Streamlit menu hidden, but keep header recovery/collapse controls available */
+#MainMenu,
+footer,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+    visibility: hidden !important;
+    height: 0 !important;
+}
+
+header[data-testid="stHeader"] {
+    visibility: visible !important;
+    height: auto !important;
+    background: transparent !important;
+}
+
+/* Responsive header */
+@media (max-width: 900px) {
+    .cc-global-header { height: 118px !important; }
+    .block-container { padding-top: 7.8rem !important; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 7.8rem !important; }
+    .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
+    .cc-global-tagline { font-size: 17px !important; padding-left: 4px !important; }
+    .cc-global-logo-center { height: 70px !important; max-width: 230px !important; }
+    .cc-global-logo-right { height: 50px !important; max-width: 140px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 inject_clean_theme_css()
 
 
 # v37: Hide Streamlit dataframe toolbar/action icons for cleaner production UI.
+st.markdown("""
+<style>
+/* Hide dataframe hover toolbar/action controls that render as black icon blocks.
+   This keeps the table itself visible while removing Streamlit's built-in
+   developer-style search/fullscreen/download/overflow toolbar. */
+[data-testid="stElementToolbar"],
+[data-testid="stElementToolbar"] *,
+[data-testid="StyledFullScreenButton"],
+[data-testid="StyledFullScreenButton"] *,
+[data-testid="stDataFrameResizable"] button[title],
+[data-testid="stDataFrameResizable"] button[aria-label],
+div[data-testid="stDataFrame"] div[role="toolbar"],
+div[data-testid="stDataFrame"] div[role="toolbar"] *,
+div[data-testid="stDataFrame"] button[title="Search"],
+div[data-testid="stDataFrame"] button[title="Fullscreen"],
+div[data-testid="stDataFrame"] button[title="Download"],
+div[data-testid="stDataFrame"] button[title="More"],
+div[data-testid="stDataFrame"] button[aria-label="Search"],
+div[data-testid="stDataFrame"] button[aria-label="Fullscreen"],
+div[data-testid="stDataFrame"] button[aria-label="Download"],
+div[data-testid="stDataFrame"] button[aria-label="More"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+/* Help ? icon and tooltip readability only */
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stTooltipHoverTarget"] *,
+button[aria-label="Help"],
+button[aria-label="Help"] *,
+svg[aria-label="Help"],
+[data-testid="stWidgetLabel"] svg {
+    color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+[data-baseweb="popover"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
 VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
@@ -6896,10 +7493,9 @@ def render_mail_ballot_workspace():
     # This matters for cultivation work: users need to target DNA / Not Applied voters
     # without accidentally selecting Approved or Declined application statuses.
     def _default_mb_vals(field, candidates):
-        # C4.7.28 local filter_options fallback
-        filter_options = globals().get('filter_options', {})
         valid = list(field_options(filter_options, field, base))
         return [v for v in (candidates or []) if v in valid]
+
     c5, c6, c7, c8, c9 = st.columns(5)
     app_filed = c5.multiselect(
         "Mail Ballot Application",
@@ -14281,8 +14877,229 @@ def render_voter_outreach_workspace():
     # Make the page-level navigation read as navigation tabs, visually distinct from the
     # in-dashboard Grassroots cycle ribbon. Scoped as broadly as Streamlit allows, but
     # still uses the Candidate Connect beige/red/navy palette.
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stTabs"] > div[role="tablist"] {
+            gap: 4px;
+            border-bottom: 2px solid #b9aa96;
+            margin-bottom: 10px;
+        }
+        div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] {
+            border: 1px solid #b9aa96 !important;
+            border-bottom: 0 !important;
+            border-radius: 10px 10px 0 0 !important;
+            background: #f8f1e6 !important;
+            padding: 8px 14px !important;
+            color: #071d3a !important;
+            font-weight: 900 !important;
+        }
+        div[data-testid="stTabs"] > div[role="tablist"] button[aria-selected="true"] {
+            background: #fffaf1 !important;
+            color: #9f151c !important;
+            border-top: 4px solid #9f151c !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    tab_dash, tab_programs, tab_followups, tab_reporting, tab_legacy = st.tabs(["Dashboard", "Programs", "Follow-Up Queue", "Reporting", "Legacy Setup"])
+    with tab_dash:
+        render_outreach_dashboard_v1(campaign_id, panel_id="dashboard")
+    with tab_programs:
+        render_program_manager_a2(campaign_id)
+    with tab_followups:
+        st.markdown("### Follow-Up Queue")
+        store = load_mobile_results_store(campaign_id)
+        render_follow_up_queue_c46(_mobile_result_rows(store), panel_id="workspace")
+    with tab_reporting:
+        render_grassroots_reporting_v1(campaign_id)
+    with tab_legacy:
+        st.markdown("### Legacy Setup")
+        st.warning("Use only for older grassroots records. The simplified workflow is Dashboard → Programs → Follow-Up Queue.")
+        st.caption("Temporary holding area while old contact-program/list/assignment tools are migrated into Program workspaces.")
+        legacy_programs, legacy_lists, legacy_assign = st.tabs(["Contact Programs", "Contact Lists", "Assignments"] )
+        with legacy_programs:
+            render_contact_programs_workspace(campaign_id)
+        with legacy_lists:
+            render_contact_lists_workspace(campaign_id)
+        with legacy_assign:
+            render_assignments_workspace(campaign_id)
+
+def render_election_day_workspace():
+    st.markdown("## Election Day Operations")
+    st.info("Placeholder for poll coverage, workers, drivers, turnout tracking, incident reports, and end-of-night results. Built later using the same Team / Assignment foundation.")
+
+# Full-width branded header fixed across both the sidebar and main workspace.
+_cc_logo_uri = img_data_uri(LOGO_CANDIDATE_CONNECT)
+_tss_logo_uri = img_data_uri(LOGO_TPTC)
+_cc_logo_html = f'<img class="cc-global-logo-center" src="{_cc_logo_uri}" />' if _cc_logo_uri else '<div class="cc-title">Candidate Connect</div>'
+_tss_logo_html = f'<img class="cc-global-logo-right" src="{_tss_logo_uri}" />' if _tss_logo_uri else '<div class="cc-powered">Powered by<br><b>The Political Technology Company</b></div>'
+st.markdown(f'''<div class="cc-global-header">
+  <div class="cc-global-sidebar-fill"></div>
+  <div class="cc-global-header-inner">
+    <div class="cc-global-redbar"></div>
+    <div class="cc-global-brand-row">
+      <div class="cc-global-tagline"><span>Target.</span><span>Engage.</span><span>Win.</span></div>
+      <div class="cc-global-logo-center-wrap">{_cc_logo_html}</div>
+      {_tss_logo_html}
+    </div>
+  </div>
+</div>
+''', unsafe_allow_html=True)
+
+# Require login before loading the full data/filter layer.
+render_security_gate()
+
+# If an admin reset this password, block all app access until changed.
+if _user_must_change_password():
+    render_password_change_panel(forced=True)
+    st.stop()
+
+try:
+    with st.spinner("Loading filters from R2..."):
+        manifest, filter_options, geo_hierarchy = load_filter_layer()
+except Exception as e:
+    st.error("Could not load the filter layer."); st.exception(e); st.stop()
+
+if "filter_reset_token" not in st.session_state: st.session_state["filter_reset_token"] = 0
+if "left_section" not in st.session_state: st.session_state["left_section"] = None
+_filter_suffix = st.session_state["filter_reset_token"]
+
+
+# v29 DEV-only sidebar visual refinement:
+# Make the left navigation quieter and less overwhelming without touching main-pane action buttons.
+st.markdown("""
+<style>
+/* Sidebar-only navigation polish. Main workspace buttons are intentionally untouched. */
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button {
+    background: rgba(248,244,234,.72) !important;
+    background-color: rgba(248,244,234,.72) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid rgba(159,21,28,.24) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    font-weight: 850 !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 7px 10px !important;
+    margin: 2px 0 5px 0 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:hover {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    border-color: rgba(159,21,28,.55) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+/* Rollup headers: calm, professional blocks instead of mixed plain text/red buttons. */
+[data-testid="stSidebar"] details {
+    background: rgba(248,244,234,.30) !important;
+    border: 1px solid rgba(255,255,255,.34) !important;
+    border-radius: 11px !important;
+    margin: 9px 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+    background: rgba(248,244,234,.58) !important;
+    border: 1px solid rgba(159,21,28,.18) !important;
+    border-radius: 10px !important;
+    padding: 9px 10px !important;
+    font-size: 10.5pt !important;
+    font-weight: 950 !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+    background: #efe8d8 !important;
+    border-color: rgba(159,21,28,.42) !important;
+    box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    font-weight: 950 !important;
+}
+[data-testid="stSidebar"] details > div {
+    padding: 8px 8px 10px 8px !important;
+}
+
+/* Keep account captions quieter. */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+}
+
+/* Dashboard and logout no longer look like giant destructive action buttons. */
+[data-testid="stSidebar"] .stButton:first-of-type > button {
+    margin-top: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # C4 WEB RECOVERY: keep Streamlit sidebar controls available and undo browser-collapsed/sidebar-hidden state.
 # This is intentionally WEB ONLY and does not reintroduce the mobile shell.
+st.markdown("""
+<style>
+/* Restore the Streamlit sidebar and its collapsed/open control even if prior browser state collapsed it. */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+  z-index: 999990 !important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"],
+[data-testid="stSidebar"][aria-expanded="false"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
+[data-testid="stSidebarContent"],
+[data-testid="stSidebar"] > div:first-child {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+/* The user needs this visible as a safety valve. Do not hide it in DEV. */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[aria-label*="sidebar" i],
+button[title*="sidebar" i] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 1000005 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 cc634_restore_section()
 
 with st.sidebar:
@@ -14433,10 +15250,276 @@ with st.sidebar:
 # v30 DEV-only sidebar compact polish:
 # Final sidebar-only override loaded after the global Candidate Connect theme so the
 # left nav stays calm/compact even when a submenu item is the active page.
+st.markdown("""
+<style>
+/* v30 sidebar compact navigation — sidebar only; main/right-pane buttons untouched */
+[data-testid="stSidebar"] {
+  width: 250px !important;
+  min-width: 250px !important;
+  max-width: 250px !important;
+}
+
+/* compact all sidebar buttons: Dashboard, submenu items, Logout */
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  background: rgba(248,244,234,.74) !important;
+  background-color: rgba(248,244,234,.74) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 1px solid rgba(159,21,28,.22) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  font-size: 9.6pt !important;
+  font-weight: 750 !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  line-height: 1.05 !important;
+  padding: 3px 8px !important;
+  margin: 1px 0 3px 0 !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled):hover {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  border-color: rgba(159,21,28,.50) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+
+/* rollup cards: smaller and less vertical spacing */
+[data-testid="stSidebar"] details {
+  background: rgba(248,244,234,.20) !important;
+  border: 1px solid rgba(159,21,28,.14) !important;
+  border-radius: 11px !important;
+  margin: 5px 0 7px 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+  background: rgba(248,244,234,.62) !important;
+  border: 1px solid rgba(159,21,28,.18) !important;
+  border-radius: 10px !important;
+  min-height: 31px !important;
+  padding: 6px 8px !important;
+  font-size: 10pt !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+  background: #f4edde !important;
+  border-color: rgba(159,21,28,.32) !important;
+  box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  font-weight: 900 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 5px 6px 6px 6px !important;
+}
+
+/* buttons inside open rollups: even denser nav links */
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 28px !important;
+  height: 28px !important;
+  max-height: 28px !important;
+  margin: 1px 0 4px 0 !important;
+  padding: 3px 8px !important;
+  border-radius: 9px !important;
+  font-weight: 700 !important;
+  justify-content: center !important;
+}
+
+/* compact captions and separators */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  font-size: 8.7pt !important;
+  line-height: 1.15 !important;
+  margin-bottom: 2px !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 8px 0 !important;
+}
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 2px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # v31 DEV-only ultra-compact sidebar spacing override:
 # Loaded last so it tightens only the left sidebar navigation without touching right-pane controls.
+st.markdown("""
+<style>
+/* v31 ultra-compact sidebar spacing — sidebar only */
+[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+/* reduce generic Streamlit vertical wrappers inside sidebar */
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 0px !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  gap: 0.08rem !important;
+}
+
+/* top-level nav buttons */
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  min-height: 25px !important;
+  height: 25px !important;
+  max-height: 25px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.25pt !important;
+  line-height: 1 !important;
+}
+
+/* section rollups */
+[data-testid="stSidebar"] details {
+  margin: 3px 0 4px 0 !important;
+  border-radius: 9px !important;
+}
+[data-testid="stSidebar"] details summary {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 3px 7px !important;
+  border-radius: 8px !important;
+  font-size: 9.35pt !important;
+  line-height: 1 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 3px 5px 4px 5px !important;
+}
+
+/* submenu items inside open rollups */
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 24px !important;
+  height: 24px !important;
+  max-height: 24px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.1pt !important;
+  line-height: 1 !important;
+}
+
+/* compact account/status text and separators */
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+  margin-bottom: 0.22rem !important;
+  line-height: 1.15 !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  margin-bottom: 0px !important;
+  line-height: 1.05 !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 5px 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # v35 DEV-only dataframe / mouseover toolbar readability fix:
 # Loaded late and scoped to dataframes/tooltips so it does not change right-pane action buttons.
+st.markdown("""
+<style>
+/* v35: make Streamlit dataframe hover toolbar / three-dot menu readable */
+div[data-testid="stDataFrame"] button,
+div[data-testid="stDataFrame"] [role="button"],
+div[data-testid="stDataFrame"] [data-testid*="toolbar"],
+div[data-testid="stDataFrame"] [data-testid*="Toolbar"] {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  border-color: #cdbdaa !important;
+  opacity: 1 !important;
+}
+
+div[data-testid="stDataFrame"] button *,
+div[data-testid="stDataFrame"] [role="button"] *,
+div[data-testid="stDataFrame"] svg,
+div[data-testid="stDataFrame"] path {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  opacity: 1 !important;
+}
+
+div[data-testid="stDataFrame"] button:hover,
+div[data-testid="stDataFrame"] [role="button"]:hover {
+  background: #efe8d8 !important;
+  background-color: #efe8d8 !important;
+}
+
+/* Popover/tooltip/menu text that appears from dataframe toolbar icons */
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] *,
+div[role="tooltip"],
+div[role="tooltip"] *,
+div[data-testid="stTooltipContent"],
+div[data-testid="stTooltipContent"] * {
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* The tiny floating dataframe toolbar sometimes renders outside the dataframe node. */
+button[title*="Search"],
+button[title*="Download"],
+button[title*="Fullscreen"],
+button[title*="full screen"],
+button[aria-label*="Search"],
+button[aria-label*="Download"],
+button[aria-label*="Fullscreen"],
+button[aria-label*="full screen"] {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  stroke: #071d3a !important;
+  border: 1px solid #cdbdaa !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 active = active_filters()
 section = st.session_state.get("left_section")
 
@@ -14504,15 +15587,1418 @@ pass
 
 # Final Candidate Connect theme remediation based on the UI design template.
 # This is intentionally loaded last so it fixes color/layout conflicts without changing app logic.
+st.markdown("""
+<style>
+:root {
+  color-scheme: light !important;
+  --cc-red: #9f151c;
+  --cc-red-dark: #6f0d13;
+  --cc-red-hover: #7f1016;
+  --cc-blue: #071d3a;
+  --cc-blue-soft: #0b2545;
+  --cc-green: #246b2f;
+  --cc-beige: #efe8d8;
+  --cc-beige-2: #f8f4ea;
+  --cc-beige-row: #f3eadc;
+  --cc-gray: #5f6b7a;
+  --cc-border: #9f151c;
+}
+
+/* Page, content, and readable text */
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+  background: var(--cc-beige) !important;
+  color: var(--cc-blue) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 10pt !important;
+}
+.main .block-container, [data-testid="stMain"] .block-container, .block-container {
+  max-width: 1320px !important;
+  margin-left: 0 !important;
+  margin-right: auto !important;
+  padding-left: 1.5rem !important;
+  padding-right: 1.25rem !important;
+}
+h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
+  color: var(--cc-blue) !important;
+}
+small, .stCaption, [data-testid="stCaptionContainer"] {
+  color: var(--cc-gray) !important;
+}
+
+/* Header and sidebar */
+.cc-global-header {
+  background: var(--cc-beige) !important;
+  border-bottom: 2px solid var(--cc-red) !important;
+}
+.cc-global-redbar {
+  background: var(--cc-red) !important;
+  border-color: var(--cc-red-dark) !important;
+}
+.cc-global-tagline,
+.cc-global-tagline span {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
+  color: var(--cc-blue) !important;
+}
+[data-testid="stSidebar"], section[data-testid="stSidebar"] {
+  background: #e6ddcc !important;
+  color: var(--cc-blue) !important;
+  border-right: 2px solid var(--cc-red) !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
+[data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
+  color: var(--cc-blue) !important;
+}
+
+/* Action buttons: dark red background, white text. Does not affect tabs. */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled) {
+  background: linear-gradient(180deg, #b01822, var(--cc-red)) !important;
+  background-color: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid var(--cc-red-dark) !important;
+  border-radius: 9px !important;
+  font-weight: 850 !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  min-height: 34px !important;
+  padding: 6px 12px !important;
+  line-height: 1.15 !important;
+}
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *,
+button[data-testid="baseButton-secondary"]:not(:disabled) *,
+button[kind="primary"]:not(:disabled) *,
+button[kind="secondary"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+.stButton > button:not(:disabled):hover,
+div[data-testid="stDownloadButton"] > button:not(:disabled):hover,
+button[data-testid="baseButton-primary"]:not(:disabled):hover,
+button[data-testid="baseButton-secondary"]:not(:disabled):hover {
+  background: linear-gradient(180deg, var(--cc-red), var(--cc-red-dark)) !important;
+  background-color: var(--cc-red-hover) !important;
+}
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled,
+button[data-testid="baseButton-primary"]:disabled,
+button[data-testid="baseButton-secondary"]:disabled,
+button[kind="primary"]:disabled,
+button[kind="secondary"]:disabled {
+  background: #d8cfc0 !important;
+  background-color: #d8cfc0 !important;
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: 1 !important;
+}
+.stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+  color: #111111 !important;
+  -webkit-text-fill-color: #111111 !important;
+}
+
+/* Sidebar nav buttons remain compact */
+[data-testid="stSidebar"] .stButton > button {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  width: 100% !important;
+  margin: 0 0 4px 0 !important;
+  padding: 5px 9px !important;
+  border-radius: 8px !important;
+}
+
+/* Download buttons can use same red unless disabled; keep readable */
+div[data-testid="stDownloadButton"] > button:not(:disabled) {
+  background: linear-gradient(180deg, #b01822, var(--cc-red)) !important;
+}
+
+/* Tabs must always look like tabs, not buttons */
+div[data-testid="stTabs"] button,
+div[data-testid="stTabs"] button *,
+button[data-baseweb="tab"],
+button[data-baseweb="tab"] *,
+[role="tab"],
+[role="tab"] * {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  font-weight: 900 !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+  background-color: var(--cc-red) !important;
+  height: 4px !important;
+}
+
+/* Forms and dropdowns */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+textarea,
+input {
+  background: #ffffff !important;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  border-color: #111111 !important;
+  caret-color: #000000 !important;
+}
+input::placeholder,
+textarea::placeholder,
+[data-baseweb="input"] input::placeholder {
+  color: #5f6b7a !important;
+  -webkit-text-fill-color: #5f6b7a !important;
+  opacity: 1 !important;
+}
+[data-baseweb="select"] input,
+[data-baseweb="select"] span,
+[data-baseweb="select"] div {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+}
+[role="option"], [role="option"] * {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[role="option"]:hover,
+[role="option"][aria-selected="true"] {
+  background: #f1e7d6 !important;
+  color: var(--cc-blue) !important;
+}
+[data-baseweb="tag"] {
+  background: #e5e0d8 !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #b9ad99 !important;
+}
+[data-baseweb="tag"] * {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-testid="stCheckbox"] label,
+[data-testid="stCheckbox"] label *,
+[data-testid="stRadio"] label,
+[data-testid="stRadio"] label *,
+[data-testid="stToggle"] label,
+[data-testid="stToggle"] label * {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--cc-blue) !important;
+}
+
+/* Password eye icon and icon wells */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  border: 0 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: var(--cc-blue) !important;
+  fill: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+
+/* Expander headers: beige/light, not black */
+details,
+div[data-testid="stExpander"],
+div[data-testid="stExpander"] > details {
+  background: transparent !important;
+  color: var(--cc-blue) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+details > summary,
+details > summary *,
+div[data-testid="stExpander"] summary,
+div[data-testid="stExpander"] summary * {
+  background: var(--cc-beige-2) !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  font-weight: 850 !important;
+}
+details[open] > summary,
+div[data-testid="stExpander"] details[open] > summary {
+  border-bottom: 1px solid rgba(159,21,28,.25) !important;
+}
+
+/* Cards, alerts, info bubbles */
+.cc-card, .cc-home-card, .cc-metric, .cc-icon-metric,
+div[data-testid="stForm"] {
+  background: var(--cc-beige-2) !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 12px !important;
+}
+.cc-note, .cc-verify, .cc-empty-table, .stAlert {
+  background: #d9e8f8 !important;
+  color: var(--cc-blue) !important;
+  border: 1px solid #8aa3bf !important;
+}
+.cc-note *, .cc-verify *, .cc-empty-table *, .stAlert * {
+  color: var(--cc-blue) !important;
+}
+
+/* Donut charts: restore the actual colored segments */
+.cc-donut {
+  width: 150px !important;
+  height: 150px !important;
+  border-radius: 50% !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  background: conic-gradient(
+    #d51f2a 0 calc(var(--r) * 1%),
+    #2454d6 calc(var(--r) * 1%) calc((var(--r) + var(--d)) * 1%),
+    #4c9a2a calc((var(--r) + var(--d)) * 1%) 100%
+  ) !important;
+  box-shadow: 0 12px 22px rgba(7,29,58,.18) !important;
+}
+.cc-donut:after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 40px !important;
+  border-radius: 50% !important;
+  background: var(--cc-blue) !important;
+}
+.cc-donut-center,
+.cc-donut-center *,
+.cc-donut-center div,
+.cc-donut-center span {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.65) !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+.cc-swatch[style*="#d51f2a"] { background: #d51f2a !important; }
+.cc-swatch[style*="#2454d6"] { background: #2454d6 !important; }
+.cc-swatch[style*="#4c9a2a"] { background: #4c9a2a !important; }
+
+/* Age bars/charts */
+.cc-age-bar-bg {
+  background: var(--cc-blue) !important;
+}
+.cc-age-bar {
+  background: linear-gradient(90deg, #8b0d13, #ef4444) !important;
+}
+.cc-age-row, .cc-age-row *, .cc-legend-row, .cc-legend-row * {
+  color: var(--cc-blue) !important;
+}
+
+/* Tables */
+.cc-table-wrap, .cc-scroll-table, [data-testid="stDataFrame"], [data-testid="stTable"] {
+  background: #ffffff !important;
+  border: 1px solid var(--cc-red) !important;
+  border-radius: 10px !important;
+}
+.cc-html-table th, .cc-home-table th,
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stTable"] th {
+  background: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-align: center !important;
+  font-weight: 900 !important;
+}
+.cc-html-table td, .cc-home-table td,
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stTable"] td {
+  background: #ffffff !important;
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+  text-align: center !important;
+}
+.cc-html-table tbody tr:nth-child(even) td,
+.cc-home-table tbody tr:nth-child(even) td,
+[data-testid="stTable"] tr:nth-child(even) td {
+  background: var(--cc-beige-row) !important;
+}
+
+/* Election history tables keep dark style but readable */
+.cc-history-table {
+  background: #111827 !important;
+  color: #ffffff !important;
+}
+.cc-history-table th,
+.cc-history-table td {
+  background: #111827 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #374151 !important;
+}
+.cc-history-table th {
+  background: #1f2937 !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] section {
+  background: #fbf7ee !important;
+  color: var(--cc-blue) !important;
+  border-color: rgba(159,21,28,.35) !important;
+}
+[data-testid="stFileUploader"] *,
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] small {
+  color: var(--cc-blue) !important;
+  -webkit-text-fill-color: var(--cc-blue) !important;
+}
+[data-testid="stFileUploader"] button,
+[data-testid="stFileUploader"] button * {
+  background: var(--cc-red) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Code blocks: keep dark, but readable */
+pre, code, [data-testid="stCodeBlock"] {
+  background: #111827 !important;
+  color: #f8fafc !important;
+}
+pre *, code *, [data-testid="stCodeBlock"] * {
+  color: #f8fafc !important;
+}
+
+/* Login/setup card center and readable controls */
+.cc-login-title {
+  color: var(--cc-blue) !important;
+}
+.cc-login-subtitle {
+  color: var(--cc-gray) !important;
+}
+div[data-testid="stForm"] {
+  background: var(--cc-beige-2) !important;
+}
+
+/* Prevent old broad CSS from hiding useful controls */
+header[data-testid="stHeader"] {
+  visibility: visible !important;
+  height: auto !important;
+  background: transparent !important;
+}
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
+  visibility: hidden !important;
+  height: 0 !important;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  [data-testid="stSidebar"], section[data-testid="stSidebar"] {
+    min-width: 230px !important;
+    width: 230px !important;
+    max-width: 230px !important;
+  }
+  .cc-donut {
+    width: 135px !important;
+    height: 135px !important;
+  }
+  .cc-donut:after {
+    inset: 36px !important;
+  }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Final production CSS lock: fixes login readability and removes broad dark-on-dark conflicts.
+st.markdown("""
+<style>
+:root{--cc-red:#9f151c;--cc-red-dark:#6f0d13;--cc-blue:#071d3a;--cc-beige:#efe8d8;--cc-card:#f8f4ea;--cc-row:#f3eadc;--cc-gray:#5f6b7a;color-scheme:light!important;}
+html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!important;color:var(--cc-blue)!important;}
+.block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
+h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
+small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
+.stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
+.stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
+[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 9px!important;border-radius:8px!important;}
+.stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
+div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
+input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
+[data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;border:0!important;}
+button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *{color:var(--cc-blue)!important;fill:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+details,div[data-testid="stExpander"],div[data-testid="stExpander"]>details{background:var(--cc-card)!important;color:var(--cc-blue)!important;border:1px solid rgba(159,21,28,.35)!important;border-radius:10px!important;}
+details>summary,details>summary *,div[data-testid="stExpander"] summary,div[data-testid="stExpander"] summary *{background:var(--cc-card)!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:850!important;}
+.cc-card,.cc-home-card,.cc-metric,.cc-icon-metric,div[data-testid="stForm"]{background:var(--cc-card)!important;color:var(--cc-blue)!important;border:1px solid #b9ad99!important;border-radius:12px!important;}
+.cc-note,.cc-verify,.cc-empty-table,.stAlert{background:#d9e8f8!important;color:var(--cc-blue)!important;border:1px solid #8aa3bf!important;border-radius:10px!important;padding:14px 16px!important;}
+.cc-note *,.cc-verify *,.cc-empty-table *,.stAlert *{color:var(--cc-blue)!important;}
+[data-testid="stFileUploader"],[data-testid="stFileUploader"] section{background:#fbf7ee!important;color:var(--cc-blue)!important;border-color:rgba(159,21,28,.35)!important;}
+[data-testid="stFileUploader"] *{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
+[data-testid="stFileUploader"] button,[data-testid="stFileUploader"] button *{background:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;}
+pre,code,[data-testid="stCodeBlock"]{background:#111827!important;color:#f8fafc!important;}
+pre *,code *,[data-testid="stCodeBlock"] *{color:#f8fafc!important;}
+header[data-testid="stHeader"]{visibility:visible!important;height:auto!important;background:transparent!important;}
+#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{visibility:hidden!important;height:0!important;}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Final UI polish patch: login card, readable buttons/icons, compact party/gender bars.
+st.markdown("""
+<style>
+/* Login/setup professional card layout */
+div[data-testid="stForm"] {
+    background: #f8f4ea !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+    padding: 22px 26px !important;
+}
+
+/* Login/setup page content should be centered, not left-floating */
+.cc-login-wrap,
+.cc-login-card,
+.cc-auth-card,
+.cc-setup-card {
+    max-width: 460px !important;
+    margin: 0 auto !important;
+}
+
+/* Streamlit login form fallback: center the first form on auth pages */
+[data-testid="stVerticalBlock"]:has(div[data-testid="stForm"]) {
+    max-width: 520px !important;
+}
+
+/* Active buttons: always readable */
+.stButton > button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled),
+button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled),
+button[kind="secondary"]:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #9f151c) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #6f0d13 !important;
+    font-weight: 900 !important;
+    opacity: 1 !important;
+}
+.stButton > button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *,
+button[data-testid="baseButton-secondary"]:not(:disabled) *,
+button[kind="primary"]:not(:disabled) *,
+button[kind="secondary"]:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+/* Login button was dark navy with dark text; force login forms to red/white too */
+div[data-testid="stForm"] .stButton > button:not(:disabled) {
+    background: linear-gradient(180deg, #b01822, #9f151c) !important;
+    background-color: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    min-width: 88px !important;
+}
+div[data-testid="stForm"] .stButton > button:not(:disabled) * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Disabled buttons: readable but clearly disabled */
+.stButton > button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+    background: #d8cfc0 !important;
+    color: #222222 !important;
+    -webkit-text-fill-color: #222222 !important;
+    border: 1px solid #b9ad99 !important;
+    opacity: .75 !important;
+}
+.stButton > button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+    color: #222222 !important;
+    -webkit-text-fill-color: #222222 !important;
+}
+
+/* Password show/hide icon: readable navy on white */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border-left: 1px solid #d0c7b7 !important;
+    opacity: 1 !important;
+}
+button[aria-label*="password"] svg,
+button[title*="password"] svg,
+[data-testid="stTextInputRootElement"] button svg,
+[data-baseweb="input"] button svg {
+    fill: #071d3a !important;
+    color: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Compact party/gender bar charts. Each item stays on one row. */
+.cc-party-bars {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    margin-top: 8px !important;
+    width: 100% !important;
+}
+.cc-party-bar-row {
+    display: grid !important;
+    grid-template-columns: 150px minmax(180px, 1fr) 140px !important;
+    align-items: center !important;
+    gap: 10px !important;
+    min-height: 24px !important;
+    margin: 0 !important;
+}
+.cc-party-bar-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    color: #071d3a !important;
+    white-space: nowrap !important;
+}
+.cc-party-bar-track {
+    height: 12px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+    min-width: 120px !important;
+}
+.cc-party-bar-fill {
+    height: 100% !important;
+    border-radius: 999px !important;
+}
+.cc-party-bar-value {
+    font-size: 10pt !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    color: #071d3a !important;
+    white-space: nowrap !important;
+    text-align: left !important;
+}
+.cc-swatch {
+    width: 11px !important;
+    height: 11px !important;
+    min-width: 11px !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+}
+
+/* Give chart cards enough room, but not giant vertical waste */
+.cc-chart-card,
+.cc-card {
+    overflow: visible !important;
+}
+.cc-chart-card .cc-party-bars,
+.cc-card .cc-party-bars {
+    padding-bottom: 4px !important;
+}
+
+/* Keep table colors light/zebra even with sortable dataframe fallback */
+[data-testid="stDataFrame"] {
+    background: #ffffff !important;
+    border: 1px solid #9f151c !important;
+    border-radius: 10px !important;
+}
+[data-testid="stDataFrame"] * {
+    color: #071d3a !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
+    background: #9f151c !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 900 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Final focused patch v8: auth layout, readable controls, compact group bars.
+st.markdown("""
+<style>
+div[data-testid="stForm"] {
+    background: #f8f4ea !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+    padding: 22px 26px !important;
+    max-width: 460px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+.cc-login-title { text-align:center !important; color:#071d3a !important; font-size:18pt !important; font-weight:950 !important; }
+.cc-login-subtitle { text-align:center !important; color:#5f6b7a !important; font-size:10pt !important; }
+div[data-testid="stForm"] label, div[data-testid="stForm"] label *, div[data-testid="stForm"] p, div[data-testid="stForm"] span {
+    color:#071d3a !important; -webkit-text-fill-color:#071d3a !important; opacity:1 !important;
+}
+input, textarea, [data-baseweb="input"] input {
+    background:#ffffff !important; color:#000000 !important; -webkit-text-fill-color:#000000 !important; caret-color:#000000 !important;
+}
+.stButton > button:not(:disabled), div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid="baseButton-primary"]:not(:disabled), button[data-testid="baseButton-secondary"]:not(:disabled),
+button[kind="primary"]:not(:disabled), button[kind="secondary"]:not(:disabled) {
+    background:linear-gradient(180deg,#b01822,#9f151c) !important; background-color:#9f151c !important;
+    color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; border:1px solid #6f0d13 !important;
+    font-weight:900 !important; opacity:1 !important;
+}
+.stButton > button:not(:disabled) *, div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid="baseButton-primary"]:not(:disabled) *, button[data-testid="baseButton-secondary"]:not(:disabled) * {
+    color:#ffffff !important; -webkit-text-fill-color:#ffffff !important; opacity:1 !important;
+}
+.stButton > button:disabled, div[data-testid="stDownloadButton"] > button:disabled {
+    background:#d8cfc0 !important; color:#222222 !important; -webkit-text-fill-color:#222222 !important;
+    border:1px solid #b9ad99 !important; opacity:.75 !important;
+}
+button[aria-label*="password"], button[title*="password"], [data-testid="stTextInputRootElement"] button, [data-baseweb="input"] button {
+    background:#ffffff !important; color:#071d3a !important; -webkit-text-fill-color:#071d3a !important;
+    border-left:1px solid #d0c7b7 !important; opacity:1 !important;
+}
+button[aria-label*="password"] svg, button[title*="password"] svg, [data-testid="stTextInputRootElement"] button svg, [data-baseweb="input"] button svg {
+    color:#071d3a !important; fill:#071d3a !important; opacity:1 !important;
+}
+.cc-group-bar-card { overflow:visible !important; padding-bottom:14px !important; }
+.cc-total-line { color:#071d3a !important; font-weight:950 !important; font-size:11pt !important; margin:2px 0 8px 0 !important; }
+.cc-total-line span { color:#5f6b7a !important; font-size:9pt !important; margin-left:3px !important; }
+.cc-one-line-bars { display:flex !important; flex-direction:column !important; gap:8px !important; width:100% !important; padding-bottom:8px !important; }
+.cc-one-line-bar-row {
+    display:grid !important; grid-template-columns:150px minmax(170px,1fr) 140px !important;
+    gap:10px !important; align-items:center !important; min-height:22px !important;
+}
+.cc-one-line-bar-label {
+    display:flex !important; align-items:center !important; gap:7px !important; color:#071d3a !important;
+    font-weight:900 !important; font-size:10pt !important; line-height:1.1 !important; white-space:nowrap !important;
+}
+.cc-one-line-bar-track { height:12px !important; border-radius:999px !important; background:#071d3a !important; overflow:hidden !important; }
+.cc-one-line-bar-fill { height:100% !important; border-radius:999px !important; }
+.cc-one-line-bar-value { color:#071d3a !important; font-weight:900 !important; font-size:10pt !important; line-height:1.1 !important; white-space:nowrap !important; }
+.cc-swatch { width:11px !important; height:11px !important; min-width:11px !important; border-radius:50% !important; display:inline-block !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
 # Final source-level UI fixes v9.
+st.markdown("""
+<style>
+/* Login card: true centered professional card */
+div[data-testid="stForm"] {
+  background: #f8f4ea !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+  padding: 22px 26px !important;
+}
+
+/* ALL buttons, including form submit and BaseWeb buttons */
+button:not(:disabled),
+.stButton > button:not(:disabled),
+.stFormSubmitButton > button:not(:disabled),
+div[data-testid="stFormSubmitButton"] button:not(:disabled),
+div[data-testid="stDownloadButton"] > button:not(:disabled),
+button[data-testid*="baseButton"]:not(:disabled) {
+  background: linear-gradient(180deg,#b01822,#9f151c) !important;
+  background-color: #9f151c !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #6f0d13 !important;
+  font-weight: 900 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+button:not(:disabled) *,
+.stButton > button:not(:disabled) *,
+.stFormSubmitButton > button:not(:disabled) *,
+div[data-testid="stFormSubmitButton"] button:not(:disabled) *,
+div[data-testid="stDownloadButton"] > button:not(:disabled) *,
+button[data-testid*="baseButton"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Do NOT turn password eye into red button */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 0 !important;
+  border-left: 1px solid #d0c7b7 !important;
+  opacity: 1 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* Disabled buttons readable */
+button:disabled,
+.stButton > button:disabled,
+.stFormSubmitButton > button:disabled,
+div[data-testid="stFormSubmitButton"] button:disabled,
+div[data-testid="stDownloadButton"] > button:disabled {
+  background: #d8cfc0 !important;
+  background-color: #d8cfc0 !important;
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: .75 !important;
+}
+button:disabled *,
+.stButton > button:disabled *,
+.stFormSubmitButton > button:disabled *,
+div[data-testid="stFormSubmitButton"] button:disabled *,
+div[data-testid="stDownloadButton"] > button:disabled * {
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+}
+
+/* Compact, non-clipped party/gender bars */
+.cc-group-bar-card {
+  min-height: 230px !important;
+  height: auto !important;
+  overflow: visible !important;
+  padding: 18px 22px 22px 22px !important;
+}
+.cc-one-line-bars {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  width: 100% !important;
+  padding-bottom: 14px !important;
+}
+.cc-one-line-bar-row {
+  display: grid !important;
+  grid-template-columns: 150px minmax(180px, 1fr) 145px !important;
+  gap: 10px !important;
+  align-items: center !important;
+  min-height: 24px !important;
+}
+.cc-one-line-bar-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 10pt !important;
+  white-space: nowrap !important;
+}
+.cc-one-line-bar-track {
+  height: 12px !important;
+  border-radius: 999px !important;
+  background: #071d3a !important;
+  overflow: hidden !important;
+}
+.cc-one-line-bar-fill { height: 100% !important; border-radius: 999px !important; }
+.cc-one-line-bar-value {
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 10pt !important;
+  white-space: nowrap !important;
+}
+.cc-total-line {
+  color: #071d3a !important;
+  font-weight: 950 !important;
+  font-size: 11pt !important;
+  margin: 2px 0 12px 0 !important;
+}
+.cc-total-line span {
+  color: #5f6b7a !important;
+  font-size: 9pt !important;
+}
+.cc-swatch {
+  width: 11px !important;
+  height: 11px !important;
+  min-width: 11px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+}
+
+/* Account admin: no raw black JSON-looking blocks unless real code requested */
+.cc-boundary-summary {
+  background: #d9e8f8 !important;
+  color: #071d3a !important;
+  border: 1px solid #8aa3bf !important;
+  border-radius: 10px !important;
+  padding: 10px 12px !important;
+  margin: 8px 0 12px 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Final polish v10: buttons, password icon, unclipped charts.
+st.markdown("""
+<style>
+/* NEVER dark text on dark buttons, including account admin/save form buttons */
+.stButton button:not(:disabled),
+.stFormSubmitButton button:not(:disabled),
+div[data-testid="stFormSubmitButton"] button:not(:disabled),
+div[data-testid="stDownloadButton"] button:not(:disabled),
+button[data-testid*="baseButton"]:not(:disabled) {
+  background: linear-gradient(180deg,#b01822,#9f151c) !important;
+  background-color: #9f151c !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #6f0d13 !important;
+  font-weight: 900 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+.stButton button:not(:disabled) *,
+.stFormSubmitButton button:not(:disabled) *,
+div[data-testid="stFormSubmitButton"] button:not(:disabled) *,
+div[data-testid="stDownloadButton"] button:not(:disabled) *,
+button[data-testid*="baseButton"]:not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  fill: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Disabled buttons remain readable */
+.stButton button:disabled,
+.stFormSubmitButton button:disabled,
+div[data-testid="stFormSubmitButton"] button:disabled,
+div[data-testid="stDownloadButton"] button:disabled {
+  background: #d8cfc0 !important;
+  color: #222222 !important;
+  -webkit-text-fill-color: #222222 !important;
+  border: 1px solid #b9ad99 !important;
+  opacity: .8 !important;
+}
+
+/* Password icon stays readable and is NOT styled like a red button */
+button[aria-label*="password"],
+button[title*="password"],
+[data-testid="stTextInputRootElement"] button,
+[data-baseweb="input"] button {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 0 !important;
+  border-left: 1px solid #d0c7b7 !important;
+  opacity: 1 !important;
+}
+button[aria-label*="password"] *,
+button[title*="password"] *,
+[data-testid="stTextInputRootElement"] button *,
+[data-baseweb="input"] button * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* Party/Gender chart cards: stop Streamlit/parent containers from clipping */
+.cc-group-bar-card,
+.cc-home-card:has(.cc-one-line-bars),
+.cc-card:has(.cc-one-line-bars) {
+  height: auto !important;
+  min-height: 285px !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 18px 22px 28px 22px !important;
+  margin-bottom: 16px !important;
+}
+.cc-one-line-bars {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  width: 100% !important;
+  overflow: visible !important;
+  padding-bottom: 18px !important;
+}
+.cc-one-line-bar-row {
+  display: grid !important;
+  grid-template-columns: 145px minmax(160px, 1fr) 132px !important;
+  gap: 8px !important;
+  align-items: center !important;
+  min-height: 20px !important;
+  margin-bottom: 2px !important;
+}
+.cc-one-line-bar-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 9.5pt !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.cc-one-line-bar-track {
+  height: 10px !important;
+  border-radius: 999px !important;
+  background: #071d3a !important;
+  overflow: hidden !important;
+}
+.cc-one-line-bar-fill {
+  height: 100% !important;
+  border-radius: 999px !important;
+}
+.cc-one-line-bar-value {
+  color: #071d3a !important;
+  font-weight: 900 !important;
+  font-size: 9.5pt !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.cc-total-line {
+  color: #071d3a !important;
+  font-weight: 950 !important;
+  font-size: 10.5pt !important;
+  margin: 2px 0 8px 0 !important;
+}
+.cc-total-line span {
+  color: #5f6b7a !important;
+  font-size: 8.5pt !important;
+}
+.cc-swatch {
+  width: 10px !important;
+  height: 10px !important;
+  min-width: 10px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+}
+
+/* Login form card */
+div[data-testid="stForm"] {
+  background: #f8f4ea !important;
+  border: 1px solid #b9ad99 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 28px rgba(7,29,58,.12) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Final chart iframe polish v12.
+st.markdown("""
+<style>
+iframe[title="streamlit.components.v1.html"] {
+  width: 100% !important;
+  border: 0 !important;
+  background: transparent !important;
+  margin-bottom: 12px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Native Party/Gender chart rows: no iframe, no clipping.
+st.markdown("""
+<style>
+.cc-native-total {
+    color: #071d3a !important;
+    font-weight: 950 !important;
+    font-size: 15px !important;
+    margin: 0 0 10px 0 !important;
+}
+.cc-native-total span {
+    color: #5f6b7a !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+}
+.cc-native-bar-row {
+    display: grid !important;
+    grid-template-columns: 155px minmax(160px, 1fr) 140px !important;
+    gap: 10px !important;
+    align-items: center !important;
+    margin: 8px 0 10px 0 !important;
+    min-height: 22px !important;
+}
+.cc-native-bar-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    color: #071d3a !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+}
+.cc-native-dot {
+    width: 11px !important;
+    height: 11px !important;
+    min-width: 11px !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+}
+.cc-native-bar-track {
+    height: 11px !important;
+    border-radius: 999px !important;
+    background: #071d3a !important;
+    overflow: hidden !important;
+}
+.cc-native-bar-fill {
+    height: 100% !important;
+    border-radius: 999px !important;
+}
+.cc-native-bar-value {
+    color: #071d3a !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+}
+@media (max-width: 850px) {
+    .cc-native-bar-row {
+        grid-template-columns: 1fr !important;
+        gap: 4px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # Readable tooltip/help popovers only. No theme/color redesign.
+st.markdown("""
+<style>
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+[data-baseweb="popover"] {
+    background: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+
 # v36 DEV-only: final dataframe toolbar/menu polish.
 # This is intentionally loaded last so it wins over Streamlit's generated dataframe toolbar styles.
 # It does not change app logic, auth, filters, shards, or right-pane action buttons.
+st.markdown("""
+<style>
+/* Streamlit dataframe floating toolbar: make icons readable instead of black/navy blocks */
+div[data-testid="stElementToolbar"],
+div[data-testid="stElementToolbar"] > div,
+div[data-testid="stElementToolbar"] [role="toolbar"] {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    border: 1px solid #cdbdaa !important;
+    border-radius: 9px !important;
+    box-shadow: 0 4px 12px rgba(7,29,58,.14) !important;
+    opacity: 1 !important;
+}
+
+div[data-testid="stElementToolbar"] button,
+div[data-testid="stElementToolbar"] [role="button"] {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    min-height: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    width: 24px !important;
+    padding: 2px !important;
+    margin: 1px !important;
+}
+
+div[data-testid="stElementToolbar"] button:hover,
+div[data-testid="stElementToolbar"] [role="button"]:hover {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+}
+
+/* Icons inside dataframe/element toolbar */
+div[data-testid="stElementToolbar"] svg,
+div[data-testid="stElementToolbar"] svg *,
+div[data-testid="stElementToolbar"] path,
+div[data-testid="stElementToolbar"] rect,
+div[data-testid="stElementToolbar"] circle,
+div[data-testid="stElementToolbar"] line,
+div[data-testid="stElementToolbar"] polyline,
+div[data-testid="stElementToolbar"] polygon {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    opacity: 1 !important;
+}
+
+/* Some toolbar icons render as small divs/spans instead of pure SVG */
+div[data-testid="stElementToolbar"] span,
+div[data-testid="stElementToolbar"] span *,
+div[data-testid="stElementToolbar"] button div,
+div[data-testid="stElementToolbar"] button div * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Dataframe toolbar/menu popovers */
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] ul,
+div[data-baseweb="popover"] li,
+div[data-baseweb="popover"] [role="menu"],
+div[data-baseweb="popover"] [role="menuitem"],
+div[role="tooltip"],
+div[data-testid="stTooltipContent"] {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border-color: #cdbdaa !important;
+    opacity: 1 !important;
+}
+
+div[data-baseweb="popover"] *,
+div[role="tooltip"] *,
+div[data-testid="stTooltipContent"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    opacity: 1 !important;
+}
+
+/* Keep dataframes readable but avoid turning toolbar buttons into dark table headers */
+div[data-testid="stDataFrame"] {
+    background: #ffffff !important;
+    border: 1px solid #caa89d !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+div[data-testid="stDataFrame"] [role="columnheader"] {
+    background: #2d3340 !important;
+    background-color: #2d3340 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 850 !important;
+}
+div[data-testid="stDataFrame"] [role="gridcell"] {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # C4.7.16 — clean sidebar reset after removing failed sidebar patches
+st.markdown("""
+<style>
+/* Sidebar lane */
+section[data-testid="stSidebar"], [data-testid="stSidebar"] {
+  width: 390px !important;
+  min-width: 390px !important;
+  max-width: 390px !important;
+  flex: 0 0 390px !important;
+  overflow-x: hidden !important;
+}
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+  width: 390px !important;
+  min-width: 390px !important;
+  max-width: 390px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+/* Sidebar buttons/submenus left aligned and contained */
+section[data-testid="stSidebar"] .stButton,
+section[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] .stButton > button {
+  width: 100% !important;
+  max-width: 365px !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+section[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton > button {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  min-height: 32px !important;
+  height: auto !important;
+  padding: 5px 10px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 14px !important;
+  line-height: 1.15 !important;
+}
+section[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stButton > button * {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+}
+
+/* Remove expander/card halos in sidebar. Only the summary/header keeps a border. */
+section[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details,
+section[data-testid="stSidebar"] div[data-testid="stExpander"],
+[data-testid="stSidebar"] div[data-testid="stExpander"] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 5px 0 !important;
+  width: 100% !important;
+  max-width: 365px !important;
+}
+section[data-testid="stSidebar"] details > summary,
+[data-testid="stSidebar"] details > summary {
+  border: 1px solid rgba(159,21,28,.35) !important;
+  border-radius: 10px !important;
+  background: var(--cc-beige-2, #f8f4ea) !important;
+  min-height: 32px !important;
+  padding: 5px 10px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  font-size: 14px !important;
+  line-height: 1.15 !important;
+}
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 8px 8px 10px 8px !important;
+  width: 100% !important;
+  max-width: 365px !important;
+}
+
+/* Compact readable multiselect/select controls */
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+section[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-baseweb="select"] {
+  width: 100% !important;
+  max-width: 345px !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  min-height: 38px !important;
+  height: 38px !important;
+  max-height: 38px !important;
+  padding: 0 8px 0 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+/* BaseWeb value container/input: the clipped text lives here */
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
+  padding-left: 18px !important;
+  margin-left: 0 !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input {
+  min-width: 210px !important;
+  height: 24px !important;
+  line-height: 24px !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+  text-indent: 0 !important;
+  overflow: visible !important;
+  font-size: 14px !important;
+}
+/* Selected tags readable */
+section[data-testid="stSidebar"] [data-baseweb="tag"],
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  max-width: 285px !important;
+  height: 24px !important;
+  margin: 5px 4px 5px 10px !important;
+  padding-left: 12px !important;
+  padding-right: 6px !important;
+  overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] span,
+section[data-testid="stSidebar"] [data-baseweb="tag"] div,
+[data-testid="stSidebar"] [data-baseweb="tag"] span,
+[data-testid="stSidebar"] [data-baseweb="tag"] div {
+  max-width: 240px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+</style>
+""", unsafe_allow_html=True)
