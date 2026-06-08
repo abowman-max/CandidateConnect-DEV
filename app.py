@@ -109,6 +109,186 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
+
+# C4.7.11 — emergency sidebar visibility recovery only
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+    flex: 0 0 360px !important;
+    overflow-x: hidden !important;
+    background: #eee8d8 !important;
+}
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    overflow-x: hidden !important;
+}
+section[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+section[data-testid="stSidebar"] details > summary {
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+</style>
+""", unsafe_allow_html=True)
+# C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
+st.markdown("""
+<style>
+/* Sidebar width: normal/wide enough, not clipped */
+section[data-testid="stSidebar"] {
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+    flex: 0 0 360px !important;
+    overflow-x: hidden !important;
+}
+
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container {
+    width: 360px !important;
+    min-width: 360px !important;
+    max-width: 360px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
+/* Important: all sidebar menu buttons left aligned, no centering */
+section[data-testid="stSidebar"] [data-testid="stButton"],
+section[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    width: 100% !important;
+    max-width: 336px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    display: block !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 6px 12px !important;
+    margin: 2px 0 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
+}
+
+/* Expander headers left aligned and readable */
+section[data-testid="stSidebar"] details {
+    width: 100% !important;
+    max-width: 336px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    margin: 5px 0 !important;
+}
+
+section[data-testid="stSidebar"] details > summary {
+    width: 100% !important;
+    max-width: 336px !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 6px 12px !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.15 !important;
+    font-size: 14px !important;
+}
+
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+    width: 100% !important;
+    max-width: 336px !important;
+    padding: 8px 8px 10px 8px !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
+/* Sidebar labels compact but readable */
+section[data-testid="stSidebar"] label p,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    font-size: 14px !important;
+    line-height: 1.18 !important;
+}
+
+/* Multiselect/select: contained but not crushed */
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+section[data-testid="stSidebar"] [data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 320px !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    width: 100% !important;
+    max-width: 320px !important;
+    min-height: 38px !important;
+    height: auto !important;
+    padding-left: 10px !important;
+    padding-right: 8px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+/* Hide Streamlit/BaseWeb selected tags in sidebar because they clip first letters.
+   We will show selected values as readable text below the control from Python. */
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+    display: none !important;
+}
+
+/* Keep placeholder/input text visible and not shifted left under the border */
+section[data-testid="stSidebar"] [data-baseweb="select"] input {
+    padding-left: 4px !important;
+    margin-left: 0 !important;
+    min-width: 120px !important;
+}
+
+/* Sidebar readable selection summary injected below multiselects */
+.cc-sidebar-selection-summary {
+    max-width: 320px;
+    font-size: 12px;
+    line-height: 1.2;
+    color: #071d3a;
+    background: #f8f1e6;
+    border: 1px solid #d8c7b5;
+    border-radius: 7px;
+    padding: 5px 7px;
+    margin: -2px 0 7px 0;
+    overflow-wrap: anywhere;
+}
+.cc-sidebar-selection-summary b {
+    color: #5f6b7a;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
 <style>
@@ -291,13 +471,35 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 }
 
 /* sidebar */
+[data-testid="stSidebar"] {
+    background: #e6ddcc !important;
+    border-right: 2px solid #9f151c !important;
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
+}
 
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 8.6rem !important;
+}
 
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: #071d3a !important;
+}
 
-
-
-
-
+[data-testid="stSidebar"] .stButton > button {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    width: 100% !important;
+    padding: 5px 9px !important;
+    margin: 0 0 4px 0 !important;
+    border-radius: 8px !important;
+    font-size: 10pt !important;
+    line-height: 1.1 !important;
+}
 
 /* real action buttons */
 .stButton > button,
@@ -639,7 +841,7 @@ header[data-testid="stHeader"] {
 @media (max-width: 900px) {
     .cc-global-header { height: 118px !important; }
     .block-container { padding-top: 7.8rem !important; }
-    
+    [data-testid="stSidebar"] > div:first-child { padding-top: 7.8rem !important; }
     .cc-global-brand-row { grid-template-columns: 90px minmax(160px,1fr) 90px !important; }
     .cc-global-tagline { font-size: 17px !important; padding-left: 4px !important; }
     .cc-global-logo-center { height: 70px !important; max-width: 230px !important; }
@@ -14718,22 +14920,80 @@ _filter_suffix = st.session_state["filter_reset_token"]
 st.markdown("""
 <style>
 /* Sidebar-only navigation polish. Main workspace buttons are intentionally untouched. */
-
-
-
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button {
+    background: rgba(248,244,234,.72) !important;
+    background-color: rgba(248,244,234,.72) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid rgba(159,21,28,.24) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    font-weight: 850 !important;
+    min-height: 34px !important;
+    height: auto !important;
+    padding: 7px 10px !important;
+    margin: 2px 0 5px 0 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:hover {
+    background: #f8f4ea !important;
+    background-color: #f8f4ea !important;
+    border-color: rgba(159,21,28,.55) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
 
 /* Rollup headers: calm, professional blocks instead of mixed plain text/red buttons. */
-
-
-
-
-
+[data-testid="stSidebar"] details {
+    background: rgba(248,244,234,.30) !important;
+    border: 1px solid rgba(255,255,255,.34) !important;
+    border-radius: 11px !important;
+    margin: 9px 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+    background: rgba(248,244,234,.58) !important;
+    border: 1px solid rgba(159,21,28,.18) !important;
+    border-radius: 10px !important;
+    padding: 9px 10px !important;
+    font-size: 10.5pt !important;
+    font-weight: 950 !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+    background: #efe8d8 !important;
+    border-color: rgba(159,21,28,.42) !important;
+    box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    font-weight: 950 !important;
+}
+[data-testid="stSidebar"] details > div {
+    padding: 8px 8px 10px 8px !important;
+}
 
 /* Keep account captions quieter. */
-
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: #5f6b7a !important;
+    font-size: 9pt !important;
+}
 
 /* Dashboard and logout no longer look like giant destructive action buttons. */
-
+[data-testid="stSidebar"] .stButton:first-of-type > button {
+    margin-top: 8px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -14744,10 +15004,36 @@ st.markdown("""
 st.markdown("""
 <style>
 /* Restore the Streamlit sidebar and its collapsed/open control even if prior browser state collapsed it. */
-
-
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+  z-index: 999990 !important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"],
+[data-testid="stSidebar"][aria-expanded="false"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0px) !important;
+  margin-left: 0px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
 [data-testid="stSidebarContent"],
-
+[data-testid="stSidebar"] > div:first-child {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
 /* The user needs this visible as a safety valve. Do not hide it in DEV. */
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapsedControl"],
@@ -14915,27 +15201,117 @@ with st.sidebar:
 st.markdown("""
 <style>
 /* v30 sidebar compact navigation — sidebar only; main/right-pane buttons untouched */
-
+[data-testid="stSidebar"] {
+  width: 250px !important;
+  min-width: 250px !important;
+  max-width: 250px !important;
+}
 
 /* compact all sidebar buttons: Dashboard, submenu items, Logout */
-
-
-
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  background: rgba(248,244,234,.74) !important;
+  background-color: rgba(248,244,234,.74) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  border: 1px solid rgba(159,21,28,.22) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  font-size: 9.6pt !important;
+  font-weight: 750 !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  max-height: 30px !important;
+  line-height: 1.05 !important;
+  padding: 3px 8px !important;
+  margin: 1px 0 3px 0 !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled) *,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  fill: #071d3a !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled):hover,
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled):hover {
+  background: #f8f4ea !important;
+  background-color: #f8f4ea !important;
+  border-color: rgba(159,21,28,.50) !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
 
 /* rollup cards: smaller and less vertical spacing */
-
-
-
-
-
+[data-testid="stSidebar"] details {
+  background: rgba(248,244,234,.20) !important;
+  border: 1px solid rgba(159,21,28,.14) !important;
+  border-radius: 11px !important;
+  margin: 5px 0 7px 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+[data-testid="stSidebar"] details summary {
+  background: rgba(248,244,234,.62) !important;
+  border: 1px solid rgba(159,21,28,.18) !important;
+  border-radius: 10px !important;
+  min-height: 31px !important;
+  padding: 6px 8px !important;
+  font-size: 10pt !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+[data-testid="stSidebar"] details[open] summary {
+  background: #f4edde !important;
+  border-color: rgba(159,21,28,.32) !important;
+  box-shadow: inset 3px 0 0 #9f151c !important;
+}
+[data-testid="stSidebar"] details summary * {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  font-weight: 900 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 5px 6px 6px 6px !important;
+}
 
 /* buttons inside open rollups: even denser nav links */
-
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 28px !important;
+  height: 28px !important;
+  max-height: 28px !important;
+  margin: 1px 0 4px 0 !important;
+  padding: 3px 8px !important;
+  border-radius: 9px !important;
+  font-weight: 700 !important;
+  justify-content: center !important;
+}
 
 /* compact captions and separators */
-
-
-
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  font-size: 8.7pt !important;
+  line-height: 1.15 !important;
+  margin-bottom: 2px !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 8px 0 !important;
+}
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 2px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -14946,27 +15322,78 @@ st.markdown("""
 st.markdown("""
 <style>
 /* v31 ultra-compact sidebar spacing — sidebar only */
-
+[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
 
 /* reduce generic Streamlit vertical wrappers inside sidebar */
-
-
+[data-testid="stSidebar"] .element-container {
+  margin-bottom: 0px !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  gap: 0.08rem !important;
+}
 
 /* top-level nav buttons */
-
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="secondary"]:not(:disabled),
+[data-testid="stSidebar"] button[kind="primary"]:not(:disabled) {
+  min-height: 25px !important;
+  height: 25px !important;
+  max-height: 25px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.25pt !important;
+  line-height: 1 !important;
+}
 
 /* section rollups */
-
-
-
+[data-testid="stSidebar"] details {
+  margin: 3px 0 4px 0 !important;
+  border-radius: 9px !important;
+}
+[data-testid="stSidebar"] details summary {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 3px 7px !important;
+  border-radius: 8px !important;
+  font-size: 9.35pt !important;
+  line-height: 1 !important;
+}
+[data-testid="stSidebar"] details > div {
+  padding: 3px 5px 4px 5px !important;
+}
 
 /* submenu items inside open rollups */
-
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 24px !important;
+  height: 24px !important;
+  max-height: 24px !important;
+  padding: 2px 7px !important;
+  margin: 0px 0 2px 0 !important;
+  border-radius: 8px !important;
+  font-size: 9.1pt !important;
+  line-height: 1 !important;
+}
 
 /* compact account/status text and separators */
-
-
-
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+  margin-bottom: 0.22rem !important;
+  line-height: 1.15 !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  margin-bottom: 0px !important;
+  line-height: 1.05 !important;
+}
+[data-testid="stSidebar"] hr {
+  margin: 5px 0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -15160,7 +15587,17 @@ small, .stCaption, [data-testid="stCaptionContainer"] {
   font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
   color: var(--cc-blue) !important;
 }
-
+[data-testid="stSidebar"], section[data-testid="stSidebar"] {
+  background: #e6ddcc !important;
+  color: var(--cc-blue) !important;
+  border-right: 2px solid var(--cc-red) !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
+}
+[data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
+  color: var(--cc-blue) !important;
+}
 
 /* Action buttons: dark red background, white text. Does not affect tabs. */
 .stButton > button:not(:disabled),
@@ -15218,7 +15655,15 @@ div[data-testid="stDownloadButton"] > button:disabled * {
 }
 
 /* Sidebar nav buttons remain compact */
-
+[data-testid="stSidebar"] .stButton > button {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  width: 100% !important;
+  margin: 0 0 4px 0 !important;
+  padding: 5px 9px !important;
+  border-radius: 8px !important;
+}
 
 /* Download buttons can use same red unless disabled; keep readable */
 div[data-testid="stDownloadButton"] > button:not(:disabled) {
@@ -15511,7 +15956,15 @@ header[data-testid="stHeader"] {
 
 /* Responsive */
 @media (max-width: 900px) {
-  
+  [data-testid="stSidebar"], section[data-testid="stSidebar"] {
+    min-width: 230px !important;
+    width: 230px !important;
+    max-width: 230px !important;
+  }
+  .cc-donut {
+    width: 135px !important;
+    height: 135px !important;
+  }
   .cc-donut:after {
     inset: 36px !important;
   }
@@ -15527,11 +15980,11 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-
-
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
-
+[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 9px!important;border-radius:8px!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
@@ -16324,176 +16777,6 @@ div[data-testid="stDataFrame"] [role="columnheader"] {
 div[data-testid="stDataFrame"] [role="gridcell"] {
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# C4.7.10 FINAL sidebar repair — placed at end of file after all older CSS
-st.markdown("""
-<style id="cc-final-sidebar-repair">
-/* Make the sidebar actually wide enough and prevent overlap */
-[data-testid="stSidebar"],
-section[data-testid="stSidebar"] {
-    width: 420px !important;
-    min-width: 420px !important;
-    max-width: 420px !important;
-    flex: 0 0 420px !important;
-    overflow-x: hidden !important;
-}
-
-[data-testid="stSidebar"] > div,
-section[data-testid="stSidebar"] > div,
-[data-testid="stSidebar"] .block-container,
-section[data-testid="stSidebar"] .block-container {
-    width: 420px !important;
-    min-width: 420px !important;
-    max-width: 420px !important;
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-    box-sizing: border-box !important;
-    overflow-x: hidden !important;
-}
-
-/* Every sidebar control gets contained inside the lane */
-[data-testid="stSidebar"] *,
-section[data-testid="stSidebar"] * {
-    box-sizing: border-box !important;
-}
-
-/* All sidebar buttons left aligned, readable, consistent */
-[data-testid="stSidebar"] button,
-section[data-testid="stSidebar"] button {
-    max-width: 392px !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    height: auto !important;
-    min-height: 34px !important;
-    padding: 6px 12px !important;
-    margin: 2px 0 !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    font-size: 14px !important;
-    line-height: 1.15 !important;
-}
-
-/* Streamlit button inner text sometimes has its own alignment */
-[data-testid="stSidebar"] button p,
-[data-testid="stSidebar"] button span,
-section[data-testid="stSidebar"] button p,
-section[data-testid="stSidebar"] button span {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    font-size: 14px !important;
-    line-height: 1.15 !important;
-}
-
-/* Expander headers left aligned and not clipped */
-[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] details {
-    max-width: 392px !important;
-    width: 100% !important;
-    overflow: visible !important;
-    margin: 5px 0 !important;
-}
-
-[data-testid="stSidebar"] details > summary,
-section[data-testid="stSidebar"] details > summary {
-    max-width: 392px !important;
-    width: 100% !important;
-    min-height: 34px !important;
-    height: auto !important;
-    padding: 6px 12px !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    font-size: 14px !important;
-    line-height: 1.15 !important;
-}
-
-[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    max-width: 392px !important;
-    width: 100% !important;
-    padding: 8px 10px 10px 10px !important;
-    overflow: visible !important;
-}
-
-/* Filter labels */
-[data-testid="stSidebar"] label p,
-section[data-testid="stSidebar"] label p {
-    font-size: 14px !important;
-    line-height: 1.15 !important;
-}
-
-/* Select/multiselect readable width */
-[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-[data-testid="stSidebar"] [data-testid="stSelectbox"],
-[data-testid="stSidebar"] [data-baseweb="select"],
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-section[data-testid="stSidebar"] [data-baseweb="select"] {
-    max-width: 372px !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    overflow: visible !important;
-}
-
-[data-testid="stSidebar"] [data-baseweb="select"] > div,
-section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-    max-width: 372px !important;
-    width: 100% !important;
-    min-height: 38px !important;
-    height: auto !important;
-    padding-left: 14px !important;
-    padding-right: 8px !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-}
-
-/* Critical: selected chips no longer lose their first character */
-[data-testid="stSidebar"] [data-baseweb="tag"],
-section[data-testid="stSidebar"] [data-baseweb="tag"] {
-    display: inline-flex !important;
-    max-width: 310px !important;
-    margin-left: 10px !important;
-    padding-left: 14px !important;
-    padding-right: 6px !important;
-    overflow: visible !important;
-}
-
-[data-testid="stSidebar"] [data-baseweb="tag"] span,
-[data-testid="stSidebar"] [data-baseweb="tag"] div,
-section[data-testid="stSidebar"] [data-baseweb="tag"] span,
-section[data-testid="stSidebar"] [data-baseweb="tag"] div {
-    max-width: 260px !important;
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-}
-
-/* Placeholder/input text visible */
-[data-testid="stSidebar"] [data-baseweb="select"] input,
-section[data-testid="stSidebar"] [data-baseweb="select"] input {
-    min-width: 150px !important;
-    padding-left: 8px !important;
-    margin-left: 0 !important;
-}
-
-/* Nudge main pane to respect the wider sidebar */
-[data-testid="stAppViewContainer"] {
-    overflow-x: hidden !important;
 }
 </style>
 """, unsafe_allow_html=True)
