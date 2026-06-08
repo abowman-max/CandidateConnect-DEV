@@ -15792,15 +15792,15 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:520px!important;width:520px!important;max-width:520px!important;flex:0 0 520px!important;overflow-x:hidden!important;}
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
-[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 9px!important;border-radius:8px!important;}
+[data-testid="stSidebar"] .stButton>button{height:auto!important;min-height:34px!important;max-height:none!important;width:100%!important;max-width:480px!important;margin:0 0 4px 0!important;padding:6px 12px!important;border-radius:8px!important;text-align:left!important;justify-content:flex-start!important;white-space:normal!important;overflow:visible!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
-[data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;border-color:#111!important;caret-color:#071d3a!important;}
 input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
 [data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
 button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;border:0!important;}
@@ -15819,6 +15819,148 @@ header[data-testid="stHeader"]{visibility:visible!important;height:auto!importan
 #MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{visibility:hidden!important;height:0!important;}
 </style>
 """, unsafe_allow_html=True)
+
+# C4.7.24 — EARLY active sidebar filter repair, after production CSS lock
+st.markdown("""
+<style>
+/* Active left sidebar width */
+[data-testid="stSidebar"], section[data-testid="stSidebar"] {
+  min-width: 520px !important;
+  width: 520px !important;
+  max-width: 520px !important;
+  flex: 0 0 520px !important;
+  overflow-x: hidden !important;
+}
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container,
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container {
+  min-width: 520px !important;
+  width: 520px !important;
+  max-width: 520px !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+/* Menu and submenu buttons */
+[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stButton > button {
+  max-width: 480px !important;
+  width: 100% !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+
+/* Remove wrapper halos, keep actual button/header borders */
+[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+/* Filter dropdowns: functional, wide, white, readable */
+[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-baseweb="select"],
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+section[data-testid="stSidebar"] [data-baseweb="select"] {
+  width: 100% !important;
+  max-width: 470px !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  min-height: 52px !important;
+  height: 52px !important;
+  max-height: 52px !important;
+  max-width: 470px !important;
+  width: 100% !important;
+  padding: 0 14px 0 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  background: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+
+/* BaseWeb current versions use these internal wrappers */
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="InputContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="input-container"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="InputContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="input-container"] {
+  min-height: 46px !important;
+  height: 46px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding-left: 18px !important;
+  margin-left: 0 !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+
+/* Placeholder/input */
+[data-testid="stSidebar"] [data-baseweb="select"] input,
+section[data-testid="stSidebar"] [data-baseweb="select"] input {
+  min-width: 330px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  padding-left: 18px !important;
+  margin-left: 0 !important;
+  text-indent: 0 !important;
+  transform: none !important;
+  overflow: visible !important;
+  font-size: 14px !important;
+  background: transparent !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  opacity: 1 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder,
+section[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder {
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+  opacity: 1 !important;
+}
+
+/* Selected chips */
+[data-testid="stSidebar"] [data-baseweb="tag"],
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 28px !important;
+  height: 28px !important;
+  max-width: 380px !important;
+  margin: 8px 4px 8px 10px !important;
+  padding-left: 14px !important;
+  padding-right: 6px !important;
+  overflow: visible !important;
+  background: #f1e7d6 !important;
+  color: #071d3a !important;
+  -webkit-text-fill-color: #071d3a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 
 
 # Final UI polish patch: login card, readable buttons/icons, compact party/gender bars.
@@ -16593,210 +16735,4 @@ div[data-testid="stDataFrame"] [role="gridcell"] {
 </style>
 """, unsafe_allow_html=True)
 
-
-
-# C4.7.23 — clean single sidebar CSS, replacing old 390/345/38px block
-st.markdown("""
-<style>
-/* Sidebar lane: wider and stable */
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-  width: 520px !important;
-  min-width: 520px !important;
-  max-width: 520px !important;
-  flex: 0 0 520px !important;
-  overflow-x: hidden !important;
-  background: #e6ddcc !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container,
-[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] .block-container {
-  width: 520px !important;
-  min-width: 520px !important;
-  max-width: 520px !important;
-  padding-left: 16px !important;
-  padding-right: 16px !important;
-  box-sizing: border-box !important;
-  overflow-x: hidden !important;
-}
-
-/* Sidebar buttons/submenus: left aligned and contained */
-section[data-testid="stSidebar"] .stButton,
-section[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton,
-[data-testid="stSidebar"] .stButton > button {
-  width: 100% !important;
-  max-width: 480px !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton > button {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  min-height: 34px !important;
-  height: auto !important;
-  padding: 6px 12px !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  font-size: 14px !important;
-  line-height: 1.15 !important;
-}
-
-section[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button * {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-}
-
-/* Remove expander/card halos. Only summary/header keeps border. */
-section[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] div[data-testid="stExpander"],
-[data-testid="stSidebar"] div[data-testid="stExpander"],
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
-  border: 0 !important;
-  outline: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  margin: 5px 0 !important;
-  width: 100% !important;
-  max-width: 480px !important;
-}
-
-section[data-testid="stSidebar"] details > summary,
-[data-testid="stSidebar"] details > summary {
-  border: 1px solid rgba(159,21,28,.35) !important;
-  border-radius: 10px !important;
-  background: #f8f4ea !important;
-  min-height: 34px !important;
-  padding: 6px 12px !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  font-size: 14px !important;
-  line-height: 1.15 !important;
-}
-
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-  border: 0 !important;
-  outline: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 8px 8px 10px 8px !important;
-  width: 100% !important;
-  max-width: 480px !important;
-}
-
-/* Select/multiselect controls: wider and taller, readable */
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-section[data-testid="stSidebar"] [data-baseweb="select"],
-[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-[data-testid="stSidebar"] [data-testid="stSelectbox"],
-[data-testid="stSidebar"] [data-baseweb="select"] {
-  width: 100% !important;
-  max-width: 460px !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="select"] > div {
-  min-height: 52px !important;
-  height: 52px !important;
-  max-height: 52px !important;
-  padding: 0 14px 0 24px !important;
-  display: flex !important;
-  align-items: center !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-  background: #ffffff !important;
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-  border-color: #111111 !important;
-}
-
-/* BaseWeb value container/input */
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
-  padding-left: 18px !important;
-  margin-left: 0 !important;
-  min-height: 46px !important;
-  height: 46px !important;
-  display: flex !important;
-  align-items: center !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-  background: #ffffff !important;
-  color: #071d3a !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-[data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 320px !important;
-  height: 32px !important;
-  line-height: 32px !important;
-  padding-left: 16px !important;
-  margin-left: 0 !important;
-  text-indent: 0 !important;
-  transform: none !important;
-  overflow: visible !important;
-  font-size: 14px !important;
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-  background: transparent !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder,
-[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder {
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-  opacity: 1 !important;
-}
-
-/* Selected chips readable */
-section[data-testid="stSidebar"] [data-baseweb="tag"],
-[data-testid="stSidebar"] [data-baseweb="tag"] {
-  display: inline-flex !important;
-  align-items: center !important;
-  max-width: 365px !important;
-  min-height: 28px !important;
-  height: 28px !important;
-  margin: 8px 4px 8px 10px !important;
-  padding-left: 14px !important;
-  padding-right: 6px !important;
-  overflow: visible !important;
-  background: #f1e7d6 !important;
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="tag"] span,
-section[data-testid="stSidebar"] [data-baseweb="tag"] div,
-[data-testid="stSidebar"] [data-baseweb="tag"] span,
-[data-testid="stSidebar"] [data-baseweb="tag"] div {
-  max-width: 315px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  color: #071d3a !important;
-  -webkit-text-fill-color: #071d3a !important;
-}
-</style>
-""", unsafe_allow_html=True)
 
