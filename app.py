@@ -18,6 +18,39 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+# C4.7.29 — compatibility helper for legacy output-center metric summary
+def render_metric_summary(summary):
+    """Render a compact metric summary if the legacy helper is missing."""
+    try:
+        if summary is None:
+            return
+        if not isinstance(summary, dict):
+            st.write(summary)
+            return
+
+        items = list(summary.items())
+        if not items:
+            return
+
+        cols = st.columns(min(len(items), 4))
+        for i, (key, value) in enumerate(items):
+            label = str(key).replace("_", " ").title()
+            try:
+                if isinstance(value, (int, float)):
+                    display_value = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.1f}"
+                else:
+                    display_value = str(value)
+                with cols[i % len(cols)]:
+                    st.metric(label, display_value)
+            except Exception:
+                with cols[i % len(cols)]:
+                    st.markdown(f"**{label}**")
+                    st.write(value)
+    except Exception as e:
+        st.warning(f"Metric summary unavailable: {e}")
+
+
+
 # C4.7.28 — defensive fallback for legacy filter_options references
 try:
     filter_options
