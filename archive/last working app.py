@@ -289,20 +289,11 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     height: 38px !important;
     max-height: 38px !important;
     width: 100% !important;
-    padding: 5px 12px !important;
+    padding: 5px 9px !important;
     margin: 0 0 4px 0 !important;
     border-radius: 8px !important;
     font-size: 10pt !important;
     line-height: 1.1 !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-}
-
-[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button span,
-[data-testid="stSidebar"] .stButton > button p {
-    text-align: left !important;
-    justify-content: flex-start !important;
 }
 
 /* real action buttons */
@@ -15465,16 +15456,8 @@ div[data-testid="stDownloadButton"] > button:disabled * {
   max-height: 38px !important;
   width: 100% !important;
   margin: 0 0 4px 0 !important;
-  padding: 5px 12px !important;
+  padding: 5px 9px !important;
   border-radius: 8px !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-}
-[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button span,
-[data-testid="stSidebar"] .stButton > button p {
-  text-align: left !important;
-  justify-content: flex-start !important;
 }
 
 /* Download buttons can use same red unless disabled; keep readable */
@@ -15796,8 +15779,7 @@ small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!importa
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
-[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 12px!important;border-radius:8px!important;text-align:left!important;justify-content:flex-start!important;}
-[data-testid="stSidebar"] .stButton>button *,[data-testid="stSidebar"] .stButton>button span,[data-testid="stSidebar"] .stButton>button p{text-align:left!important;justify-content:flex-start!important;}
+[data-testid="stSidebar"] .stButton>button{height:38px!important;min-height:38px!important;max-height:38px!important;width:100%!important;margin:0 0 4px 0!important;padding:5px 9px!important;border-radius:8px!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
@@ -16590,28 +16572,6 @@ div[data-testid="stDataFrame"] [role="columnheader"] {
 div[data-testid="stDataFrame"] [role="gridcell"] {
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# Sidebar nav final alignment override - keeps all left menu button labels flush left.
-st.markdown("""
-<style>
-[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    padding-left: 12px !important;
-}
-[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button span,
-[data-testid="stSidebar"] .stButton > button p,
-[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button *,
-[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button span,
-[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button p {
-    text-align: left !important;
-    justify-content: flex-start !important;
 }
 </style>
 """, unsafe_allow_html=True)
