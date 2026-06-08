@@ -238,6 +238,89 @@ section[data-testid="stSidebar"] [data-baseweb="select"] input,
 </style>
 """, unsafe_allow_html=True)
 
+
+# C4.7.13 — sidebar halo removal + select text readability
+st.markdown("""
+<style>
+/* Remove the repeated halo/nested outlines around sidebar menu groups */
+section[data-testid="stSidebar"] details,
+section[data-testid="stSidebar"] details > div,
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div,
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] [data-testid="stElementContainer"] {
+    box-shadow: none !important;
+}
+
+/* Keep only the intended button/expander border; remove doubled red outlines from wrappers */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] div[data-testid="stElementContainer"] > div:has(details) {
+    border: none !important;
+    outline: none !important;
+    background: transparent !important;
+}
+
+/* Expander body should not draw an extra outer red card around all submenu buttons */
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* Make sidebar select/multiselect readable: text starts far enough right */
+section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    padding-left: 20px !important;
+    padding-right: 12px !important;
+    overflow: hidden !important;
+}
+
+/* Placeholder/input text was being clipped under the left edge */
+section[data-testid="stSidebar"] [data-baseweb="select"] input {
+    padding-left: 18px !important;
+    margin-left: 0 !important;
+    min-width: 210px !important;
+}
+
+/* BaseWeb value container was shifting text left; reset it */
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
+    padding-left: 12px !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
+}
+
+/* Single-value placeholders and multiselect placeholder text */
+section[data-testid="stSidebar"] [data-baseweb="select"] div {
+    text-indent: 0 !important;
+}
+
+/* Selected chips: keep first character visible */
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+    margin-left: 14px !important;
+    padding-left: 16px !important;
+    max-width: 300px !important;
+}
+
+/* Reduce visual crowding from submenu buttons */
+section[data-testid="stSidebar"] .stButton > button {
+    border-width: 1px !important;
+    box-shadow: none !important;
+}
+
+/* Make menu text left aligned everywhere inside sidebar buttons */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stButton > button *,
+section[data-testid="stSidebar"] details summary,
+section[data-testid="stSidebar"] details summary * {
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
 st.markdown("""
 <style>
