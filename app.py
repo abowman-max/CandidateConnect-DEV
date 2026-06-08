@@ -95,251 +95,51 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-# C4.7.18 — working sidebar filter visual repair only
+
+
+
+
+
+
+
+
+# C4.7.21 — safe sidebar reset: restore native filter controls
 st.markdown("""
 <style>
-/* Keep the working sidebar layout from C4.7.16, but repair filter readability. */
-
-/* Sidebar filter controls should be real dropdowns, compact, and clickable */
-section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
-    width: 100% !important;
-    max-width: 350px !important;
-    margin-bottom: 8px !important;
-    overflow: visible !important;
+/* Keep the sidebar wide enough, but do not touch native select/multiselect internals. */
+section[data-testid="stSidebar"] {
+    min-width: 430px !important;
+    width: 430px !important;
+    max-width: 430px !important;
+    flex: 0 0 430px !important;
+    overflow-x: hidden !important;
 }
-
-/* Compact one-line control height */
-section[data-testid="stSidebar"] div[data-baseweb="select"] {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 40px !important;
-    height: auto !important;
-    overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 40px !important;
-    height: 40px !important;
-    max-height: 40px !important;
-    display: flex !important;
-    align-items: center !important;
-    padding: 0 10px 0 18px !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-    border-radius: 8px !important;
-}
-
-/* Value container/input: restore visible placeholder, fix first-letter clipping */
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
-    height: 38px !important;
-    min-height: 38px !important;
-    display: flex !important;
-    align-items: center !important;
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container {
+    min-width: 430px !important;
+    width: 430px !important;
+    max-width: 430px !important;
     padding-left: 14px !important;
-    margin-left: 0 !important;
-    overflow: visible !important;
+    padding-right: 14px !important;
     box-sizing: border-box !important;
 }
 
-section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-    color: #071d3a !important;
-    caret-color: #071d3a !important;
-    min-width: 220px !important;
-    width: auto !important;
-    height: 24px !important;
-    line-height: 24px !important;
-    padding-left: 14px !important;
-    margin-left: 0 !important;
-    text-indent: 0 !important;
-    transform: translateX(8px) !important;
-    overflow: visible !important;
-    font-size: 14px !important;
-}
-
-/* Placeholder text should be readable */
-section[data-testid="stSidebar"] div[data-baseweb="select"] input::placeholder {
-    color: #071d3a !important;
-    opacity: 1 !important;
-}
-
-/* Selected chips stay visible and readable; do not hide the real control */
-section[data-testid="stSidebar"] div[data-baseweb="tag"] {
-    display: inline-flex !important;
-    align-items: center !important;
-    min-height: 24px !important;
-    height: 24px !important;
-    max-height: 24px !important;
-    margin: 5px 4px 5px 10px !important;
-    padding-left: 14px !important;
-    padding-right: 6px !important;
-    max-width: 290px !important;
-    overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
-section[data-testid="stSidebar"] div[data-baseweb="tag"] div {
-    max-width: 245px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-}
-
-/* Remove remaining doubled expander/body border, but leave each header/button border */
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    box-shadow: none !important;
-}
-
-/* Make menu alignment consistent */
+/* Menu buttons and expander headers: readable and left aligned. */
 section[data-testid="stSidebar"] .stButton > button,
 section[data-testid="stSidebar"] .stButton > button *,
 section[data-testid="stSidebar"] details summary,
 section[data-testid="stSidebar"] details summary * {
     text-align: left !important;
     justify-content: flex-start !important;
+    white-space: normal !important;
+}
+
+/* Remove extra wrapper shadows/borders, but leave actual buttons and fields alone. */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
+    box-shadow: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
-
-
-# C4.7.19 — sidebar width + selectbox vertical fit correction
-st.markdown("""
-<style>
-/* Wider sidebar so filters are not cut off left/right */
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-    min-width: 460px !important;
-    width: 460px !important;
-    max-width: 460px !important;
-    flex: 0 0 460px !important;
-    overflow-x: hidden !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container,
-[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] .block-container {
-    min-width: 460px !important;
-    width: 460px !important;
-    max-width: 460px !important;
-    padding-left: 16px !important;
-    padding-right: 16px !important;
-    box-sizing: border-box !important;
-    overflow-x: hidden !important;
-}
-
-/* Give all sidebar controls enough width */
-section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
-section[data-testid="stSidebar"] div[data-baseweb="select"],
-[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
-[data-testid="stSidebar"] div[data-testid="stSelectbox"],
-[data-testid="stSidebar"] div[data-baseweb="select"] {
-    width: 100% !important;
-    max-width: 410px !important;
-    min-width: 0 !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-}
-
-/* Fix vertical clipping: controls need more height */
-section[data-testid="stSidebar"] div[data-baseweb="select"],
-[data-testid="stSidebar"] div[data-baseweb="select"] {
-    min-height: 50px !important;
-    height: 50px !important;
-    max-height: 50px !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
-[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-    min-height: 50px !important;
-    height: 50px !important;
-    max-height: 50px !important;
-    display: flex !important;
-    align-items: center !important;
-    padding: 0 14px 0 22px !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-    border-radius: 8px !important;
-}
-
-/* BaseWeb internal value container: center placeholder/selected text vertically */
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"],
-[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
-[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
-    min-height: 46px !important;
-    height: 46px !important;
-    max-height: 46px !important;
-    display: flex !important;
-    align-items: center !important;
-    padding: 0 0 0 18px !important;
-    margin: 0 !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-}
-
-/* Placeholder/input text: no top/bottom clipping, no first-letter clipping */
-section[data-testid="stSidebar"] div[data-baseweb="select"] input,
-[data-testid="stSidebar"] div[data-baseweb="select"] input {
-    height: 30px !important;
-    min-height: 30px !important;
-    line-height: 30px !important;
-    min-width: 260px !important;
-    width: auto !important;
-    padding: 0 0 0 18px !important;
-    margin: 0 !important;
-    transform: none !important;
-    text-indent: 0 !important;
-    overflow: visible !important;
-    font-size: 14px !important;
-    color: #071d3a !important;
-}
-
-/* Selected chips: fit in the taller box */
-section[data-testid="stSidebar"] div[data-baseweb="tag"],
-[data-testid="stSidebar"] div[data-baseweb="tag"] {
-    display: inline-flex !important;
-    align-items: center !important;
-    min-height: 28px !important;
-    height: 28px !important;
-    max-height: 28px !important;
-    margin: 8px 4px 8px 10px !important;
-    padding-left: 14px !important;
-    padding-right: 6px !important;
-    max-width: 330px !important;
-    overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
-section[data-testid="stSidebar"] div[data-baseweb="tag"] div,
-[data-testid="stSidebar"] div[data-baseweb="tag"] span,
-[data-testid="stSidebar"] div[data-baseweb="tag"] div {
-    max-width: 285px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-}
-
-/* Keep sidebar menu readable within new width */
-section[data-testid="stSidebar"] .stButton > button,
-section[data-testid="stSidebar"] details summary,
-[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] details summary {
-    max-width: 410px !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
 
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
@@ -362,39 +162,6 @@ st.markdown("""
 }
 .cc-selected-summary strong {
     color: #061c3a;
-}
-
-
-/* C4.6.12 — Global Streamlit multiselect chip readability fix */
-div[data-baseweb="select"] span[data-baseweb="tag"] {
-    max-width: 100% !important;
-    min-width: 0 !important;
-    overflow: visible !important;
-}
-
-div[data-baseweb="select"] span[data-baseweb="tag"] > span {
-    overflow: visible !important;
-    text-overflow: clip !important;
-    white-space: nowrap !important;
-    direction: ltr !important;
-    text-align: left !important;
-    padding-left: 0.35rem !important;
-    padding-right: 0.25rem !important;
-}
-
-div[data-baseweb="select"] div[role="listbox"],
-div[data-baseweb="select"] div[data-baseweb="select"] {
-    overflow: visible !important;
-}
-
-div[data-baseweb="select"] input {
-    min-width: 2rem !important;
-}
-
-/* keep multiselect controls from crushing selected labels */
-.stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 44px !important;
-    align-items: center !important;
 }
 
 /* login/setup card */
@@ -587,17 +354,6 @@ div[data-testid="stDownloadButton"] > button:disabled {
     opacity: 1 !important;
 }
 
-/* controls */
-[data-baseweb="select"] > div,
-[data-baseweb="input"] > div,
-textarea,
-input {
-    background: #ffffff !important;
-    color: #071d3a !important;
-    border-color: #8b8171 !important;
-    font-size: 10pt !important;
-}
-
 [data-baseweb="popover"],
 [data-baseweb="menu"],
 [role="listbox"] {
@@ -615,15 +371,6 @@ input {
 [role="option"][aria-selected="true"] {
     background: #f1e7d6 !important;
     color: #071d3a !important;
-}
-
-[data-baseweb="tag"] {
-    background: #9f151c !important;
-    color: #ffffff !important;
-}
-
-[data-baseweb="tag"] * {
-    color: #ffffff !important;
 }
 
 /* tabs: never style them like action buttons */
@@ -15740,30 +15487,12 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
   background-color: var(--cc-red) !important;
   height: 4px !important;
 }
-
-/* Forms and dropdowns */
-[data-baseweb="select"] > div,
-[data-baseweb="input"] > div,
-textarea,
-input {
-  background: #ffffff !important;
-  color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  border-color: #111111 !important;
-  caret-color: #000000 !important;
-}
 input::placeholder,
 textarea::placeholder,
 [data-baseweb="input"] input::placeholder {
   color: #5f6b7a !important;
   -webkit-text-fill-color: #5f6b7a !important;
   opacity: 1 !important;
-}
-[data-baseweb="select"] input,
-[data-baseweb="select"] span,
-[data-baseweb="select"] div {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
 }
 [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
   background: #ffffff !important;
@@ -15778,15 +15507,6 @@ textarea::placeholder,
 [role="option"][aria-selected="true"] {
   background: #f1e7d6 !important;
   color: var(--cc-blue) !important;
-}
-[data-baseweb="tag"] {
-  background: #e5e0d8 !important;
-  color: var(--cc-blue) !important;
-  border: 1px solid #b9ad99 !important;
-}
-[data-baseweb="tag"] * {
-  color: var(--cc-blue) !important;
-  -webkit-text-fill-color: var(--cc-blue) !important;
 }
 [data-testid="stCheckbox"] label,
 [data-testid="stCheckbox"] label *,
@@ -16041,9 +15761,7 @@ small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!importa
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
-[data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
 input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
-[data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
 button[aria-label*="password"],button[title*="password"],[data-testid="stTextInputRootElement"] button,[data-baseweb="input"] button{background:#fff!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;border:0!important;}
 button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *{color:var(--cc-blue)!important;fill:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
 details,div[data-testid="stExpander"],div[data-testid="stExpander"]>details{background:var(--cc-card)!important;color:var(--cc-blue)!important;border:1px solid rgba(159,21,28,.35)!important;border-radius:10px!important;}
@@ -16835,204 +16553,3 @@ div[data-testid="stDataFrame"] [role="gridcell"] {
 """, unsafe_allow_html=True)
 
 
-# C4.7.16 — clean sidebar reset after removing failed sidebar patches
-st.markdown("""
-<style>
-/* Sidebar lane */
-section[data-testid="stSidebar"], [data-testid="stSidebar"] {
-  width: 460px !important;
-  min-width: 460px !important;
-  max-width: 460px !important;
-  flex: 0 0 460px !important;
-  overflow-x: hidden !important;
-}
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container,
-[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] .block-container {
-  width: 460px !important;
-  min-width: 460px !important;
-  max-width: 460px !important;
-  padding-left: 10px !important;
-  padding-right: 10px !important;
-  box-sizing: border-box !important;
-  overflow-x: hidden !important;
-}
-
-/* Sidebar buttons/submenus left aligned and contained */
-section[data-testid="stSidebar"] .stButton,
-section[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton,
-[data-testid="stSidebar"] .stButton > button {
-  width: 100% !important;
-  max-width: 430px !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-}
-section[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton > button {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  min-height: 32px !important;
-  height: auto !important;
-  padding: 5px 10px !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  font-size: 14px !important;
-  line-height: 1.15 !important;
-}
-section[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button * {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-}
-
-/* Remove expander/card halos in sidebar. Only the summary/header keeps a border. */
-section[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] div[data-testid="stExpander"],
-[data-testid="stSidebar"] div[data-testid="stExpander"] {
-  border: 0 !important;
-  outline: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  margin: 5px 0 !important;
-  width: 100% !important;
-  max-width: 430px !important;
-}
-section[data-testid="stSidebar"] details > summary,
-[data-testid="stSidebar"] details > summary {
-  border: 1px solid rgba(159,21,28,.35) !important;
-  border-radius: 10px !important;
-  background: var(--cc-beige-2, #f8f4ea) !important;
-  min-height: 32px !important;
-  padding: 5px 10px !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  font-size: 14px !important;
-  line-height: 1.15 !important;
-}
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-  border: 0 !important;
-  outline: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 8px 8px 10px 8px !important;
-  width: 100% !important;
-  max-width: 430px !important;
-}
-
-/* Compact readable multiselect/select controls */
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-section[data-testid="stSidebar"] [data-baseweb="select"],
-[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-[data-testid="stSidebar"] [data-testid="stSelectbox"],
-[data-testid="stSidebar"] [data-baseweb="select"] {
-  width: 100% !important;
-  max-width: 420px !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  overflow: visible !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="select"] > div {
-  min-height: 52px !important;
-  height: 52px !important;
-  max-height: 52px !important;
-  padding: 0 8px 0 8px !important;
-  display: flex !important;
-  align-items: center !important;
-  overflow: hidden !important;
-  box-sizing: border-box !important;
-}
-/* BaseWeb value container/input: the clipped text lives here */
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
-  padding-left: 18px !important;
-  margin-left: 0 !important;
-  min-height: 46px !important;
-  height: 46px !important;
-  display: flex !important;
-  align-items: center !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-[data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 300px !important;
-  height: 32px !important;
-  line-height: 32px !important;
-  padding-left: 18px !important;
-  margin-left: 0 !important;
-  text-indent: 0 !important;
-  overflow: visible !important;
-  font-size: 14px !important;
-}
-/* Selected tags readable */
-section[data-testid="stSidebar"] [data-baseweb="tag"],
-[data-testid="stSidebar"] [data-baseweb="tag"] {
-  display: inline-flex !important;
-  align-items: center !important;
-  max-width: 360px !important;
-  height: 32px !important;
-  margin: 5px 4px 5px 10px !important;
-  padding-left: 12px !important;
-  padding-right: 6px !important;
-  overflow: visible !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="tag"] span,
-section[data-testid="stSidebar"] [data-baseweb="tag"] div,
-[data-testid="stSidebar"] [data-baseweb="tag"] span,
-[data-testid="stSidebar"] [data-baseweb="tag"] div {
-  max-width: 310px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-
-/* C4.7.20 direct final-block sidebar filter correction */
-section[data-testid="stSidebar"] [data-baseweb="select"],
-[data-testid="stSidebar"] [data-baseweb="select"] {
-  max-width: 420px !important;
-  width: 100% !important;
-  min-height: 52px !important;
-  height: 52px !important;
-  overflow: visible !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="select"] > div {
-  max-width: 420px !important;
-  width: 100% !important;
-  min-height: 52px !important;
-  height: 52px !important;
-  max-height: 52px !important;
-  padding: 0 14px 0 24px !important;
-  overflow: visible !important;
-  display: flex !important;
-  align-items: center !important;
-}
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-[data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 300px !important;
-  height: 32px !important;
-  line-height: 32px !important;
-  padding-left: 18px !important;
-  margin-left: 0 !important;
-  transform: none !important;
-  text-indent: 0 !important;
-  overflow: visible !important;
-}
-</style>
-""", unsafe_allow_html=True)
