@@ -110,49 +110,141 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-# C4.7.11 — emergency sidebar visibility recovery only
+# C4.7.12 — direct sidebar CSS correction after modifying old 250px rules
 st.markdown("""
 <style>
-section[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    width: 360px !important;
-    min-width: 360px !important;
-    max-width: 360px !important;
-    flex: 0 0 360px !important;
-    overflow-x: hidden !important;
-    background: #eee8d8 !important;
+/* Final sidebar width and alignment correction */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+  min-width: 380px !important;
+  width: 380px !important;
+  max-width: 380px !important;
+  flex: 0 0 380px !important;
+  overflow-x: hidden !important;
 }
+
 section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    width: 360px !important;
-    min-width: 360px !important;
-    max-width: 360px !important;
-    padding-left: 10px !important;
-    padding-right: 10px !important;
-    overflow-x: hidden !important;
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+  min-width: 380px !important;
+  width: 380px !important;
+  max-width: 380px !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
 }
-section[data-testid="stSidebar"] [data-testid="stButton"] > button {
-    text-align: left !important;
-    justify-content: flex-start !important;
+
+/* All sidebar buttons/submenu buttons left aligned */
+section[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] button[data-testid^="baseButton"],
+[data-testid="stSidebar"] button[data-testid^="baseButton"] {
+  width: 100% !important;
+  max-width: 350px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 5px 10px !important;
 }
-section[data-testid="stSidebar"] details > summary {
-    text-align: left !important;
-    justify-content: flex-start !important;
+
+section[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stButton > button * {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+}
+
+/* Expander headers left aligned */
+section[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details {
+  max-width: 350px !important;
+  width: 100% !important;
+}
+
+section[data-testid="stSidebar"] details summary,
+[data-testid="stSidebar"] details summary {
+  max-width: 350px !important;
+  width: 100% !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 5px 10px !important;
+}
+
+/* Filter controls wider and no first-letter clipping */
+section[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-baseweb="select"],
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"] {
+  max-width: 350px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  max-width: 350px !important;
+  width: 100% !important;
+  min-height: 34px !important;
+  height: auto !important;
+  padding-left: 18px !important;
+  padding-right: 8px !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+/* Selected multiselect chips */
+section[data-testid="stSidebar"] [data-baseweb="tag"],
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+  margin-left: 8px !important;
+  padding-left: 12px !important;
+  padding-right: 6px !important;
+  max-width: 290px !important;
+  overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="tag"] span,
+section[data-testid="stSidebar"] [data-baseweb="tag"] div,
+[data-testid="stSidebar"] [data-baseweb="tag"] span,
+[data-testid="stSidebar"] [data-baseweb="tag"] div {
+  max-width: 245px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Placeholder text should not start under the border */
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input {
+  min-width: 145px !important;
+  padding-left: 8px !important;
+  margin-left: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
 # C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
 st.markdown("""
 <style>
 /* Sidebar width: normal/wide enough, not clipped */
 section[data-testid="stSidebar"] {
-    width: 360px !important;
-    min-width: 360px !important;
+    width: 380px !important;
+    min-width: 380px !important;
     max-width: 360px !important;
     flex: 0 0 360px !important;
     overflow-x: hidden !important;
@@ -160,8 +252,8 @@ section[data-testid="stSidebar"] {
 
 section[data-testid="stSidebar"] > div:first-child,
 section[data-testid="stSidebar"] .block-container {
-    width: 360px !important;
-    min-width: 360px !important;
+    width: 380px !important;
+    min-width: 380px !important;
     max-width: 360px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
@@ -454,7 +546,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     justify-self: center !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: center !important;
+    justify-content: flex-start !important;
 }
 
 .cc-global-logo-center {
@@ -474,7 +566,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 [data-testid="stSidebar"] {
     background: #e6ddcc !important;
     border-right: 2px solid #9f151c !important;
-    min-width: 250px !important;
+    min-width: 380px !important;
     width: 250px !important;
     max-width: 250px !important;
 }
@@ -634,7 +726,7 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     border-radius: 999px !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: center !important;
+    justify-content: flex-start !important;
     background: radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%) !important;
     color: #ffffff !important;
 }
@@ -15012,8 +15104,8 @@ section[data-testid="stSidebar"],
   transform: translateX(0px) !important;
   margin-left: 0px !important;
   left: 0px !important;
-  min-width: 250px !important;
-  width: 250px !important;
+  min-width: 380px !important;
+  width: 380px !important;
   max-width: 250px !important;
   z-index: 999990 !important;
 }
@@ -15024,8 +15116,8 @@ section[data-testid="stSidebar"][aria-expanded="false"],
   opacity: 1 !important;
   transform: translateX(0px) !important;
   margin-left: 0px !important;
-  min-width: 250px !important;
-  width: 250px !important;
+  min-width: 380px !important;
+  width: 380px !important;
   max-width: 250px !important;
 }
 [data-testid="stSidebarContent"],
@@ -15202,7 +15294,7 @@ st.markdown("""
 <style>
 /* v30 sidebar compact navigation — sidebar only; main/right-pane buttons untouched */
 [data-testid="stSidebar"] {
-  width: 250px !important;
+  width: 380px !important;
   min-width: 250px !important;
   max-width: 250px !important;
 }
@@ -15229,8 +15321,8 @@ st.markdown("""
   line-height: 1.05 !important;
   padding: 3px 8px !important;
   margin: 1px 0 3px 0 !important;
-  justify-content: center !important;
-  text-align: center !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
 }
 [data-testid="stSidebar"] .stButton > button:not(:disabled) *,
 [data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled) *,
@@ -15297,7 +15389,7 @@ st.markdown("""
   padding: 3px 8px !important;
   border-radius: 9px !important;
   font-weight: 700 !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
 }
 
 /* compact captions and separators */
@@ -15591,8 +15683,8 @@ small, .stCaption, [data-testid="stCaptionContainer"] {
   background: #e6ddcc !important;
   color: var(--cc-blue) !important;
   border-right: 2px solid var(--cc-red) !important;
-  min-width: 250px !important;
-  width: 250px !important;
+  min-width: 380px !important;
+  width: 380px !important;
   max-width: 250px !important;
 }
 [data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
@@ -15957,8 +16049,8 @@ header[data-testid="stHeader"] {
 /* Responsive */
 @media (max-width: 900px) {
   [data-testid="stSidebar"], section[data-testid="stSidebar"] {
-    min-width: 230px !important;
-    width: 230px !important;
+    min-width: 380px !important;
+    width: 380px !important;
     max-width: 230px !important;
   }
   .cc-donut {
@@ -15980,7 +16072,7 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width: 380px !important;width:250px!important;max-width:250px!important;}
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
