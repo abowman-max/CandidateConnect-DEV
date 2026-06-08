@@ -8129,9 +8129,36 @@ def _area_pdf_bytes(title: str, active: dict, summary: dict, insights: list[str]
     # ---------------- Strategic breakdown ----------------
     breakdown_df = tables.get("Breakdown")
     story.append(section_header(f"Strategic Breakdown by {breakdown_field}"))
-    story.append(Spacer(1, 0.10*inch))
+    story.append(Spacer(1, 0.08*inch))
     if breakdown_df is not None and not breakdown_df.empty:
-        story.append(as_table_df(breakdown_df, max_rows=28, max_cols=12, first_col_w=1.85*inch, font_size=5.2, total_w=10.0*inch))
+        # C4.7.3: do not squeeze 12+ columns and dozens of rows onto one page.
+        # Split into readable core and demographic sections, then paginate rows.
+        all_cols = list(breakdown_df.columns)
+        core_cols = [c for c in ["Area", "Total", "R", "D", "O", "R %", "D %", "O %"] if c in all_cols]
+        demo_cols = [c for c in ["Area", "Female", "Male", "Age65Plus", "65+ %"] if c in all_cols]
+        other_cols = [c for c in all_cols if c not in set(core_cols + demo_cols)]
+        row_chunk = 24
+        for start in range(0, len(breakdown_df), row_chunk):
+            chunk = breakdown_df.iloc[start:start+row_chunk].copy()
+            label = f"Rows {start+1:,}-{min(start+row_chunk, len(breakdown_df)):,} of {len(breakdown_df):,}"
+            story.append(Paragraph(f"Registration / Party Summary ({label})", styles["CC_H2"]))
+            if core_cols:
+                story.append(as_table_df(chunk[core_cols], max_rows=row_chunk, max_cols=len(core_cols), first_col_w=2.15*inch, font_size=6.2, total_w=10.0*inch))
+                story.append(Spacer(1, 0.08*inch))
+            if demo_cols:
+                story.append(Paragraph(f"Demographic Summary ({label})", styles["CC_H2"]))
+                story.append(as_table_df(chunk[demo_cols], max_rows=row_chunk, max_cols=len(demo_cols), first_col_w=2.45*inch, font_size=6.5, total_w=8.6*inch))
+                story.append(Spacer(1, 0.08*inch))
+            if other_cols:
+                keep = ["Area"] + [c for c in other_cols if c != "Area"]
+                keep = [c for c in keep if c in chunk.columns]
+                if len(keep) > 1:
+                    story.append(Paragraph(f"Additional Fields ({label})", styles["CC_H2"]))
+                    story.append(as_table_df(chunk[keep], max_rows=row_chunk, max_cols=min(len(keep), 8), first_col_w=2.35*inch, font_size=6.2, total_w=9.5*inch))
+            if start + row_chunk < len(breakdown_df):
+                story.append(PageBreak())
+                story.append(section_header(f"Strategic Breakdown by {breakdown_field} - continued"))
+                story.append(Spacer(1, 0.08*inch))
     else:
         story.append(Paragraph("No breakdown data available for this selection.", styles["CC_Body"]))
     story.append(PageBreak())
@@ -14240,31 +14267,34 @@ def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
 def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     break_by = _gr_clean(break_by)
     aliases = {
-        "County": ["county", "County", "COUNTY"],
-        "Municipality": ["municipality", "Municipality", "MUNICIPALITY", "muni", "Muni"],
-        "Precinct": ["precinct", "Precinct", "precinct_name", "PrecinctName", "Voting Precinct"],
-        "School District": ["school_district", "School District", "SchoolDistrict", "schooldistrict"],
-        "School Region": ["school_region", "School Region", "SchoolRegion"],
-        "State House": ["state_house", "State House", "STH", "state_house_district"],
-        "State Senate": ["state_senate", "State Senate", "STS", "state_senate_district"],
-        "Congressional": ["congressional", "Congressional", "USC", "congressional_district"],
+        "County": ["County", "county", "COUNTY"],
+        "Municipality": ["Municipality", "municipality", "MUNICIPALITY", "muni", "Muni"],
+        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Voting Precinct"],
+        "School District": ["School District", "school_district", "SchoolDistrict", "schooldistrict"],
+        "School Region": ["School Region", "school_region", "SchoolRegion"],
+        "State House": ["STH", "State House", "state_house", "state_house_district"],
+        "State Senate": ["STS", "State Senate", "state_senate", "state_senate_district"],
+        "Congressional": ["USC", "Congressional", "congressional", "congressional_district"],
         "Program": ["program_name", "program", "Program"],
         "Assignment": ["assignment_name", "Assignment"],
     }
     if break_by == "Area / Best Available":
-        return _gr_row_area(row)
+        val = _gr_row_area(row)
+        return val if val and val != "Unknown" else (_gr_clean(row.get("Municipality")) or _gr_clean(row.get("County")) or "Unknown")
     for key in aliases.get(break_by, []):
         val = _gr_clean(row.get(key))
         if val:
             return val
-    # Fall back gracefully when the mobile result record does not carry every geo field yet.
     if break_by == "Precinct":
         return _gr_row_area(row)
     if break_by == "Assignment":
         return _gr_clean(row.get("assignment_name")) or "Unknown"
     if break_by == "Program":
         return _gr_row_program(row)
-    return "Unknown"
+    # If the mobile record lacks a district field, use the best available area instead of a misleading Unknown bucket.
+    fallback = _gr_row_area(row)
+    return fallback if fallback and fallback != "Unknown" else "Unknown"
+
 
 def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
     areas = {}
@@ -14315,11 +14345,11 @@ def _gr_report_pdf_bytes(
     from datetime import datetime
     try:
         from reportlab.lib import colors
-        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
         from reportlab.lib.pagesizes import letter, landscape
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, KeepTogether
         from reportlab.graphics.shapes import Drawing, Rect, String
     except Exception as e:
         raise RuntimeError("ReportLab is required for PDF export. Add reportlab to requirements.txt.") from e
@@ -14328,37 +14358,63 @@ def _gr_report_pdf_bytes(
         s = _gr_clean(value)
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    def table_from_rows(rows, cols, title=None, max_rows=20, widths=None):
-        story = []
+    def safe_logo(path, width=2.0*inch, max_h=0.7*inch):
+        try:
+            if path and file_exists(path):
+                img = Image(path)
+                iw, ih = float(img.imageWidth or 1), float(img.imageHeight or 1)
+                img.drawWidth = width
+                img.drawHeight = width * ih / iw
+                if img.drawHeight > max_h:
+                    scale = max_h / img.drawHeight
+                    img.drawWidth *= scale
+                    img.drawHeight *= scale
+                return img
+        except Exception:
+            pass
+        return Paragraph("Candidate Connect", styles["Small"])
+
+    def col_widths(cols, total=10.1*inch):
+        n = max(1, len(cols))
+        first = 2.15*inch if cols and cols[0] in {"Area", "Worker", "Finding", "Voter", "Metric"} else total / n
+        if n == 1:
+            return [total]
+        rest = (total - first) / (n - 1)
+        return [first] + [rest] * (n - 1)
+
+    def table_from_rows(rows, cols, title=None, max_rows=18, widths=None, font_size=7.2):
+        blocks = []
         if title:
-            story.append(Paragraph(ptxt(title), styles["Section"]))
-            story.append(Spacer(1, 0.06 * inch))
-        data = [[ptxt(c) for c in cols]]
+            blocks.append(Paragraph(ptxt(title), styles["Section"]))
+            blocks.append(Spacer(1, 0.06 * inch))
+        data = [[Paragraph(ptxt(c), styles["HeadCell"]) for c in cols]]
         for r in (rows or [])[:max_rows]:
-            data.append([ptxt(r.get(c, "")) for c in cols])
+            data.append([Paragraph(ptxt(r.get(c, "")), styles["Cell"]) for c in cols])
         if len(data) == 1:
-            data.append(["No rows to display."] + [""] * (len(cols)-1))
-        t = Table(data, colWidths=widths, repeatRows=1)
+            data.append([Paragraph("No rows to display.", styles["Cell"])] + [Paragraph("", styles["Cell"]) for _ in cols[1:]])
+        t = Table(data, colWidths=widths or col_widths(cols), repeatRows=1, hAlign="LEFT")
         t.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), red),
             ("TEXTCOLOR", (0,0), (-1,0), colors.white),
             ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("FONTSIZE", (0,0), (-1,-1), font_size),
             ("ALIGN", (0,0), (-1,-1), "CENTER"),
             ("ALIGN", (0,1), (0,-1), "LEFT"),
             ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#d8ccbc")),
             ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f3eadc")]),
             ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-            ("LEFTPADDING", (0,0), (-1,-1), 4),
-            ("RIGHTPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING", (0,0), (-1,-1), 3),
+            ("RIGHTPADDING", (0,0), (-1,-1), 3),
+            ("TOPPADDING", (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
         ]))
-        story.append(t)
-        story.append(Spacer(1, 0.14 * inch))
-        return story
+        blocks.append(t)
+        blocks.append(Spacer(1, 0.12 * inch))
+        return blocks
 
     def bar_chart(title, rows):
         rows = [(str(k), int(v or 0)) for k, v in rows if int(v or 0) > 0][:8]
-        d = Drawing(500, 150)
+        d = Drawing(480, 150)
         d.add(String(0, 135, title, fontName="Helvetica-Bold", fontSize=11, fillColor=navy))
         if not rows:
             d.add(String(0, 105, "No activity yet.", fontName="Helvetica", fontSize=9, fillColor=gray))
@@ -14367,9 +14423,9 @@ def _gr_report_pdf_bytes(
         y = 110
         for label, val in rows:
             d.add(String(0, y + 3, label[:24], fontName="Helvetica-Bold", fontSize=7.5, fillColor=navy))
-            d.add(Rect(120, y, 260, 10, fillColor=colors.HexColor("#eadfce"), strokeColor=colors.HexColor("#d4c7b5")))
-            d.add(Rect(120, y, max(2, 260 * val / mx), 10, fillColor=red, strokeColor=red))
-            d.add(String(390, y + 2, f"{val:,}", fontName="Helvetica-Bold", fontSize=8, fillColor=navy))
+            d.add(Rect(125, y, 245, 10, fillColor=colors.HexColor("#eadfce"), strokeColor=colors.HexColor("#d4c7b5")))
+            d.add(Rect(125, y, max(2, 245 * val / mx), 10, fillColor=red, strokeColor=red))
+            d.add(String(382, y + 2, f"{val:,}", fontName="Helvetica-Bold", fontSize=8, fillColor=navy))
             y -= 15
         return d
 
@@ -14382,15 +14438,7 @@ def _gr_report_pdf_bytes(
         canvas.restoreState()
 
     buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=landscape(letter),
-        rightMargin=0.45 * inch,
-        leftMargin=0.45 * inch,
-        topMargin=0.42 * inch,
-        bottomMargin=0.42 * inch,
-        title="Grassroots Management Report",
-    )
+    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=0.45*inch, leftMargin=0.45*inch, topMargin=0.42*inch, bottomMargin=0.42*inch, title="Grassroots Management Report")
     red = colors.HexColor("#9f151c")
     navy = colors.HexColor("#071d3a")
     gray = colors.HexColor("#5f6b7a")
@@ -14398,55 +14446,47 @@ def _gr_report_pdf_bytes(
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=26, textColor=navy, alignment=TA_CENTER, leading=30))
     styles.add(ParagraphStyle(name="SubTitle", parent=styles["Normal"], fontName="Helvetica", fontSize=11, textColor=gray, alignment=TA_CENTER, leading=15))
-    styles.add(ParagraphStyle(name="Section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, textColor=navy, spaceAfter=4))
-    styles.add(ParagraphStyle(name="BodySmall", parent=styles["Normal"], fontName="Helvetica", fontSize=9, textColor=navy, leading=12))
+    styles.add(ParagraphStyle(name="Section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14, textColor=navy, spaceAfter=4, leading=17))
+    styles.add(ParagraphStyle(name="Small", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, textColor=gray, leading=11))
+    styles.add(ParagraphStyle(name="Cell", parent=styles["Normal"], fontName="Helvetica", fontSize=7.2, textColor=navy, leading=8.5, alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name="HeadCell", parent=styles["Cell"], fontName="Helvetica-Bold", textColor=colors.white, leading=8.5))
 
     story = []
-    story.append(Spacer(1, 0.7 * inch))
+    logo_left = safe_logo(LOGO_CANDIDATE_CONNECT, width=2.1*inch)
+    logo_right = safe_logo(LOGO_TPTC, width=1.7*inch)
+    story.append(Table([[logo_left, "", logo_right]], colWidths=[2.4*inch, 5.4*inch, 2.2*inch], style=TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("ALIGN",(2,0),(2,0),"RIGHT")])) )
+    story.append(Spacer(1, 0.55*inch))
     story.append(Paragraph("Grassroots Management Report", styles["CoverTitle"]))
-    story.append(Spacer(1, 0.12 * inch))
-    story.append(Paragraph(f"Campaign: {ptxt(campaign_id)} &nbsp;&nbsp; | &nbsp;&nbsp; Program Scope: {ptxt(program_scope)} &nbsp;&nbsp; | &nbsp;&nbsp; Area Break: {ptxt(area_break)}", styles["SubTitle"]))
-    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}", styles["SubTitle"]))
-    story.append(Spacer(1, 0.45 * inch))
-    cover_data = [
-        ["Assigned Universe", "Contacted", "Not Contacted", "Contact Rate", "Favorable", "Follow-Ups"],
-        [summary.get("assigned", "—"), summary.get("contacted", "—"), summary.get("remaining", "—"), summary.get("contact_rate", "—"), summary.get("favorable", "—"), summary.get("followups", "—")],
-    ]
+    story.append(Spacer(1, 0.12*inch))
+    story.append(Paragraph(f"Campaign: {ptxt(campaign_id)} | Program Scope: {ptxt(program_scope)} | Area Break: {ptxt(area_break)}", styles["SubTitle"]))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y %I:%M %p')}", styles["SubTitle"]))
+    story.append(Spacer(1, 0.35*inch))
+    cover_data = [["Assigned Universe", "Contacted", "Not Contacted", "Contact Rate", "Favorable", "Follow-Ups"], [summary.get("assigned", "-"), summary.get("contacted", "-"), summary.get("remaining", "-"), summary.get("contact_rate", "-"), summary.get("favorable", "-"), summary.get("followups", "-")]]
     cover_table = Table(cover_data, colWidths=[1.55*inch]*6)
-    cover_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), red),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("BACKGROUND", (0,1), (-1,1), beige),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTNAME", (0,1), (-1,1), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,0), 8),
-        ("FONTSIZE", (0,1), (-1,1), 16),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#d8ccbc")),
-        ("BOX", (0,0), (-1,-1), 1, red),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-    ]))
+    cover_table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), red), ("TEXTCOLOR", (0,0), (-1,0), colors.white), ("BACKGROUND", (0,1), (-1,1), beige), ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"), ("FONTNAME", (0,1), (-1,1), "Helvetica-Bold"), ("FONTSIZE", (0,0), (-1,0), 8), ("FONTSIZE", (0,1), (-1,1), 15), ("ALIGN", (0,0), (-1,-1), "CENTER"), ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#d8ccbc")), ("BOX", (0,0), (-1,-1), 1, red), ("TOPPADDING", (0,0), (-1,-1), 8), ("BOTTOMPADDING", (0,0), (-1,-1), 8)]))
     story.append(cover_table)
-    story.append(Spacer(1, 0.28 * inch))
-    story.extend(table_from_rows(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Executive Management Readout", max_rows=5))
+    story.append(Spacer(1, 0.25*inch))
+    story.extend(table_from_rows(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Executive Management Readout", max_rows=5, widths=[0.75*inch, 1.55*inch, 3.2*inch, 4.6*inch], font_size=7.0))
     story.append(PageBreak())
 
     story.append(Paragraph("Summary Charts", styles["Section"]))
-    chart_tbl = Table([[bar_chart("Contact Results", sorted(result_counts.items(), key=lambda x: x[1], reverse=True)), bar_chart("Action Signals", signal_rows)]], colWidths=[5.0*inch, 5.0*inch])
+    chart_tbl = Table([[bar_chart("Contact Results", sorted(result_counts.items(), key=lambda x: x[1], reverse=True)), bar_chart("Action Signals", signal_rows)]], colWidths=[5.05*inch, 5.05*inch])
     chart_tbl.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP")]))
     story.append(chart_tbl)
-    story.append(Spacer(1, 0.16 * inch))
-    story.extend(table_from_rows(area_rows, ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title=f"Area Management View - {area_break}", max_rows=18))
+    story.append(Spacer(1, 0.12*inch))
+    # Area table gets its own room and narrower columns to avoid overlapping charts.
+    area_cols = ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"]
+    story.extend(table_from_rows(area_rows, area_cols, title=f"Area Management View - {area_break}", max_rows=16, widths=[2.15*inch, .78*inch, .82*inch, .82*inch, .72*inch, .82*inch, .88*inch, .88*inch, .95*inch], font_size=6.7))
     story.append(PageBreak())
 
-    story.extend(table_from_rows(worker_rows, ["Worker", "Contacts", "Favorable", "Not Home", "Follow-Ups"], title="Personnel / Worker Production", max_rows=18))
-    story.extend(table_from_rows(party_rows, ["Party", "Contacts", "Share"], title="Contacts by Party", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
-    story.extend(table_from_rows(age_rows, ["Age Group", "Contacts", "Share"], title="Contacts by Age Group", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
-    story.extend(table_from_rows(gender_rows, ["Gender", "Contacts", "Share"], title="Contacts by Gender", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
+    story.extend(table_from_rows(worker_rows, ["Worker", "Contacts", "Favorable", "Not Home", "Follow-Ups"], title="Personnel / Worker Production", max_rows=18, widths=[3.3*inch, 1.0*inch, 1.1*inch, 1.1*inch, 1.1*inch], font_size=7.2))
+    story.append(PageBreak())
+    story.extend(table_from_rows(party_rows, ["Party", "Contacts", "Share"], title="Contacts by Party", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch], font_size=7.2))
+    story.extend(table_from_rows(age_rows, ["Age Group", "Contacts", "Share"], title="Contacts by Age Group", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch], font_size=7.2))
+    story.extend(table_from_rows(gender_rows, ["Gender", "Contacts", "Share"], title="Contacts by Gender", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch], font_size=7.2))
     if notes_rows:
         story.append(PageBreak())
-        story.extend(table_from_rows(notes_rows, ["Result", "Voter", "Area", "Worker", "Notes"], title="Recent Field Notes", max_rows=14))
+        story.extend(table_from_rows(notes_rows, ["Result", "Voter", "Area", "Worker", "Notes"], title="Recent Field Notes", max_rows=14, widths=[.8*inch, 1.7*inch, 2.0*inch, 2.05*inch, 3.55*inch], font_size=6.7))
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
@@ -14466,6 +14506,55 @@ def _gr_recent_notes(rows: list[dict], limit: int = 8) -> list[dict]:
         })
     return noted[-limit:][::-1]
 
+
+
+# C4.7.3 - Grassroots report geo fallback helpers
+def _gr_campaign_scope_value(campaign_id: str, field: str) -> str:
+    try:
+        store = load_security_store()
+        camp = (store.get("campaigns") or {}).get(_ops_slug(campaign_id or ""), {}) or {}
+        scope = camp.get("scope_filters") or {}
+        vals = scope.get(field) or []
+        if isinstance(vals, str):
+            vals = [vals]
+        vals = [_gr_clean(v) for v in vals if _gr_clean(v)]
+        if len(vals) == 1:
+            return vals[0]
+        if len(vals) > 1:
+            return ", ".join(vals[:3]) + ("..." if len(vals) > 3 else "")
+    except Exception:
+        pass
+    try:
+        scope = security_scope_filters()
+        vals = scope.get(field) or []
+        if isinstance(vals, str):
+            vals = [vals]
+        vals = [_gr_clean(v) for v in vals if _gr_clean(v)]
+        if len(vals) == 1:
+            return vals[0]
+    except Exception:
+        pass
+    return ""
+
+def _gr_enrich_rows_with_scope(rows: list[dict], campaign_id: str) -> list[dict]:
+    scope_fields = {
+        "County": _gr_campaign_scope_value(campaign_id, "County"),
+        "Municipality": _gr_campaign_scope_value(campaign_id, "Municipality"),
+        "School District": _gr_campaign_scope_value(campaign_id, "School District"),
+        "School Region": _gr_campaign_scope_value(campaign_id, "School Region"),
+        "STH": _gr_campaign_scope_value(campaign_id, "STH"),
+        "STS": _gr_campaign_scope_value(campaign_id, "STS"),
+        "USC": _gr_campaign_scope_value(campaign_id, "USC"),
+    }
+    out = []
+    for r in rows or []:
+        rr = dict(r)
+        for k, v in scope_fields.items():
+            if v and not _gr_clean(rr.get(k)):
+                rr[k] = v
+        out.append(rr)
+    return out
+
 def render_grassroots_reporting_v1(campaign_id: str) -> None:
     st.markdown("### Grassroots Reporting")
     st.caption("Management report for campaign leadership: coverage, contact results, follow-up load, worker production, and where to push next.")
@@ -14477,7 +14566,7 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         programs = []
     counts = _program_manager_counts_c46(campaign_id, programs)
     mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
-    rows_all = _gr_dedupe_rows(mobile.get("synced_rows") or mobile.get("rows") or [])
+    rows_all = _gr_enrich_rows_with_scope(_gr_dedupe_rows(mobile.get("synced_rows") or mobile.get("rows") or []), campaign_id)
     total_assigned_all = _gr_int(counts.get("total_voters"))
 
     program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
@@ -15259,6 +15348,63 @@ button[aria-label*="full screen"] {
   fill: #071d3a !important;
   stroke: #071d3a !important;
   border: 1px solid #cdbdaa !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# C4.7.3 - final sidebar sizing recovery (web only)
+st.markdown("""
+<style>
+/* Restore a usable desktop sidebar width and normal form-control heights. */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+  width: 330px !important;
+  min-width: 330px !important;
+  max-width: 330px !important;
+}
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+[data-testid="stSidebar"] details summary {
+  min-height: 34px !important;
+  height: auto !important;
+  padding: 7px 9px !important;
+  font-size: 10.2pt !important;
+  line-height: 1.15 !important;
+}
+[data-testid="stSidebar"] .stButton > button:not(:disabled),
+[data-testid="stSidebar"] details .stButton > button:not(:disabled) {
+  min-height: 32px !important;
+  height: auto !important;
+  max-height: none !important;
+  padding: 6px 9px !important;
+  font-size: 9.8pt !important;
+  line-height: 1.1 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="input"] > div,
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea {
+  min-height: 42px !important;
+  height: auto !important;
+  max-height: none !important;
+  font-size: 10pt !important;
+  line-height: 1.25 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-baseweb="select"] div {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p {
+  font-size: 10pt !important;
+  line-height: 1.2 !important;
 }
 </style>
 """, unsafe_allow_html=True)
