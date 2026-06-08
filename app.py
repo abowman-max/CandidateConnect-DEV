@@ -453,6 +453,203 @@ section[data-testid="stSidebar"] details summary * {
 """, unsafe_allow_html=True)
 
 
+# C4.7.15 — custom left-pane/sidebar direct repair
+st.markdown("""
+<style>
+/* The visible left pane is custom app chrome, not only Streamlit's stSidebar.
+   Target the left column/sidebar-like pane by its fixed/narrow structure and repair it directly. */
+
+/* Make the left navigation pane wide enough and prevent child controls from bleeding/cropping */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"],
+aside,
+div[class*="sidebar"],
+div[class*="Sidebar"] {
+    width: 390px !important;
+    min-width: 390px !important;
+    max-width: 390px !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+}
+
+/* All left-pane buttons/menus should be left aligned */
+section[data-testid="stSidebar"] button,
+[data-testid="stSidebar"] button,
+aside button,
+div[class*="sidebar"] button,
+div[class*="Sidebar"] button {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-size: 14px !important;
+    line-height: 1.15 !important;
+}
+
+/* Fix button text wrappers that were still centered */
+section[data-testid="stSidebar"] button *,
+[data-testid="stSidebar"] button *,
+aside button *,
+div[class*="sidebar"] button *,
+div[class*="Sidebar"] button * {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    white-space: normal !important;
+    overflow: visible !important;
+}
+
+/* Remove the weird outer halo around groups but keep individual button borders */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+aside [data-testid="stVerticalBlockBorderWrapper"],
+div[class*="sidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+div[class*="Sidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+/* Remove expander/card wrapper halo */
+section[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details,
+aside details,
+div[class*="sidebar"] details,
+div[class*="Sidebar"] details {
+    box-shadow: none !important;
+}
+
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+aside details [data-testid="stExpanderDetails"],
+div[class*="sidebar"] details [data-testid="stExpanderDetails"],
+div[class*="Sidebar"] details [data-testid="stExpanderDetails"] {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 8px !important;
+}
+
+/* Expander headers only: left aligned and compact */
+section[data-testid="stSidebar"] summary,
+[data-testid="stSidebar"] summary,
+aside summary,
+div[class*="sidebar"] summary,
+div[class*="Sidebar"] summary {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    min-height: 32px !important;
+    height: auto !important;
+    padding: 6px 10px !important;
+    white-space: normal !important;
+    overflow: visible !important;
+}
+
+/* BaseWeb Select / MultiSelect: actual placeholder lives in the input and value container.
+   Force normal height and ensure text starts visibly. */
+section[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-baseweb="select"],
+aside [data-baseweb="select"],
+div[class*="sidebar"] [data-baseweb="select"],
+div[class*="Sidebar"] [data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+aside [data-baseweb="select"] > div,
+div[class*="sidebar"] [data-baseweb="select"] > div,
+div[class*="Sidebar"] [data-baseweb="select"] > div {
+    width: 100% !important;
+    max-width: 350px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    padding: 0 10px 0 14px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+/* The visible clipped "Choose options" is this internal input/value area. */
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input,
+aside [data-baseweb="select"] input,
+div[class*="sidebar"] [data-baseweb="select"] input,
+div[class*="Sidebar"] [data-baseweb="select"] input {
+    position: relative !important;
+    left: 0 !important;
+    transform: none !important;
+    min-width: 210px !important;
+    height: 24px !important;
+    line-height: 24px !important;
+    padding-left: 18px !important;
+    margin-left: 0 !important;
+    text-indent: 0 !important;
+    overflow: visible !important;
+    font-size: 14px !important;
+}
+
+/* Value container sometimes has negative/low left padding from prior app CSS. */
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+aside [data-baseweb="select"] div[class*="ValueContainer"],
+aside [data-baseweb="select"] div[class*="value-container"],
+div[class*="sidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+div[class*="sidebar"] [data-baseweb="select"] div[class*="value-container"],
+div[class*="Sidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+div[class*="Sidebar"] [data-baseweb="select"] div[class*="value-container"] {
+    padding-left: 14px !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
+    height: 34px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Selected tags compact and readable */
+section[data-testid="stSidebar"] [data-baseweb="tag"],
+[data-testid="stSidebar"] [data-baseweb="tag"],
+aside [data-baseweb="tag"],
+div[class*="sidebar"] [data-baseweb="tag"],
+div[class*="Sidebar"] [data-baseweb="tag"] {
+    display: inline-flex !important;
+    align-items: center !important;
+    height: 24px !important;
+    max-height: 24px !important;
+    margin: 5px 4px 5px 10px !important;
+    padding-left: 14px !important;
+    padding-right: 6px !important;
+    max-width: 285px !important;
+    overflow: visible !important;
+}
+
+/* Reduce visual clutter from nested red cards in the left pane */
+section[data-testid="stSidebar"] div:has(> details),
+[data-testid="stSidebar"] div:has(> details),
+aside div:has(> details),
+div[class*="sidebar"] div:has(> details),
+div[class*="Sidebar"] div:has(> details) {
+    box-shadow: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+
 
 
 
