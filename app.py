@@ -18,6 +18,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+# C4.7.28 — defensive fallback for legacy filter_options references
+try:
+    filter_options
+except NameError:
+    filter_options = {}
+
+
+
 
 # C4.6.39 — web completion math guard
 def cc639_safe_completion_pct(completed, assigned_total):
@@ -6855,9 +6863,10 @@ def render_mail_ballot_workspace():
     # This matters for cultivation work: users need to target DNA / Not Applied voters
     # without accidentally selecting Approved or Declined application statuses.
     def _default_mb_vals(field, candidates):
+        # C4.7.28 local filter_options fallback
+        filter_options = globals().get('filter_options', {})
         valid = list(field_options(filter_options, field, base))
         return [v for v in (candidates or []) if v in valid]
-
     c5, c6, c7, c8, c9 = st.columns(5)
     app_filed = c5.multiselect(
         "Mail Ballot Application",
