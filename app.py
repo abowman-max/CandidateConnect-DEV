@@ -153,6 +153,92 @@ button[aria-label*="password"],button[title*="password"],[data-testid="stTextInp
 button[aria-label*="password"] *,button[title*="password"] *,[data-testid="stTextInputRootElement"] button *,[data-baseweb="input"] button *{color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;fill:#071d3a!important;opacity:1!important;}
 /* leave tab buttons alone */
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:#071d3a!important;-webkit-text-fill-color:#071d3a!important;font-weight:900!important;}
+
+
+/* C4.7.4 sidebar sizing + multiselect readability repair */
+section[data-testid="stSidebar"] {
+    min-width: 325px !important;
+    max-width: 325px !important;
+    width: 325px !important;
+}
+section[data-testid="stSidebar"] > div {
+    width: 325px !important;
+    min-width: 325px !important;
+    max-width: 325px !important;
+    overflow-x: hidden !important;
+}
+section[data-testid="stSidebar"] .block-container {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    max-width: 325px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.35rem !important;
+}
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    max-width: 100% !important;
+}
+
+/* Keep select/multiselect controls compact and readable */
+section[data-testid="stSidebar"] [data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    min-height: 38px !important;
+    max-height: 44px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] {
+    margin: 2px 3px 2px 0 !important;
+    max-width: 245px !important;
+    overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] span,
+section[data-testid="stSidebar"] [data-baseweb="tag"] div {
+    max-width: 215px !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] input {
+    min-width: 0 !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] div[role="button"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[aria-selected] {
+    overflow: visible !important;
+}
+
+/* Remove the oversized white-box effect inside sidebar form controls */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] {
+    margin-bottom: 0.35rem !important;
+}
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] > div {
+    width: 100% !important;
+}
+section[data-testid="stSidebar"] .stMultiSelect,
+section[data-testid="stSidebar"] .stSelectbox {
+    max-width: 100% !important;
+}
+
+/* Sidebar expander cards should not create nested oversized outlines */
+section[data-testid="stSidebar"] details {
+    margin-bottom: 7px !important;
+}
+section[data-testid="stSidebar"] details > summary {
+    min-height: 34px !important;
+    padding-top: 5px !important;
+    padding-bottom: 5px !important;
+}
+section[data-testid="stSidebar"] details div[data-testid="stExpanderDetails"] {
+    padding: 8px 8px 10px 8px !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 try:
