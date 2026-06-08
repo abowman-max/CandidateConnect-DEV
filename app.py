@@ -14234,6 +14234,223 @@ def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
         })
     return sorted(out, key=lambda x: _gr_int(x["Contacts"]), reverse=True)
 
+
+
+# C4.7.2 — Grassroots Reporting area-break selector + PDF packet
+def _gr_area_value_by_break(row: dict, break_by: str) -> str:
+    break_by = _gr_clean(break_by)
+    aliases = {
+        "County": ["county", "County", "COUNTY"],
+        "Municipality": ["municipality", "Municipality", "MUNICIPALITY", "muni", "Muni"],
+        "Precinct": ["precinct", "Precinct", "precinct_name", "PrecinctName", "Voting Precinct"],
+        "School District": ["school_district", "School District", "SchoolDistrict", "schooldistrict"],
+        "School Region": ["school_region", "School Region", "SchoolRegion"],
+        "State House": ["state_house", "State House", "STH", "state_house_district"],
+        "State Senate": ["state_senate", "State Senate", "STS", "state_senate_district"],
+        "Congressional": ["congressional", "Congressional", "USC", "congressional_district"],
+        "Program": ["program_name", "program", "Program"],
+        "Assignment": ["assignment_name", "Assignment"],
+    }
+    if break_by == "Area / Best Available":
+        return _gr_row_area(row)
+    for key in aliases.get(break_by, []):
+        val = _gr_clean(row.get(key))
+        if val:
+            return val
+    # Fall back gracefully when the mobile result record does not carry every geo field yet.
+    if break_by == "Precinct":
+        return _gr_row_area(row)
+    if break_by == "Assignment":
+        return _gr_clean(row.get("assignment_name")) or "Unknown"
+    if break_by == "Program":
+        return _gr_row_program(row)
+    return "Unknown"
+
+def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
+    areas = {}
+    for r in rows or []:
+        area = _gr_area_value_by_break(r, break_by)
+        rec = areas.setdefault(area, {"Area": area, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
+        rec["Contacts"] += 1
+        result = _gr_result_label(r.get("result"))
+        if result in rec:
+            rec[result] += 1
+        if _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")):
+            rec["Follow-Ups"] += 1
+        if _gr_truthy(r.get("yard_sign")):
+            rec["Yard Signs"] += 1
+    out = []
+    denom = max(len(rows or []), 1)
+    for rec in areas.values():
+        contacts = _gr_int(rec["Contacts"])
+        out.append({
+            "Area": rec["Area"],
+            "Contacts": f"{contacts:,}",
+            "Favorable": f'{_gr_int(rec["Favorable"]):,}',
+            "Undecided": f'{_gr_int(rec["Undecided"]):,}',
+            "Against": f'{_gr_int(rec["Against"]):,}',
+            "Not Home": f'{_gr_int(rec["Not Home"]):,}',
+            "Follow-Ups": f'{_gr_int(rec["Follow-Ups"]):,}',
+            "Yard Signs": f'{_gr_int(rec["Yard Signs"]):,}',
+            "Contact Share": _gr_percent(contacts, denom),
+        })
+    return sorted(out, key=lambda x: _gr_int(x["Contacts"]), reverse=True)
+
+def _gr_report_pdf_bytes(
+    campaign_id: str,
+    program_scope: str,
+    area_break: str,
+    summary: dict,
+    recs: list[dict],
+    result_counts: dict,
+    signal_rows: list[tuple[str, int]],
+    area_rows: list[dict],
+    worker_rows: list[dict],
+    party_rows: list[dict],
+    age_rows: list[dict],
+    gender_rows: list[dict],
+    notes_rows: list[dict],
+) -> bytes:
+    from io import BytesIO
+    from datetime import datetime
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+        from reportlab.graphics.shapes import Drawing, Rect, String
+    except Exception as e:
+        raise RuntimeError("ReportLab is required for PDF export. Add reportlab to requirements.txt.") from e
+
+    def ptxt(value):
+        s = _gr_clean(value)
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def table_from_rows(rows, cols, title=None, max_rows=20, widths=None):
+        story = []
+        if title:
+            story.append(Paragraph(ptxt(title), styles["Section"]))
+            story.append(Spacer(1, 0.06 * inch))
+        data = [[ptxt(c) for c in cols]]
+        for r in (rows or [])[:max_rows]:
+            data.append([ptxt(r.get(c, "")) for c in cols])
+        if len(data) == 1:
+            data.append(["No rows to display."] + [""] * (len(cols)-1))
+        t = Table(data, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), red),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("ALIGN", (0,0), (-1,-1), "CENTER"),
+            ("ALIGN", (0,1), (0,-1), "LEFT"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#d8ccbc")),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f3eadc")]),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 4),
+            ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 0.14 * inch))
+        return story
+
+    def bar_chart(title, rows):
+        rows = [(str(k), int(v or 0)) for k, v in rows if int(v or 0) > 0][:8]
+        d = Drawing(500, 150)
+        d.add(String(0, 135, title, fontName="Helvetica-Bold", fontSize=11, fillColor=navy))
+        if not rows:
+            d.add(String(0, 105, "No activity yet.", fontName="Helvetica", fontSize=9, fillColor=gray))
+            return d
+        mx = max([v for _, v in rows] + [1])
+        y = 110
+        for label, val in rows:
+            d.add(String(0, y + 3, label[:24], fontName="Helvetica-Bold", fontSize=7.5, fillColor=navy))
+            d.add(Rect(120, y, 260, 10, fillColor=colors.HexColor("#eadfce"), strokeColor=colors.HexColor("#d4c7b5")))
+            d.add(Rect(120, y, max(2, 260 * val / mx), 10, fillColor=red, strokeColor=red))
+            d.add(String(390, y + 2, f"{val:,}", fontName="Helvetica-Bold", fontSize=8, fillColor=navy))
+            y -= 15
+        return d
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(gray)
+        canvas.drawString(0.45 * inch, 0.28 * inch, f"Candidate Connect Grassroots Report - {campaign_id}")
+        canvas.drawRightString(10.55 * inch, 0.28 * inch, f"Page {doc.page}")
+        canvas.restoreState()
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(letter),
+        rightMargin=0.45 * inch,
+        leftMargin=0.45 * inch,
+        topMargin=0.42 * inch,
+        bottomMargin=0.42 * inch,
+        title="Grassroots Management Report",
+    )
+    red = colors.HexColor("#9f151c")
+    navy = colors.HexColor("#071d3a")
+    gray = colors.HexColor("#5f6b7a")
+    beige = colors.HexColor("#f3eadc")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=26, textColor=navy, alignment=TA_CENTER, leading=30))
+    styles.add(ParagraphStyle(name="SubTitle", parent=styles["Normal"], fontName="Helvetica", fontSize=11, textColor=gray, alignment=TA_CENTER, leading=15))
+    styles.add(ParagraphStyle(name="Section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, textColor=navy, spaceAfter=4))
+    styles.add(ParagraphStyle(name="BodySmall", parent=styles["Normal"], fontName="Helvetica", fontSize=9, textColor=navy, leading=12))
+
+    story = []
+    story.append(Spacer(1, 0.7 * inch))
+    story.append(Paragraph("Grassroots Management Report", styles["CoverTitle"]))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph(f"Campaign: {ptxt(campaign_id)} &nbsp;&nbsp; | &nbsp;&nbsp; Program Scope: {ptxt(program_scope)} &nbsp;&nbsp; | &nbsp;&nbsp; Area Break: {ptxt(area_break)}", styles["SubTitle"]))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}", styles["SubTitle"]))
+    story.append(Spacer(1, 0.45 * inch))
+    cover_data = [
+        ["Assigned Universe", "Contacted", "Not Contacted", "Contact Rate", "Favorable", "Follow-Ups"],
+        [summary.get("assigned", "—"), summary.get("contacted", "—"), summary.get("remaining", "—"), summary.get("contact_rate", "—"), summary.get("favorable", "—"), summary.get("followups", "—")],
+    ]
+    cover_table = Table(cover_data, colWidths=[1.55*inch]*6)
+    cover_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), red),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("BACKGROUND", (0,1), (-1,1), beige),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTNAME", (0,1), (-1,1), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,0), 8),
+        ("FONTSIZE", (0,1), (-1,1), 16),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#d8ccbc")),
+        ("BOX", (0,0), (-1,-1), 1, red),
+        ("TOPPADDING", (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+    ]))
+    story.append(cover_table)
+    story.append(Spacer(1, 0.28 * inch))
+    story.extend(table_from_rows(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Executive Management Readout", max_rows=5))
+    story.append(PageBreak())
+
+    story.append(Paragraph("Summary Charts", styles["Section"]))
+    chart_tbl = Table([[bar_chart("Contact Results", sorted(result_counts.items(), key=lambda x: x[1], reverse=True)), bar_chart("Action Signals", signal_rows)]], colWidths=[5.0*inch, 5.0*inch])
+    chart_tbl.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP")]))
+    story.append(chart_tbl)
+    story.append(Spacer(1, 0.16 * inch))
+    story.extend(table_from_rows(area_rows, ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title=f"Area Management View - {area_break}", max_rows=18))
+    story.append(PageBreak())
+
+    story.extend(table_from_rows(worker_rows, ["Worker", "Contacts", "Favorable", "Not Home", "Follow-Ups"], title="Personnel / Worker Production", max_rows=18))
+    story.extend(table_from_rows(party_rows, ["Party", "Contacts", "Share"], title="Contacts by Party", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
+    story.extend(table_from_rows(age_rows, ["Age Group", "Contacts", "Share"], title="Contacts by Age Group", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
+    story.extend(table_from_rows(gender_rows, ["Gender", "Contacts", "Share"], title="Contacts by Gender", max_rows=10, widths=[2.2*inch, 1.2*inch, 1.2*inch]))
+    if notes_rows:
+        story.append(PageBreak())
+        story.extend(table_from_rows(notes_rows, ["Result", "Voter", "Area", "Worker", "Notes"], title="Recent Field Notes", max_rows=14))
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()
+
 def _gr_recent_notes(rows: list[dict], limit: int = 8) -> list[dict]:
     noted = []
     for r in rows or []:
@@ -14265,6 +14482,12 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
 
     program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
     selected_program = st.selectbox("Program scope", program_names if program_names else ["All Programs"], key=f"gr_report_program_{campaign_id}")
+    area_break = st.selectbox(
+        "Area / district break",
+        ["Area / Best Available", "Precinct", "Municipality", "County", "School District", "School Region", "State House", "State Senate", "Congressional", "Program", "Assignment"],
+        index=1,
+        key=f"gr_report_area_break_{campaign_id}",
+    )
     if selected_program != "All Programs":
         rows = [r for r in rows_all if _gr_row_program(r) == selected_program]
         total_assigned = total_assigned_all
@@ -14292,7 +14515,7 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         unsafe_allow_html=True,
     )
 
-    weak_areas = _gr_area_rows(rows, total_assigned)[:5]
+    weak_areas = _gr_area_rows_by_break(rows, area_break, total_assigned)[:5]
     recs = _gr_management_recommendations(total_assigned, contacted, result_counts, queue_count, weak_areas)
     st.markdown(_c46_html_table(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Management Readout", max_rows=5), unsafe_allow_html=True)
 
@@ -14322,8 +14545,8 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
             st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Result", lambda r: _gr_result_label(r.get("result"))), ["Result", "Contacts", "Share"], title="Contacts by Result", max_rows=10), unsafe_allow_html=True)
 
     with coverage_tab:
-        area_rows = _gr_area_rows(rows, total_assigned)
-        st.markdown(_c46_html_table(area_rows, ["Area", "Contacts", "Favorable", "Not Home", "Follow-Ups", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
+        area_rows = _gr_area_rows_by_break(rows, area_break, total_assigned)
+        st.markdown(_c46_html_table(area_rows, ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
         remaining_row = [{"Metric": "Not contacted / remaining", "Count": f"{remaining:,}" if total_assigned else "—", "Manager interpretation": "Use this to decide whether the next push should be a new contact pass or follow-up/recontact work."}]
         st.markdown(_c46_html_table(remaining_row, ["Metric", "Count", "Manager interpretation"], title="Uncontacted Universe", max_rows=1), unsafe_allow_html=True)
 
@@ -14354,6 +14577,38 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
                     "volunteer_interest": _gr_truthy(r.get("volunteer_interest")),
                     "notes": _gr_clean(r.get("notes") or r.get("Notes")),
                 })
+
+            pdf_summary = {
+                "assigned": f"{total_assigned:,}" if total_assigned else "—",
+                "contacted": f"{contacted:,}",
+                "remaining": f"{remaining:,}" if total_assigned else "—",
+                "contact_rate": contact_rate,
+                "favorable": f"{_gr_int(result_counts.get('Favorable')):,}",
+                "followups": f"{queue_count:,}",
+            }
+            party_rows_pdf = _gr_breakdown_rows(rows, "Party", _gr_row_party)
+            age_rows_pdf = _gr_breakdown_rows(rows, "Age Group", lambda r: _gr_age_group(r.get("age") or r.get("Age")))
+            gender_rows_pdf = _gr_breakdown_rows(rows, "Gender", _gr_row_gender)
+            try:
+                pdf_bytes = _gr_report_pdf_bytes(
+                    campaign_id=campaign_id,
+                    program_scope=selected_program,
+                    area_break=area_break,
+                    summary=pdf_summary,
+                    recs=recs,
+                    result_counts=result_counts,
+                    signal_rows=follow_rows,
+                    area_rows=area_rows,
+                    worker_rows=worker_rows,
+                    party_rows=party_rows_pdf,
+                    age_rows=age_rows_pdf,
+                    gender_rows=gender_rows_pdf,
+                    notes_rows=recent,
+                )
+                st.download_button("Download Professional PDF Report", data=pdf_bytes, file_name=f"grassroots_management_report_{campaign_id}.pdf", mime="application/pdf", key=f"gr_report_pdf_{campaign_id}")
+            except Exception as e:
+                st.warning(f"PDF export unavailable: {e}")
+
             csv = pd.DataFrame(export_rows).to_csv(index=False).encode("utf-8")
             st.download_button("Download Grassroots Reporting CSV", data=csv, file_name=f"grassroots_reporting_{campaign_id}.csv", mime="text/csv", key=f"gr_report_csv_{campaign_id}")
 
