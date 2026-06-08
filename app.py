@@ -207,6 +207,140 @@ section[data-testid="stSidebar"] details summary * {
 </style>
 """, unsafe_allow_html=True)
 
+
+# C4.7.19 — sidebar width + selectbox vertical fit correction
+st.markdown("""
+<style>
+/* Wider sidebar so filters are not cut off left/right */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+    min-width: 460px !important;
+    width: 460px !important;
+    max-width: 460px !important;
+    flex: 0 0 460px !important;
+    overflow-x: hidden !important;
+}
+
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+    min-width: 460px !important;
+    width: 460px !important;
+    max-width: 460px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+}
+
+/* Give all sidebar controls enough width */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+section[data-testid="stSidebar"] div[data-baseweb="select"],
+[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
+[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+[data-testid="stSidebar"] div[data-baseweb="select"] {
+    width: 100% !important;
+    max-width: 410px !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Fix vertical clipping: controls need more height */
+section[data-testid="stSidebar"] div[data-baseweb="select"],
+[data-testid="stSidebar"] div[data-baseweb="select"] {
+    min-height: 50px !important;
+    height: 50px !important;
+    max-height: 50px !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    min-height: 50px !important;
+    height: 50px !important;
+    max-height: 50px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 14px 0 22px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    border-radius: 8px !important;
+}
+
+/* BaseWeb internal value container: center placeholder/selected text vertically */
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
+    min-height: 46px !important;
+    height: 46px !important;
+    max-height: 46px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 0 0 18px !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+/* Placeholder/input text: no top/bottom clipping, no first-letter clipping */
+section[data-testid="stSidebar"] div[data-baseweb="select"] input,
+[data-testid="stSidebar"] div[data-baseweb="select"] input {
+    height: 30px !important;
+    min-height: 30px !important;
+    line-height: 30px !important;
+    min-width: 260px !important;
+    width: auto !important;
+    padding: 0 0 0 18px !important;
+    margin: 0 !important;
+    transform: none !important;
+    text-indent: 0 !important;
+    overflow: visible !important;
+    font-size: 14px !important;
+    color: #071d3a !important;
+}
+
+/* Selected chips: fit in the taller box */
+section[data-testid="stSidebar"] div[data-baseweb="tag"],
+[data-testid="stSidebar"] div[data-baseweb="tag"] {
+    display: inline-flex !important;
+    align-items: center !important;
+    min-height: 28px !important;
+    height: 28px !important;
+    max-height: 28px !important;
+    margin: 8px 4px 8px 10px !important;
+    padding-left: 14px !important;
+    padding-right: 6px !important;
+    max-width: 330px !important;
+    overflow: visible !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] div,
+[data-testid="stSidebar"] div[data-baseweb="tag"] span,
+[data-testid="stSidebar"] div[data-baseweb="tag"] div {
+    max-width: 285px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+/* Keep sidebar menu readable within new width */
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] details summary,
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] details summary {
+    max-width: 410px !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
 <style>
