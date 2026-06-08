@@ -272,6 +272,9 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     min-width: 250px !important;
     width: 250px !important;
     max-width: 250px !important;
+
+    min-width: 340px !important;
+    max-width: 340px !important;
 }
 
 [data-testid="stSidebar"] > div:first-child {
@@ -14820,6 +14823,9 @@ section[data-testid="stSidebar"],
   width: 250px !important;
   max-width: 250px !important;
   z-index: 999990 !important;
+
+    min-width: 340px !important;
+    max-width: 340px !important;
 }
 section[data-testid="stSidebar"][aria-expanded="false"],
 [data-testid="stSidebar"][aria-expanded="false"] {
@@ -15009,6 +15015,9 @@ st.markdown("""
   width: 250px !important;
   min-width: 250px !important;
   max-width: 250px !important;
+
+    min-width: 340px !important;
+    max-width: 340px !important;
 }
 
 /* compact all sidebar buttons: Dashboard, submenu items, Logout */
@@ -15398,6 +15407,9 @@ small, .stCaption, [data-testid="stCaptionContainer"] {
   min-width: 250px !important;
   width: 250px !important;
   max-width: 250px !important;
+
+    min-width: 340px !important;
+    max-width: 340px !important;
 }
 [data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
   color: var(--cc-blue) !important;
@@ -15772,7 +15784,10 @@ header[data-testid="stHeader"] {
     min-width: 230px !important;
     width: 230px !important;
     max-width: 230px !important;
-  }
+  
+    min-width: 340px !important;
+    max-width: 340px !important;
+}
   .cc-donut {
     width: 135px !important;
     height: 135px !important;
@@ -15792,7 +15807,10 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;
+    min-width: 340px !important;
+    max-width: 340px !important;
+}
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
