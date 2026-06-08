@@ -16595,15 +16595,10 @@ div[data-testid="stDataFrame"] [role="gridcell"] {
 
 
 
-# C4.7.22 — single clean active sidebar CSS
+# C4.7.23 — clean single sidebar CSS, replacing old 390/345/38px block
 st.markdown("""
 <style>
-/* =========================================================
-   Candidate Connect sidebar reset
-   This is the ONLY active sidebar/select override.
-   ========================================================= */
-
-/* Sidebar lane: wide enough for filters */
+/* Sidebar lane: wider and stable */
 section[data-testid="stSidebar"],
 [data-testid="stSidebar"] {
   width: 520px !important;
@@ -16627,7 +16622,7 @@ section[data-testid="stSidebar"] .block-container,
   overflow-x: hidden !important;
 }
 
-/* Navigation buttons: left aligned, contained */
+/* Sidebar buttons/submenus: left aligned and contained */
 section[data-testid="stSidebar"] .stButton,
 section[data-testid="stSidebar"] .stButton > button,
 [data-testid="stSidebar"] .stButton,
@@ -16660,20 +16655,13 @@ section[data-testid="stSidebar"] .stButton > button *,
   white-space: normal !important;
 }
 
-/* Remove extra halos/wrappers around expander bodies */
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
-  border: 0 !important;
-  outline: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-}
-
+/* Remove expander/card halos. Only summary/header keeps border. */
 section[data-testid="stSidebar"] details,
 [data-testid="stSidebar"] details,
 section[data-testid="stSidebar"] div[data-testid="stExpander"],
-[data-testid="stSidebar"] div[data-testid="stExpander"] {
+[data-testid="stSidebar"] div[data-testid="stExpander"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
   border: 0 !important;
   outline: 0 !important;
   box-shadow: none !important;
@@ -16691,19 +16679,13 @@ section[data-testid="stSidebar"] details > summary,
   border-radius: 10px !important;
   background: #f8f4ea !important;
   min-height: 34px !important;
-  height: auto !important;
   padding: 6px 12px !important;
   text-align: left !important;
   justify-content: flex-start !important;
   white-space: normal !important;
   overflow: visible !important;
-  box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] details > summary *,
-[data-testid="stSidebar"] details > summary * {
-  text-align: left !important;
-  justify-content: flex-start !important;
+  font-size: 14px !important;
+  line-height: 1.15 !important;
 }
 
 section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
@@ -16717,7 +16699,7 @@ section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
   max-width: 480px !important;
 }
 
-/* Native Streamlit/BaseWeb selects: readable and usable */
+/* Select/multiselect controls: wider and taller, readable */
 section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"],
 section[data-testid="stSidebar"] [data-baseweb="select"],
@@ -16731,15 +16713,12 @@ section[data-testid="stSidebar"] [data-baseweb="select"],
   overflow: visible !important;
 }
 
-/* Actual visible select box */
 section[data-testid="stSidebar"] [data-baseweb="select"] > div,
 [data-testid="stSidebar"] [data-baseweb="select"] > div {
-  width: 100% !important;
-  max-width: 460px !important;
-  min-height: 48px !important;
-  height: 48px !important;
-  max-height: 48px !important;
-  padding: 0 12px 0 20px !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  max-height: 52px !important;
+  padding: 0 14px 0 24px !important;
   display: flex !important;
   align-items: center !important;
   overflow: visible !important;
@@ -16750,37 +16729,36 @@ section[data-testid="stSidebar"] [data-baseweb="select"] > div,
   border-color: #111111 !important;
 }
 
-/* BaseWeb value container and placeholder/input */
+/* BaseWeb value container/input */
 section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
 section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
-  min-height: 44px !important;
-  height: 44px !important;
   padding-left: 18px !important;
   margin-left: 0 !important;
+  min-height: 46px !important;
+  height: 46px !important;
   display: flex !important;
   align-items: center !important;
   overflow: visible !important;
   box-sizing: border-box !important;
   background: #ffffff !important;
+  color: #071d3a !important;
 }
 
 section[data-testid="stSidebar"] [data-baseweb="select"] input,
 [data-testid="stSidebar"] [data-baseweb="select"] input {
   min-width: 320px !important;
-  width: auto !important;
-  height: 30px !important;
-  line-height: 30px !important;
-  padding-left: 14px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  padding-left: 16px !important;
   margin-left: 0 !important;
   text-indent: 0 !important;
   transform: none !important;
   overflow: visible !important;
+  font-size: 14px !important;
   color: #071d3a !important;
   -webkit-text-fill-color: #071d3a !important;
-  caret-color: #071d3a !important;
-  font-size: 14px !important;
   background: transparent !important;
 }
 
@@ -16791,18 +16769,17 @@ section[data-testid="stSidebar"] [data-baseweb="select"] input::placeholder,
   opacity: 1 !important;
 }
 
-/* Selected multiselect chips */
+/* Selected chips readable */
 section[data-testid="stSidebar"] [data-baseweb="tag"],
 [data-testid="stSidebar"] [data-baseweb="tag"] {
   display: inline-flex !important;
   align-items: center !important;
+  max-width: 365px !important;
   min-height: 28px !important;
   height: 28px !important;
-  max-height: 28px !important;
   margin: 8px 4px 8px 10px !important;
   padding-left: 14px !important;
   padding-right: 6px !important;
-  max-width: 365px !important;
   overflow: visible !important;
   background: #f1e7d6 !important;
   color: #071d3a !important;
