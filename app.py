@@ -16840,19 +16840,19 @@ st.markdown("""
 <style>
 /* Sidebar lane */
 section[data-testid="stSidebar"], [data-testid="stSidebar"] {
-  width: 390px !important;
-  min-width: 390px !important;
-  max-width: 390px !important;
-  flex: 0 0 390px !important;
+  width: 460px !important;
+  min-width: 460px !important;
+  max-width: 460px !important;
+  flex: 0 0 460px !important;
   overflow-x: hidden !important;
 }
 section[data-testid="stSidebar"] > div:first-child,
 section[data-testid="stSidebar"] .block-container,
 [data-testid="stSidebar"] > div:first-child,
 [data-testid="stSidebar"] .block-container {
-  width: 390px !important;
-  min-width: 390px !important;
-  max-width: 390px !important;
+  width: 460px !important;
+  min-width: 460px !important;
+  max-width: 460px !important;
   padding-left: 10px !important;
   padding-right: 10px !important;
   box-sizing: border-box !important;
@@ -16865,7 +16865,7 @@ section[data-testid="stSidebar"] .stButton > button,
 [data-testid="stSidebar"] .stButton,
 [data-testid="stSidebar"] .stButton > button {
   width: 100% !important;
-  max-width: 365px !important;
+  max-width: 430px !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
 }
@@ -16903,7 +16903,7 @@ section[data-testid="stSidebar"] div[data-testid="stExpander"],
   padding: 0 !important;
   margin: 5px 0 !important;
   width: 100% !important;
-  max-width: 365px !important;
+  max-width: 430px !important;
 }
 section[data-testid="stSidebar"] details > summary,
 [data-testid="stSidebar"] details > summary {
@@ -16927,7 +16927,7 @@ section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
   background: transparent !important;
   padding: 8px 8px 10px 8px !important;
   width: 100% !important;
-  max-width: 365px !important;
+  max-width: 430px !important;
 }
 
 /* Compact readable multiselect/select controls */
@@ -16938,16 +16938,16 @@ section[data-testid="stSidebar"] [data-baseweb="select"],
 [data-testid="stSidebar"] [data-testid="stSelectbox"],
 [data-testid="stSidebar"] [data-baseweb="select"] {
   width: 100% !important;
-  max-width: 345px !important;
+  max-width: 420px !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
   overflow: visible !important;
 }
 section[data-testid="stSidebar"] [data-baseweb="select"] > div,
 [data-testid="stSidebar"] [data-baseweb="select"] > div {
-  min-height: 38px !important;
-  height: 38px !important;
-  max-height: 38px !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  max-height: 52px !important;
   padding: 0 8px 0 8px !important;
   display: flex !important;
   align-items: center !important;
@@ -16961,8 +16961,8 @@ section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-conta
 [data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
   padding-left: 18px !important;
   margin-left: 0 !important;
-  min-height: 34px !important;
-  height: 34px !important;
+  min-height: 46px !important;
+  height: 46px !important;
   display: flex !important;
   align-items: center !important;
   overflow: visible !important;
@@ -16970,10 +16970,10 @@ section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-conta
 }
 section[data-testid="stSidebar"] [data-baseweb="select"] input,
 [data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 210px !important;
-  height: 24px !important;
-  line-height: 24px !important;
-  padding-left: 0 !important;
+  min-width: 300px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  padding-left: 18px !important;
   margin-left: 0 !important;
   text-indent: 0 !important;
   overflow: visible !important;
@@ -16984,8 +16984,8 @@ section[data-testid="stSidebar"] [data-baseweb="tag"],
 [data-testid="stSidebar"] [data-baseweb="tag"] {
   display: inline-flex !important;
   align-items: center !important;
-  max-width: 285px !important;
-  height: 24px !important;
+  max-width: 360px !important;
+  height: 32px !important;
   margin: 5px 4px 5px 10px !important;
   padding-left: 12px !important;
   padding-right: 6px !important;
@@ -16995,10 +16995,44 @@ section[data-testid="stSidebar"] [data-baseweb="tag"] span,
 section[data-testid="stSidebar"] [data-baseweb="tag"] div,
 [data-testid="stSidebar"] [data-baseweb="tag"] span,
 [data-testid="stSidebar"] [data-baseweb="tag"] div {
-  max-width: 240px !important;
+  max-width: 310px !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
+}
+
+
+/* C4.7.20 direct final-block sidebar filter correction */
+section[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-baseweb="select"] {
+  max-width: 420px !important;
+  width: 100% !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  max-width: 420px !important;
+  width: 100% !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  max-height: 52px !important;
+  padding: 0 14px 0 24px !important;
+  overflow: visible !important;
+  display: flex !important;
+  align-items: center !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input {
+  min-width: 300px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  padding-left: 18px !important;
+  margin-left: 0 !important;
+  transform: none !important;
+  text-indent: 0 !important;
+  overflow: visible !important;
 }
 </style>
 """, unsafe_allow_html=True)
