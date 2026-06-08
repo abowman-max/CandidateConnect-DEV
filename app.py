@@ -18,23 +18,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-# C4.7.8 helper — readable selected values for sidebar multiselects
-def cc_sidebar_selection_summary(label: str, values, limit: int = 6):
-    try:
-        vals = list(values or [])
-    except Exception:
-        vals = []
-    if not vals:
-        return
-    shown = ", ".join(str(v) for v in vals[:limit])
-    if len(vals) > limit:
-        shown += f", +{len(vals)-limit} more"
-    st.markdown(
-        f'<div class="cc-sidebar-selection-summary"><b>{html.escape(str(label))}:</b> {html.escape(shown)}</div>',
-        unsafe_allow_html=True,
-    )
-
-
 
 # C4.6.39 — web completion math guard
 def cc639_safe_completion_pct(completed, assigned_total):
@@ -108,693 +91,6 @@ st.set_page_config(page_title="Candidate Connect", layout="wide", initial_sideba
 
 
 
-
-
-# C4.7.12 — direct sidebar CSS correction after modifying old 250px rules
-st.markdown("""
-<style>
-/* Final sidebar width and alignment correction */
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-  min-width: 380px !important;
-  width: 380px !important;
-  max-width: 380px !important;
-  flex: 0 0 380px !important;
-  overflow-x: hidden !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] > div:first-child,
-[data-testid="stSidebar"] .block-container {
-  min-width: 380px !important;
-  width: 380px !important;
-  max-width: 380px !important;
-  padding-left: 12px !important;
-  padding-right: 12px !important;
-  box-sizing: border-box !important;
-  overflow-x: hidden !important;
-}
-
-/* All sidebar buttons/submenu buttons left aligned */
-section[data-testid="stSidebar"] .stButton > button,
-[data-testid="stSidebar"] .stButton > button,
-section[data-testid="stSidebar"] button[data-testid^="baseButton"],
-[data-testid="stSidebar"] button[data-testid^="baseButton"] {
-  width: 100% !important;
-  max-width: 350px !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  font-size: 13px !important;
-  line-height: 1.15 !important;
-  min-height: 30px !important;
-  height: auto !important;
-  padding: 5px 10px !important;
-}
-
-section[data-testid="stSidebar"] .stButton > button *,
-[data-testid="stSidebar"] .stButton > button * {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-}
-
-/* Expander headers left aligned */
-section[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details {
-  max-width: 350px !important;
-  width: 100% !important;
-}
-
-section[data-testid="stSidebar"] details summary,
-[data-testid="stSidebar"] details summary {
-  max-width: 350px !important;
-  width: 100% !important;
-  text-align: left !important;
-  justify-content: flex-start !important;
-  white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  font-size: 13px !important;
-  line-height: 1.15 !important;
-  min-height: 30px !important;
-  height: auto !important;
-  padding: 5px 10px !important;
-}
-
-/* Filter controls wider and no first-letter clipping */
-section[data-testid="stSidebar"] [data-baseweb="select"],
-[data-testid="stSidebar"] [data-baseweb="select"],
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-[data-testid="stSidebar"] [data-testid="stSelectbox"] {
-  max-width: 350px !important;
-  width: 100% !important;
-  min-width: 0 !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="select"] > div {
-  max-width: 350px !important;
-  width: 100% !important;
-  min-height: 34px !important;
-  height: auto !important;
-  padding-left: 18px !important;
-  padding-right: 8px !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-}
-
-/* Selected multiselect chips */
-section[data-testid="stSidebar"] [data-baseweb="tag"],
-[data-testid="stSidebar"] [data-baseweb="tag"] {
-  margin-left: 8px !important;
-  padding-left: 12px !important;
-  padding-right: 6px !important;
-  max-width: 290px !important;
-  overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="tag"] span,
-section[data-testid="stSidebar"] [data-baseweb="tag"] div,
-[data-testid="stSidebar"] [data-baseweb="tag"] span,
-[data-testid="stSidebar"] [data-baseweb="tag"] div {
-  max-width: 245px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-/* Placeholder text should not start under the border */
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-[data-testid="stSidebar"] [data-baseweb="select"] input {
-  min-width: 145px !important;
-  padding-left: 8px !important;
-  margin-left: 0 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# C4.7.13 — sidebar halo removal + select text readability
-st.markdown("""
-<style>
-/* Remove the repeated halo/nested outlines around sidebar menu groups */
-section[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] details > div,
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div,
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] [data-testid="stElementContainer"] {
-    box-shadow: none !important;
-}
-
-/* Keep only the intended button/expander border; remove doubled red outlines from wrappers */
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] div[data-testid="stElementContainer"] > div:has(details) {
-    border: none !important;
-    outline: none !important;
-    background: transparent !important;
-}
-
-/* Expander body should not draw an extra outer red card around all submenu buttons */
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-}
-
-/* Make sidebar select/multiselect readable: text starts far enough right */
-section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-    padding-left: 20px !important;
-    padding-right: 12px !important;
-    overflow: hidden !important;
-}
-
-/* Placeholder/input text was being clipped under the left edge */
-section[data-testid="stSidebar"] [data-baseweb="select"] input {
-    padding-left: 18px !important;
-    margin-left: 0 !important;
-    min-width: 210px !important;
-}
-
-/* BaseWeb value container was shifting text left; reset it */
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
-    padding-left: 12px !important;
-    margin-left: 0 !important;
-    overflow: visible !important;
-}
-
-/* Single-value placeholders and multiselect placeholder text */
-section[data-testid="stSidebar"] [data-baseweb="select"] div {
-    text-indent: 0 !important;
-}
-
-/* Selected chips: keep first character visible */
-section[data-testid="stSidebar"] [data-baseweb="tag"] {
-    margin-left: 14px !important;
-    padding-left: 16px !important;
-    max-width: 300px !important;
-}
-
-/* Reduce visual crowding from submenu buttons */
-section[data-testid="stSidebar"] .stButton > button {
-    border-width: 1px !important;
-    box-shadow: none !important;
-}
-
-/* Make menu text left aligned everywhere inside sidebar buttons */
-section[data-testid="stSidebar"] .stButton > button,
-section[data-testid="stSidebar"] .stButton > button *,
-section[data-testid="stSidebar"] details summary,
-section[data-testid="stSidebar"] details summary * {
-    text-align: left !important;
-    justify-content: flex-start !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# C4.7.14 — final filter expander + multiselect height/readability fix
-st.markdown("""
-<style>
-/* Remove the extra rounded boxes around filter groups */
-section[data-testid="stSidebar"] details,
-section[data-testid="stSidebar"] details > div,
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] div[data-testid="stElementContainer"] {
-    box-shadow: none !important;
-}
-
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
-    border: none !important;
-    outline: none !important;
-    background: transparent !important;
-    padding: 0 !important;
-}
-
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 8px 8px 10px 8px !important;
-}
-
-/* Keep expander header as the only visible header card */
-section[data-testid="stSidebar"] details > summary {
-    border-radius: 8px !important;
-    min-height: 32px !important;
-    padding: 5px 10px !important;
-}
-
-/* Force sidebar multiselect/select controls to a normal compact height */
-section[data-testid="stSidebar"] div[data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
-    width: 100% !important;
-    max-width: 350px !important;
-    margin-bottom: 6px !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="select"] {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 40px !important;
-    height: 40px !important;
-    max-height: 40px !important;
-    overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 40px !important;
-    height: 40px !important;
-    max-height: 40px !important;
-    padding: 0 10px 0 16px !important;
-    display: flex !important;
-    align-items: center !important;
-    overflow: hidden !important;
-    box-sizing: border-box !important;
-    border-radius: 8px !important;
-}
-
-/* BaseWeb internal containers: center text vertically and stop clipping first letters */
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="value-container"] {
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
-    padding: 0 0 0 16px !important;
-    margin: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    overflow: visible !important;
-    box-sizing: border-box !important;
-}
-
-/* Placeholder/input visible and vertically centered */
-section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-    height: 24px !important;
-    line-height: 24px !important;
-    min-width: 190px !important;
-    padding: 0 0 0 10px !important;
-    margin: 0 !important;
-    overflow: visible !important;
-    text-indent: 0 !important;
-}
-
-/* For selected tags: compact, readable, no first-letter clipping */
-section[data-testid="stSidebar"] div[data-baseweb="tag"] {
-    display: inline-flex !important;
-    align-items: center !important;
-    height: 26px !important;
-    min-height: 26px !important;
-    max-height: 26px !important;
-    margin: 6px 4px 6px 8px !important;
-    padding-left: 12px !important;
-    padding-right: 6px !important;
-    max-width: 280px !important;
-    overflow: visible !important;
-}
-
-section[data-testid="stSidebar"] div[data-baseweb="tag"] span,
-section[data-testid="stSidebar"] div[data-baseweb="tag"] div {
-    max-width: 235px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-}
-
-/* Remove giant white empty vertical space from multiselect value area */
-section[data-testid="stSidebar"] div[data-baseweb="select"] div {
-    line-height: 1.15 !important;
-}
-
-/* Sidebar menu labels remain left-aligned */
-section[data-testid="stSidebar"] .stButton > button,
-section[data-testid="stSidebar"] .stButton > button *,
-section[data-testid="stSidebar"] details summary,
-section[data-testid="stSidebar"] details summary * {
-    text-align: left !important;
-    justify-content: flex-start !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# C4.7.15 — custom left-pane/sidebar direct repair
-st.markdown("""
-<style>
-/* The visible left pane is custom app chrome, not only Streamlit's stSidebar.
-   Target the left column/sidebar-like pane by its fixed/narrow structure and repair it directly. */
-
-/* Make the left navigation pane wide enough and prevent child controls from bleeding/cropping */
-section[data-testid="stSidebar"],
-[data-testid="stSidebar"],
-aside,
-div[class*="sidebar"],
-div[class*="Sidebar"] {
-    width: 390px !important;
-    min-width: 390px !important;
-    max-width: 390px !important;
-    overflow-x: hidden !important;
-    box-sizing: border-box !important;
-}
-
-/* All left-pane buttons/menus should be left aligned */
-section[data-testid="stSidebar"] button,
-[data-testid="stSidebar"] button,
-aside button,
-div[class*="sidebar"] button,
-div[class*="Sidebar"] button {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    font-size: 14px !important;
-    line-height: 1.15 !important;
-}
-
-/* Fix button text wrappers that were still centered */
-section[data-testid="stSidebar"] button *,
-[data-testid="stSidebar"] button *,
-aside button *,
-div[class*="sidebar"] button *,
-div[class*="Sidebar"] button * {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    white-space: normal !important;
-    overflow: visible !important;
-}
-
-/* Remove the weird outer halo around groups but keep individual button borders */
-section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-aside [data-testid="stVerticalBlockBorderWrapper"],
-div[class*="sidebar"] [data-testid="stVerticalBlockBorderWrapper"],
-div[class*="Sidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 0 !important;
-}
-
-/* Remove expander/card wrapper halo */
-section[data-testid="stSidebar"] details,
-[data-testid="stSidebar"] details,
-aside details,
-div[class*="sidebar"] details,
-div[class*="Sidebar"] details {
-    box-shadow: none !important;
-}
-
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
-aside details [data-testid="stExpanderDetails"],
-div[class*="sidebar"] details [data-testid="stExpanderDetails"],
-div[class*="Sidebar"] details [data-testid="stExpanderDetails"] {
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 8px !important;
-}
-
-/* Expander headers only: left aligned and compact */
-section[data-testid="stSidebar"] summary,
-[data-testid="stSidebar"] summary,
-aside summary,
-div[class*="sidebar"] summary,
-div[class*="Sidebar"] summary {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    min-height: 32px !important;
-    height: auto !important;
-    padding: 6px 10px !important;
-    white-space: normal !important;
-    overflow: visible !important;
-}
-
-/* BaseWeb Select / MultiSelect: actual placeholder lives in the input and value container.
-   Force normal height and ensure text starts visibly. */
-section[data-testid="stSidebar"] [data-baseweb="select"],
-[data-testid="stSidebar"] [data-baseweb="select"],
-aside [data-baseweb="select"],
-div[class*="sidebar"] [data-baseweb="select"],
-div[class*="Sidebar"] [data-baseweb="select"] {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 38px !important;
-    height: 38px !important;
-    overflow: hidden !important;
-    box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] [data-baseweb="select"] > div,
-aside [data-baseweb="select"] > div,
-div[class*="sidebar"] [data-baseweb="select"] > div,
-div[class*="Sidebar"] [data-baseweb="select"] > div {
-    width: 100% !important;
-    max-width: 350px !important;
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
-    padding: 0 10px 0 14px !important;
-    display: flex !important;
-    align-items: center !important;
-    overflow: hidden !important;
-    box-sizing: border-box !important;
-}
-
-/* The visible clipped "Choose options" is this internal input/value area. */
-section[data-testid="stSidebar"] [data-baseweb="select"] input,
-[data-testid="stSidebar"] [data-baseweb="select"] input,
-aside [data-baseweb="select"] input,
-div[class*="sidebar"] [data-baseweb="select"] input,
-div[class*="Sidebar"] [data-baseweb="select"] input {
-    position: relative !important;
-    left: 0 !important;
-    transform: none !important;
-    min-width: 210px !important;
-    height: 24px !important;
-    line-height: 24px !important;
-    padding-left: 18px !important;
-    margin-left: 0 !important;
-    text-indent: 0 !important;
-    overflow: visible !important;
-    font-size: 14px !important;
-}
-
-/* Value container sometimes has negative/low left padding from prior app CSS. */
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
-aside [data-baseweb="select"] div[class*="ValueContainer"],
-aside [data-baseweb="select"] div[class*="value-container"],
-div[class*="sidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-div[class*="sidebar"] [data-baseweb="select"] div[class*="value-container"],
-div[class*="Sidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
-div[class*="Sidebar"] [data-baseweb="select"] div[class*="value-container"] {
-    padding-left: 14px !important;
-    margin-left: 0 !important;
-    overflow: visible !important;
-    height: 34px !important;
-    display: flex !important;
-    align-items: center !important;
-}
-
-/* Selected tags compact and readable */
-section[data-testid="stSidebar"] [data-baseweb="tag"],
-[data-testid="stSidebar"] [data-baseweb="tag"],
-aside [data-baseweb="tag"],
-div[class*="sidebar"] [data-baseweb="tag"],
-div[class*="Sidebar"] [data-baseweb="tag"] {
-    display: inline-flex !important;
-    align-items: center !important;
-    height: 24px !important;
-    max-height: 24px !important;
-    margin: 5px 4px 5px 10px !important;
-    padding-left: 14px !important;
-    padding-right: 6px !important;
-    max-width: 285px !important;
-    overflow: visible !important;
-}
-
-/* Reduce visual clutter from nested red cards in the left pane */
-section[data-testid="stSidebar"] div:has(> details),
-[data-testid="stSidebar"] div:has(> details),
-aside div:has(> details),
-div[class*="sidebar"] div:has(> details),
-div[class*="Sidebar"] div:has(> details) {
-    box-shadow: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-
-
-
-
-
-# C4.7.8 — sidebar usability reset: left-aligned menus + readable filters
-st.markdown("""
-<style>
-/* Sidebar width: normal/wide enough, not clipped */
-section[data-testid="stSidebar"] {
-    width: 380px !important;
-    min-width: 380px !important;
-    max-width: 360px !important;
-    flex: 0 0 360px !important;
-    overflow-x: hidden !important;
-}
-
-section[data-testid="stSidebar"] > div:first-child,
-section[data-testid="stSidebar"] .block-container {
-    width: 380px !important;
-    min-width: 380px !important;
-    max-width: 360px !important;
-    padding-left: 10px !important;
-    padding-right: 10px !important;
-    box-sizing: border-box !important;
-    overflow-x: hidden !important;
-}
-
-/* Important: all sidebar menu buttons left aligned, no centering */
-section[data-testid="stSidebar"] [data-testid="stButton"],
-section[data-testid="stSidebar"] [data-testid="stButton"] > button {
-    width: 100% !important;
-    max-width: 336px !important;
-    min-width: 0 !important;
-    box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] [data-testid="stButton"] > button {
-    display: block !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    min-height: 34px !important;
-    height: auto !important;
-    padding: 6px 12px !important;
-    margin: 2px 0 !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    line-height: 1.15 !important;
-    font-size: 14px !important;
-}
-
-/* Expander headers left aligned and readable */
-section[data-testid="stSidebar"] details {
-    width: 100% !important;
-    max-width: 336px !important;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-    margin: 5px 0 !important;
-}
-
-section[data-testid="stSidebar"] details > summary {
-    width: 100% !important;
-    max-width: 336px !important;
-    min-height: 34px !important;
-    height: auto !important;
-    padding: 6px 12px !important;
-    box-sizing: border-box !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    line-height: 1.15 !important;
-    font-size: 14px !important;
-}
-
-section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
-    width: 100% !important;
-    max-width: 336px !important;
-    padding: 8px 8px 10px 8px !important;
-    box-sizing: border-box !important;
-    overflow-x: hidden !important;
-}
-
-/* Sidebar labels compact but readable */
-section[data-testid="stSidebar"] label p,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] span {
-    font-size: 14px !important;
-    line-height: 1.18 !important;
-}
-
-/* Multiselect/select: contained but not crushed */
-section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-section[data-testid="stSidebar"] [data-baseweb="select"] {
-    width: 100% !important;
-    max-width: 320px !important;
-    min-width: 0 !important;
-    box-sizing: border-box !important;
-}
-
-section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-    width: 100% !important;
-    max-width: 320px !important;
-    min-height: 38px !important;
-    height: auto !important;
-    padding-left: 10px !important;
-    padding-right: 8px !important;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-}
-
-/* Hide Streamlit/BaseWeb selected tags in sidebar because they clip first letters.
-   We will show selected values as readable text below the control from Python. */
-section[data-testid="stSidebar"] [data-baseweb="tag"] {
-    display: none !important;
-}
-
-/* Keep placeholder/input text visible and not shifted left under the border */
-section[data-testid="stSidebar"] [data-baseweb="select"] input {
-    padding-left: 4px !important;
-    margin-left: 0 !important;
-    min-width: 120px !important;
-}
-
-/* Sidebar readable selection summary injected below multiselects */
-.cc-sidebar-selection-summary {
-    max-width: 320px;
-    font-size: 12px;
-    line-height: 1.2;
-    color: #071d3a;
-    background: #f8f1e6;
-    border: 1px solid #d8c7b5;
-    border-radius: 7px;
-    padding: 5px 7px;
-    margin: -2px 0 7px 0;
-    overflow-wrap: anywhere;
-}
-.cc-sidebar-selection-summary b {
-    color: #5f6b7a;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # Early hard CSS fixes: loaded before any st.stop() branches.
 st.markdown("""
@@ -961,7 +257,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     justify-self: center !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: flex-start !important;
+    justify-content: center !important;
 }
 
 .cc-global-logo-center {
@@ -981,7 +277,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 [data-testid="stSidebar"] {
     background: #e6ddcc !important;
     border-right: 2px solid #9f151c !important;
-    min-width: 380px !important;
+    min-width: 250px !important;
     width: 250px !important;
     max-width: 250px !important;
 }
@@ -1141,7 +437,7 @@ div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     border-radius: 999px !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: flex-start !important;
+    justify-content: center !important;
     background: radial-gradient(circle at 35% 20%, #ff6b6b, #9f151c 72%) !important;
     color: #ffffff !important;
 }
@@ -15519,8 +14815,8 @@ section[data-testid="stSidebar"],
   transform: translateX(0px) !important;
   margin-left: 0px !important;
   left: 0px !important;
-  min-width: 380px !important;
-  width: 380px !important;
+  min-width: 250px !important;
+  width: 250px !important;
   max-width: 250px !important;
   z-index: 999990 !important;
 }
@@ -15531,8 +14827,8 @@ section[data-testid="stSidebar"][aria-expanded="false"],
   opacity: 1 !important;
   transform: translateX(0px) !important;
   margin-left: 0px !important;
-  min-width: 380px !important;
-  width: 380px !important;
+  min-width: 250px !important;
+  width: 250px !important;
   max-width: 250px !important;
 }
 [data-testid="stSidebarContent"],
@@ -15709,7 +15005,7 @@ st.markdown("""
 <style>
 /* v30 sidebar compact navigation — sidebar only; main/right-pane buttons untouched */
 [data-testid="stSidebar"] {
-  width: 380px !important;
+  width: 250px !important;
   min-width: 250px !important;
   max-width: 250px !important;
 }
@@ -15736,8 +15032,8 @@ st.markdown("""
   line-height: 1.05 !important;
   padding: 3px 8px !important;
   margin: 1px 0 3px 0 !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
+  justify-content: center !important;
+  text-align: center !important;
 }
 [data-testid="stSidebar"] .stButton > button:not(:disabled) *,
 [data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:not(:disabled) *,
@@ -15804,7 +15100,7 @@ st.markdown("""
   padding: 3px 8px !important;
   border-radius: 9px !important;
   font-weight: 700 !important;
-  justify-content: flex-start !important;
+  justify-content: center !important;
 }
 
 /* compact captions and separators */
@@ -16098,8 +15394,8 @@ small, .stCaption, [data-testid="stCaptionContainer"] {
   background: #e6ddcc !important;
   color: var(--cc-blue) !important;
   border-right: 2px solid var(--cc-red) !important;
-  min-width: 380px !important;
-  width: 380px !important;
+  min-width: 250px !important;
+  width: 250px !important;
   max-width: 250px !important;
 }
 [data-testid="stSidebar"] *, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
@@ -16279,10 +15575,11 @@ button[title*="password"] *,
 details,
 div[data-testid="stExpander"],
 div[data-testid="stExpander"] > details {
-  background: var(--cc-beige-2) !important;
+  background: transparent !important;
   color: var(--cc-blue) !important;
-  border: 1px solid rgba(159,21,28,.35) !important;
-  border-radius: 10px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 details > summary,
 details > summary *,
@@ -16464,8 +15761,8 @@ header[data-testid="stHeader"] {
 /* Responsive */
 @media (max-width: 900px) {
   [data-testid="stSidebar"], section[data-testid="stSidebar"] {
-    min-width: 380px !important;
-    width: 380px !important;
+    min-width: 230px !important;
+    width: 230px !important;
     max-width: 230px !important;
   }
   .cc-donut {
@@ -16487,7 +15784,7 @@ html,body,.stApp,[data-testid="stAppViewContainer"]{background:var(--cc-beige)!i
 .block-container{max-width:1320px!important;margin-left:0!important;margin-right:auto!important;padding-left:1.5rem!important;padding-right:1.25rem!important;}
 h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,[data-testid="stMarkdownContainer"]{color:var(--cc-blue)!important;}
 small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!important;}
-[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width: 380px !important;width:250px!important;max-width:250px!important;}
+[data-testid="stSidebar"]{background:#e6ddcc!important;border-right:2px solid var(--cc-red)!important;min-width:250px!important;width:250px!important;max-width:250px!important;}
 [data-testid="stSidebar"] *{color:var(--cc-blue)!important;}
 .stButton>button:not(:disabled),div[data-testid="stDownloadButton"]>button:not(:disabled),button[data-testid="baseButton-primary"]:not(:disabled),button[data-testid="baseButton-secondary"]:not(:disabled){background:linear-gradient(180deg,#b01822,var(--cc-red))!important;background-color:var(--cc-red)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid var(--cc-red-dark)!important;border-radius:9px!important;font-weight:850!important;text-shadow:none!important;box-shadow:none!important;min-height:34px!important;padding:6px 12px!important;line-height:1.15!important;}
 .stButton>button:not(:disabled) *,.stButton>button:not(:disabled) p,div[data-testid="stDownloadButton"]>button:not(:disabled) *,button[data-testid="baseButton-primary"]:not(:disabled) *,button[data-testid="baseButton-secondary"]:not(:disabled) *{color:#fff!important;-webkit-text-fill-color:#fff!important;}
@@ -17284,6 +16581,175 @@ div[data-testid="stDataFrame"] [role="columnheader"] {
 div[data-testid="stDataFrame"] [role="gridcell"] {
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# C4.7.16 — clean sidebar reset after removing failed sidebar patches
+st.markdown("""
+<style>
+/* Sidebar lane */
+section[data-testid="stSidebar"], [data-testid="stSidebar"] {
+  width: 390px !important;
+  min-width: 390px !important;
+  max-width: 390px !important;
+  flex: 0 0 390px !important;
+  overflow-x: hidden !important;
+}
+section[data-testid="stSidebar"] > div:first-child,
+section[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebar"] .block-container {
+  width: 390px !important;
+  min-width: 390px !important;
+  max-width: 390px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+/* Sidebar buttons/submenus left aligned and contained */
+section[data-testid="stSidebar"] .stButton,
+section[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] .stButton > button {
+  width: 100% !important;
+  max-width: 365px !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+section[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton > button {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  min-height: 32px !important;
+  height: auto !important;
+  padding: 5px 10px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 14px !important;
+  line-height: 1.15 !important;
+}
+section[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stButton > button * {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+}
+
+/* Remove expander/card halos in sidebar. Only the summary/header keeps a border. */
+section[data-testid="stSidebar"] details,
+[data-testid="stSidebar"] details,
+section[data-testid="stSidebar"] div[data-testid="stExpander"],
+[data-testid="stSidebar"] div[data-testid="stExpander"] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 5px 0 !important;
+  width: 100% !important;
+  max-width: 365px !important;
+}
+section[data-testid="stSidebar"] details > summary,
+[data-testid="stSidebar"] details > summary {
+  border: 1px solid rgba(159,21,28,.35) !important;
+  border-radius: 10px !important;
+  background: var(--cc-beige-2, #f8f4ea) !important;
+  min-height: 32px !important;
+  padding: 5px 10px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  font-size: 14px !important;
+  line-height: 1.15 !important;
+}
+section[data-testid="stSidebar"] details [data-testid="stExpanderDetails"],
+[data-testid="stSidebar"] details [data-testid="stExpanderDetails"] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 8px 8px 10px 8px !important;
+  width: 100% !important;
+  max-width: 365px !important;
+}
+
+/* Compact readable multiselect/select controls */
+section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+section[data-testid="stSidebar"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"],
+[data-testid="stSidebar"] [data-baseweb="select"] {
+  width: 100% !important;
+  max-width: 345px !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  min-height: 38px !important;
+  height: 38px !important;
+  max-height: 38px !important;
+  padding: 0 8px 0 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+/* BaseWeb value container/input: the clipped text lives here */
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="ValueContainer"],
+[data-testid="stSidebar"] [data-baseweb="select"] div[class*="value-container"] {
+  padding-left: 18px !important;
+  margin-left: 0 !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input {
+  min-width: 210px !important;
+  height: 24px !important;
+  line-height: 24px !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+  text-indent: 0 !important;
+  overflow: visible !important;
+  font-size: 14px !important;
+}
+/* Selected tags readable */
+section[data-testid="stSidebar"] [data-baseweb="tag"],
+[data-testid="stSidebar"] [data-baseweb="tag"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  max-width: 285px !important;
+  height: 24px !important;
+  margin: 5px 4px 5px 10px !important;
+  padding-left: 12px !important;
+  padding-right: 6px !important;
+  overflow: visible !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] span,
+section[data-testid="stSidebar"] [data-baseweb="tag"] div,
+[data-testid="stSidebar"] [data-baseweb="tag"] span,
+[data-testid="stSidebar"] [data-baseweb="tag"] div {
+  max-width: 240px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 </style>
 """, unsafe_allow_html=True)
