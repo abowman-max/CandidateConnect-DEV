@@ -12810,6 +12810,24 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
     else:
         user_items = []
 
+    # C4.6.42: include every account the current campaign admin can see.
+    # Some field/campaign users are stored with slightly different campaign fields,
+    # so relying only on _user_matches_campaign can exclude valid assignable users.
+    # visible_user_records_for_current_user already applies campaign security for
+    # non-super-admin users, so this is the safest fallback source.
+    visible_usernames = set()
+    try:
+        visible_users_map = visible_user_records_for_current_user(users_obj) if isinstance(users_obj, dict) else {}
+        if isinstance(visible_users_map, dict):
+            visible_usernames = {str(k).strip().lower() for k in visible_users_map.keys()}
+            merged = {str(k).strip(): v for k, v in user_items}
+            for k, v in visible_users_map.items():
+                if isinstance(v, dict):
+                    merged.setdefault(str(k).strip(), v)
+            user_items = list(merged.items())
+    except Exception:
+        visible_usernames = set()
+
     existing_emails = {_email_key(p) for p in active if _email_key(p)}
     existing_ids = {_safe_clean(p.get("person_id")) for p in active if _safe_clean(p.get("person_id"))}
 
@@ -12824,7 +12842,8 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
         status_l = _safe_clean(u.get("status") or u.get("account_status") or "active").lower()
         if status_l in {"disabled", "inactive", "denied", "deleted", "rejected", "pending", "pending_approval"}:
             continue
-        if not _user_matches_campaign(u, aliases):
+        uname_key = str(username or "").strip().lower()
+        if not (uname_key in visible_usernames or _user_matches_campaign(u, aliases)):
             continue
         person = _security_user_to_person(username, u)
         ek = _email_key(person)
