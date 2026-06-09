@@ -1858,31 +1858,37 @@ def cc_filter_active_mobile_assignments(assignments):
 
 
 def cc_checkbox_multiselect(label, options, default=None, key_prefix="cc_multi", columns=2):
-    """Readable checkbox replacement for Streamlit multiselect chips with collision-proof keys."""
+    """Readable checkbox replacement for Streamlit multiselect chips with stable keys.
+
+    IMPORTANT: these checkboxes are used inside st.form. The old version added
+    an incrementing instance number to every checkbox key on each rerun, which
+    caused checked program users to be lost on submit/reload. This version keeps
+    keys stable per option so Program Users save and later appear in Build & Assign.
+    """
     default = set(default or [])
     options = list(options or [])
     import hashlib
-    # Include Streamlit run/context counter so duplicate rendered blocks do not collide.
-    instance_key = f"_cc_multi_instance_{key_prefix}_{label}"
-    st.session_state[instance_key] = st.session_state.get(instance_key, 0) + 1
-    instance_num = st.session_state[instance_key]
+
     selected = []
     st.markdown(f"<div class='cc-program-selector-box'><strong>{label}</strong></div>", unsafe_allow_html=True)
     if not options:
         st.caption("No options available.")
         return selected
+
     cols = st.columns(max(1, min(columns, len(options))))
     for i, opt in enumerate(options):
         raw = str(opt)
-        digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:10]
+        digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+        widget_key = f"{key_prefix}_{digest}_{i}"
         with cols[i % len(cols)]:
             checked = st.checkbox(
                 raw,
                 value=(opt in default),
-                key=f"{key_prefix}_{instance_num}_{digest}_{i}"
+                key=widget_key,
             )
             if checked:
                 selected.append(opt)
+
     if selected:
         st.markdown(
             "<div class='cc-selected-summary'><strong>Selected:</strong> "
@@ -1893,25 +1899,6 @@ def cc_checkbox_multiselect(label, options, default=None, key_prefix="cc_multi",
     else:
         st.markdown("<div class='cc-selected-summary'><strong>Selected:</strong> None</div>", unsafe_allow_html=True)
     return selected
-
-    cols = st.columns(max(1, min(columns, len(options))))
-    for i, opt in enumerate(options):
-        with cols[i % len(cols)]:
-            safe = clean_value(opt) if "clean_value" in globals() else str(opt).replace(" ", "_").replace("-", "_")
-            checked = st.checkbox(str(opt), value=(opt in default), key=f"{key_prefix}_{safe}_{i}")
-            if checked:
-                selected.append(opt)
-    if selected:
-        st.markdown(
-            "<div class='cc-selected-summary'><strong>Selected:</strong> "
-            + ", ".join([str(x) for x in selected])
-            + "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown("<div class='cc-selected-summary'><strong>Selected:</strong> None</div>", unsafe_allow_html=True)
-    return selected
-
 
 
 def smart_sort_key(v):
@@ -14848,138 +14835,35 @@ def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int =
     return list(by_key.values())
 
 
-def _gr_build_universe_geo_crosswalk(universe_rows: list[dict]) -> dict:
-    """Build safe geo crosswalks from the selected reporting universe.
-
-    Mobile results always carry household_key with County|Municipality|Precinct|Address,
-    but some early mobile rows saved voter names into voter_id instead of the true PA voter id.
-    For higher geography breaks (State House, Senate, Congressional, School District/Region),
-    use the selected campaign universe to map each precinct/municipality back to its districts.
-    A mapping is used only when the universe value is unique for that precinct/municipality.
-    """
-    breaks = ["County", "Municipality", "Precinct", "School District", "School Region", "State House", "State Senate", "Congressional"]
-    by_precinct: dict[str, dict[str, set[str]]] = {}
-    by_muni: dict[str, dict[str, set[str]]] = {}
-    by_county: dict[str, dict[str, set[str]]] = {}
-
-    for v in universe_rows or []:
-        if not isinstance(v, dict):
-            continue
-        county = _gr_area_value_by_break(v, "County")
-        muni = _gr_area_value_by_break(v, "Municipality")
-        precinct = _gr_area_value_by_break(v, "Precinct")
-        keys = [
-            (by_precinct, _gr_geo_key(precinct)),
-            (by_muni, _gr_geo_key(muni)),
-            (by_county, _gr_geo_key(county)),
-        ]
-        for target, key in keys:
-            if not key:
-                continue
-            rec = target.setdefault(key, {b: set() for b in breaks})
-            for b in breaks:
-                val = _gr_area_value_by_break(v, b)
-                if val and not _gr_is_blank_geo_value(val):
-                    rec[b].add(_gr_clean(val))
-
-    def collapse(src: dict[str, dict[str, set[str]]]) -> dict[str, dict[str, str]]:
-        out: dict[str, dict[str, str]] = {}
-        for key, vals in src.items():
-            row = {}
-            for b, seen in vals.items():
-                clean_seen = sorted({x for x in seen if x and not _gr_is_blank_geo_value(x)})
-                if len(clean_seen) == 1:
-                    row[b] = clean_seen[0]
-            out[key] = row
-        return out
-
-    return {"precinct": collapse(by_precinct), "municipality": collapse(by_muni), "county": collapse(by_county)}
-
-
-def _gr_set_geo_if_blank(row: dict, display_key: str, value: str) -> None:
-    """Set both display and normalized lower-case geo fields when currently blank/placeholder."""
-    if not value or _gr_is_blank_geo_value(value):
-        return
-    lower_alias = {
-        "County": "county",
-        "Municipality": "municipality",
-        "Precinct": "precinct",
-        "School District": "school_district",
-        "School Region": "school_region",
-        "State House": "state_house",
-        "State Senate": "state_senate",
-        "Congressional": "congressional",
-    }.get(display_key)
-    if (not _gr_clean(row.get(display_key))) or _gr_is_blank_geo_value(row.get(display_key)):
-        row[display_key] = _gr_clean(value)
-    if lower_alias and ((not _gr_clean(row.get(lower_alias))) or _gr_is_blank_geo_value(row.get(lower_alias))):
-        row[lower_alias] = _gr_clean(value)
-
-
 def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
-    """Copy true campaign-universe geography onto synced mobile contacts.
-
-    This is deliberately not a cosmetic fallback. Contacts are first matched by true voter id
-    when available. Older field-app test rows that have voter names in voter_id are then
-    attributed through their mobile household_key precinct into the selected universe's
-    district crosswalk. That gives accurate County/Muni/Precinct/School/Legislative reporting
-    without exposing or joining to data outside the user's campaign universe.
-    """
+    """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row."""
     if not rows or not universe_rows:
         return rows or []
-
     voter_by_key = {}
-    household_by_key = {}
     for v in universe_rows or []:
-        if not isinstance(v, dict):
-            continue
         key = _gr_contact_match_key(v)
-        if key and key not in voter_by_key:
+        if key:
             voter_by_key[key] = v
-        hh = _gr_household_match_key(v)
-        if hh and hh not in household_by_key:
-            household_by_key[hh] = v
-
-    crosswalk = _gr_build_universe_geo_crosswalk(universe_rows)
-    geo_keys = ["County", "Municipality", "Precinct", "School District", "School Region", "State House", "State Senate", "Congressional"]
-
     out = []
+    geo_keys = [
+        ("County", "county"),
+        ("Municipality", "municipality"),
+        ("Precinct", "precinct"),
+        ("School District", "school_district"),
+        ("School Region", "school_region"),
+        ("State House", "state_house"),
+        ("State Senate", "state_senate"),
+        ("Congressional", "congressional"),
+    ]
     for raw in rows or []:
         r = dict(raw or {})
-
-        # 1) Match the exact voter when the contact carries a real voter id, or an exact name/address key.
-        v = voter_by_key.get(_gr_contact_match_key(r)) or household_by_key.get(_gr_household_match_key(r)) or {}
+        v = voter_by_key.get(_gr_contact_match_key(r), {})
         if v:
-            for display_key in geo_keys:
-                _gr_set_geo_if_blank(r, display_key, _gr_area_value_by_break(v, display_key))
-
-        # 2) Always trust the mobile package household_key for county/municipality/precinct.
-        hk_county = _gr_household_key_geo(r, "County")
-        hk_muni = _gr_household_key_geo(r, "Municipality")
-        hk_precinct = _gr_household_key_geo(r, "Precinct")
-        _gr_set_geo_if_blank(r, "County", hk_county)
-        _gr_set_geo_if_blank(r, "Municipality", hk_muni)
-        _gr_set_geo_if_blank(r, "Precinct", hk_precinct)
-
-        # 3) For higher districts, map the contact's precinct back into the selected universe.
-        # Prefer precinct because it is the most precise available geography in the mobile result.
-        fill = {}
-        pkey = _gr_geo_key(hk_precinct or _gr_area_value_by_break(r, "Precinct"))
-        mkey = _gr_geo_key(hk_muni or _gr_area_value_by_break(r, "Municipality"))
-        ckey = _gr_geo_key(hk_county or _gr_area_value_by_break(r, "County"))
-        if pkey:
-            fill.update(crosswalk.get("precinct", {}).get(pkey, {}))
-        if mkey:
-            # only fill missing values from municipality-level unique mappings
-            for k, val in crosswalk.get("municipality", {}).get(mkey, {}).items():
-                fill.setdefault(k, val)
-        if ckey:
-            for k, val in crosswalk.get("county", {}).get(ckey, {}).items():
-                fill.setdefault(k, val)
-
-        for display_key in geo_keys:
-            _gr_set_geo_if_blank(r, display_key, fill.get(display_key, ""))
-
+            for display_key, lower_key in geo_keys:
+                if ((not _gr_clean(r.get(display_key))) or _gr_is_blank_geo_value(r.get(display_key))) and _gr_clean(v.get(display_key)):
+                    r[display_key] = _gr_clean(v.get(display_key))
+                if ((not _gr_clean(r.get(lower_key))) or _gr_is_blank_geo_value(r.get(lower_key))) and _gr_clean(v.get(display_key)):
+                    r[lower_key] = _gr_clean(v.get(display_key))
         out.append(r)
     return out
 
