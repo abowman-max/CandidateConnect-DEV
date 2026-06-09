@@ -13320,7 +13320,7 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
             "mobile_assignment_id": mobile_assignment_id,
             "source_work_item_id": package_id,
             "name": clean_value(work_item.get("name")) or street_area,
-            "assigned_to": assignee or "Unassigned",
+            "assigned_to": "Unassigned",
             "assigned_to_list": assignee_list,
             "street_area": street_area,
             "selected_precinct": clean_value(work_item.get("selected_precinct") or embedded.get("selected_precinct")),
@@ -13417,10 +13417,68 @@ def _c433_resolve_field_username_for_mobile_package(campaign_id: str, package: d
             if uname:
                 return uname, f"matched team member {clean_value(p.get('name'))}"
 
-    # Third, if assigned_to itself is already an email/username, use it.
-    if assigned_norm and assigned_norm not in {"unassigned", "none", "default"}:
-        if "@" in assigned_norm:
-            return assigned_norm, "assigned_to was already an email username"
+    # Third, match campaign/security app users. These include Campaign Admins, Managers,
+    # Field Users, staff/candidate accounts, etc. Labels may look like
+    #   "abowman50 — Campaign Admin"
+    # or
+    #   "Al Bowman — Field User"
+    # and the Field App download path uses the actual login username.
+    try:
+        sec = load_security_store() or {}
+    except Exception:
+        sec = {}
+    try:
+        aliases = _campaign_aliases(sec)
+    except Exception:
+        aliases = set()
+    users_obj = sec.get("users") if isinstance(sec, dict) else {}
+    if isinstance(users_obj, dict):
+        sec_items = list(users_obj.items())
+    elif isinstance(users_obj, list):
+        sec_items = [(clean_value(u.get("username") or u.get("email")), u) for u in users_obj if isinstance(u, dict)]
+    else:
+        sec_items = []
+
+    for uname_key, u in sec_items:
+        if not isinstance(u, dict):
+            continue
+        try:
+            if not _user_matches_campaign(u, aliases):
+                # Also allow exact campaign id/name match because older security rows
+                # do not always satisfy the newer alias helper.
+                cid_vals = [
+                    u.get("campaign_id"), u.get("campaign"), u.get("campaign_name"),
+                    u.get("assigned_campaign_id"), u.get("assigned_campaign"),
+                ]
+                if _ops_slug(campaign_id) not in {_ops_slug(x) for x in cid_vals if clean_value(x)}:
+                    pass
+        except Exception:
+            pass
+        username = clean_value(u.get("username") or u.get("login_username") or uname_key or u.get("email"))
+        email = clean_value(u.get("email"))
+        name = clean_value(u.get("name") or u.get("full_name") or u.get("display_name") or username or email)
+        role = clean_value(u.get("role") or u.get("account_role") or "User")
+        possible_labels = {
+            f"{name} — {role}".lower().strip(),
+            f"{username} — {role}".lower().strip(),
+            f"{email} — {role}".lower().strip(),
+            username.lower().strip(),
+            email.lower().strip(),
+            name.lower().strip(),
+        }
+        if assigned_norm and assigned_norm in {x for x in possible_labels if x}:
+            if username:
+                return username.lower().strip(), f"matched campaign account {username}"
+            if email:
+                return email.lower().strip(), f"matched campaign account email {email}"
+
+    # Fourth, if the label itself starts with a login/username before the dash, use that.
+    # This covers Campaign Admin labels like "abowman50 — Campaign Admin".
+    if assigned_to and assigned_norm not in {"unassigned", "none", "default", "unassigned / candidate"}:
+        first_part = clean_value(re.split(r"\s+[—-]\s+", assigned_to, maxsplit=1)[0])
+        first_norm = first_part.lower().strip()
+        if first_norm and first_norm not in {"unassigned", "none", "default"}:
+            return first_norm, "used login/name before assignment label dash"
 
     return "", f"Could not resolve Field App username from Assigned To = {assigned_to or 'blank'}"
 
@@ -14038,48 +14096,30 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                         st.error(msg)
 
             st.markdown("##### Mobile Assignment Package")
-            st.caption("C4.6.44: Assignment edits are lightweight. The full voter/household JSON is built only when you click Generate, so changing the Assign To picker does not freeze the page.")
-            pkg_state_key = f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{selected_id}_{key_suffix}"
-            msg_state_key = f"a34_mobile_pkg_msg_{campaign_id}_{pid}_{selected_id}_{key_suffix}"
+            st.caption("C4.4: Exports the full household/voter walk package to R2 so the Field App can load it now after Refresh / Download Assignments.")
+            mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
             m1, m2 = st.columns(2)
             with m1:
-                # C4.6.44: Do NOT build the mobile package during normal page reruns.
-                # Whole-universe packages can contain thousands of voters and were causing
-                # the Assign page to sit in Streamlit's grey executing state whenever the
-                # multiselect changed. Build/publish only on this explicit click.
-                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{selected_id}_{key_suffix}"):
-                    with st.spinner("Building and publishing the mobile assignment package to selected user(s). Large whole-universe packages can take a moment..."):
-                        mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
+    # C4.6.17: mobile export removes deleted assignments and groups whole-universe work by precinct.
+
+                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{key_suffix}"):
+                    with st.spinner("Publishing mobile assignment package to selected user(s). Large whole-universe packages can take a moment..."):
                         ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
-                        st.session_state[pkg_state_key] = mobile_pkg
-                        st.session_state[msg_state_key] = msg
+                        st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{key_suffix}"] = mobile_pkg
                         st.success("Mobile assignment package uploaded to R2 and available to the Field App now.")
                         st.code(msg)
                     else:
                         st.error(msg)
             with m2:
-                ready_pkg = st.session_state.get(pkg_state_key)
-                if ready_pkg:
-                    st.download_button(
-                        "Download Mobile Assignment JSON",
-                        json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
-                        file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
-                        mime="application/json",
-                        key=f"a34_download_mobile_assignment_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
-                    )
-                    if st.session_state.get(msg_state_key):
-                        st.caption(st.session_state.get(msg_state_key))
-                else:
-                    st.download_button(
-                        "Download Mobile Assignment JSON",
-                        data=b"",
-                        file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
-                        mime="application/json",
-                        key=f"a34_download_mobile_assignment_disabled_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
-                        disabled=True,
-                        help="Generate the mobile assignment package first.",
-                    )
+                ready_pkg = st.session_state.get(f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{key_suffix}") or mobile_pkg
+                st.download_button(
+                    "Download Mobile Assignment JSON",
+                    json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
+                    mime="application/json",
+                    key=f"a34_download_mobile_assignment_{campaign_id}_{pid}_{key_suffix}",
+                )
 
 def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
     """Small Program workspace summary; intentionally defensive so the UI never blocks.
