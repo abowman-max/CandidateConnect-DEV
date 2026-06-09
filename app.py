@@ -10343,7 +10343,7 @@ def _mobile_voters_from_saved_universe(source_universe: str, max_rows: int = 250
             zipc = _mobile_voter_value(row, "res_zip", "Zip")
             rows.append({
                 "row_number": i,
-                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "SURE_ID", "PA_Voter_ID"),
+                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "PAID", "SURE_ID", "PA_Voter_ID"),
                 "FullName": name,
                 "Age": _mobile_voter_value(row, "Age"),
                 "Party": _mobile_voter_value(row, "Party", "CalculatedParty"),
@@ -10629,7 +10629,7 @@ def _mobile_rows_from_dataframe(df: pd.DataFrame) -> list[dict]:
                 address = " ".join([x for x in [house, suffix, street, apt] if x]).strip()
             rows.append({
                 "row_number": i,
-                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "SURE_ID", "PA_Voter_ID"),
+                "voter_id": _mobile_voter_value(row, "voter_id", "VoterID", "PAID", "SURE_ID", "PA_Voter_ID"),
                 "FullName": name,
                 "Age": _mobile_voter_value(row, "Age"),
                 "Party": _mobile_voter_value(row, "Party", "CalculatedParty"),
@@ -14470,35 +14470,117 @@ def _gr_contact_match_key(row: dict) -> str:
 
 
 def _gr_source_universes_for_reporting(campaign_id: str, selected_program: str = "All Programs") -> list[str]:
-    """Current contact-list saved universes only. This avoids old/deleted lists driving area tables."""
+    """Return the CURRENT saved-universe sources for the reporting scope.
+
+    Important: do not infer the area table from synced contact rows or old list
+    labels. We build the universe from active contact lists, and also from
+    active assignments that point at those lists. That prevents deleted/legacy
+    list names like "Whole Universe" or old packet names from becoming area rows.
+    """
     try:
         contact_lists = load_contact_lists_store(campaign_id).get("contact_lists") or []
     except Exception:
         contact_lists = []
     try:
+        assignments = load_outreach_assignments_store(campaign_id).get("assignments") or []
+    except Exception:
+        assignments = []
+    try:
         programs = load_outreach_programs_store(campaign_id).get("programs") or []
     except Exception:
         programs = []
+
     pid_to_name = { _gr_clean(p.get("program_id")): _gr_clean(p.get("name")) for p in programs if _gr_clean(p.get("program_id")) }
-    out = []
-    seen = set()
-    for cl in contact_lists:
-        if not isinstance(cl, dict):
-            continue
-        pname = _gr_clean(cl.get("program_name")) or pid_to_name.get(_gr_clean(cl.get("program_id")), "")
-        if selected_program != "All Programs" and pname != selected_program:
-            continue
+    cl_by_id = { _gr_clean(cl.get("list_id")): cl for cl in contact_lists if isinstance(cl, dict) and _gr_clean(cl.get("list_id")) }
+
+    def program_name_for_list(cl: dict) -> str:
+        return _gr_clean(cl.get("program_name")) or pid_to_name.get(_gr_clean(cl.get("program_id")), "")
+
+    def add_source_from_list(cl: dict, out: list, seen: set):
         src = _gr_clean(cl.get("source_saved_universe") or cl.get("saved_universe") or cl.get("universe"))
         if src and src not in seen:
             seen.add(src)
             out.append(src)
-    if not out and selected_program != "All Programs":
+
+    out, seen = [], set()
+
+    # 1) Active contact lists for this program/all programs.
+    for cl in contact_lists:
+        if not isinstance(cl, dict):
+            continue
+        pname = program_name_for_list(cl)
+        if selected_program != "All Programs" and pname != selected_program:
+            continue
+        add_source_from_list(cl, out, seen)
+
+    # 2) Active assignments for this program/all programs, resolved to their lists.
+    # This catches the common case where the program is known on the assignment,
+    # but the list record itself did not store program_name cleanly.
+    for a in assignments:
+        if not isinstance(a, dict):
+            continue
+        aname = _gr_clean(a.get("program_name")) or pid_to_name.get(_gr_clean(a.get("program_id")), "")
+        if selected_program != "All Programs" and aname != selected_program:
+            continue
+        cl = cl_by_id.get(_gr_clean(a.get("list_id")), {})
+        if cl:
+            add_source_from_list(cl, out, seen)
+        else:
+            src = _gr_clean(a.get("source_saved_universe") or a.get("saved_universe") or a.get("universe"))
+            if src and src not in seen:
+                seen.add(src); out.append(src)
+
+    # 3) Program-level source as a last program-specific source.
+    if selected_program != "All Programs":
         for p in programs:
             if _gr_clean(p.get("name")) == selected_program:
                 src = _gr_clean(p.get("source_saved_universe") or p.get("saved_universe") or p.get("universe"))
                 if src and src not in seen:
-                    out.append(src); seen.add(src)
+                    seen.add(src); out.append(src)
     return out
+
+
+def _gr_campaign_universe_rows_for_reporting(max_rows: int = 150000) -> list[dict]:
+    """Fallback universe = the logged-in campaign scope.
+
+    When a program/contact-list saved-universe cannot be resolved, reporting still
+    needs to show every municipality/precinct/etc in the campaign universe with
+    zeroes. This pulls the campaign-scoped voters directly instead of falling back
+    to contact-only rows.
+    """
+    try:
+        filters = enforce_security_scope(security_scope_filters() or {})
+        df = duckdb_detail_filtered_df(filters, {}, int(max_rows) + 1)
+        if df is None or df.empty:
+            return []
+        try:
+            df = normalize_download_df(df)
+        except Exception:
+            pass
+        if len(df) > int(max_rows):
+            df = df.head(int(max_rows)).copy()
+        rows = []
+        for _, row in df.iterrows():
+            def val(*cols):
+                return _mobile_voter_value(row, *cols)
+            rows.append({
+                "voter_id": val("voter_id", "VoterID", "PAID", "SURE_ID", "PA_Voter_ID"),
+                "PAID": val("PAID", "voter_id", "VoterID", "SURE_ID", "PA_Voter_ID"),
+                "FullName": val("FullName", "full_name", "Name"),
+                "Name": val("FullName", "full_name", "Name"),
+                "res_address": val("res_address", "Residential Address", "Address"),
+                "County": val("County"),
+                "Municipality": val("Municipality"),
+                "Precinct": val("Precinct"),
+                "School District": val("School District"),
+                "School Region": val("School Region"),
+                "State House": val("State House", "STH", "state_house", "state_house_district"),
+                "State Senate": val("State Senate", "STS", "state_senate", "state_senate_district"),
+                "Congressional": val("Congressional", "USC", "congressional", "congressional_district"),
+            })
+        return rows
+    except Exception:
+        return []
 
 
 def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int = 75000) -> list[dict]:
@@ -14570,18 +14652,28 @@ def _gr_filter_contacts_to_universe(rows: list[dict], universe_rows: list[dict])
 
 
 def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[dict], break_by: str) -> list[dict]:
-    """Area table based on every area in the campaign universe, not only areas with contacts."""
+    """Area table based on every area in the selected universe, not old list labels."""
     areas = {}
-    # Seed all areas from assigned/campaign universe with zeroes.
+
+    # Seed all rows from the selected program/campaign universe so untouched
+    # precincts/municipalities appear with zero contacts.
     for v in universe_rows or []:
-        area = _gr_area_value_by_break(v, break_by)
-        area = _gr_clean(area) or "Unknown"
+        area = _gr_clean(_gr_area_value_by_break(v, break_by)) or "Unknown"
+        if area in {"Area / Best Available", "Whole Universe"}:
+            area = "Unknown"
         rec = areas.setdefault(area, {"Area": area, "Assigned": 0, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
         rec["Assigned"] += 1
-    # Add synced contact outcomes into the proper area.
+
+    valid_area_keys = {_gr_geo_key(k) for k in areas.keys()}
+
+    # Add synced contact outcomes. If the contact cannot be matched/enriched to a
+    # real universe area, do NOT let legacy list/packet labels become area rows.
+    # Put those rare records in an explicit unmatched bucket instead.
     for r in rows or []:
-        area = _gr_area_value_by_break(r, break_by)
-        area = _gr_clean(area) or "Unknown"
+        area = _gr_clean(_gr_area_value_by_break(r, break_by))
+        area_key = _gr_geo_key(area)
+        if not area or (valid_area_keys and area_key not in valid_area_keys):
+            area = "Unmatched Contact Records"
         rec = areas.setdefault(area, {"Area": area, "Assigned": 0, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
         rec["Contacts"] += 1
         result = _gr_result_label(r.get("result"))
@@ -14591,6 +14683,7 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
             rec["Follow-Ups"] += 1
         if _gr_truthy(r.get("yard_sign")):
             rec["Yard Signs"] += 1
+
     denom_contacts = max(len(rows or []), 1)
     out = []
     for rec in areas.values():
@@ -14601,7 +14694,7 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
             "Assigned": f"{assigned:,}" if assigned else "0",
             "Contacts": f"{contacts:,}",
             "Not Contacted": f"{max(assigned - contacts, 0):,}" if assigned else "0",
-            "Contact Rate": _gr_percent(contacts, assigned) if assigned else "0.0%",
+            "Contact Rate": _gr_percent(contacts, assigned) if assigned else "—",
             "Favorable": f'{_gr_int(rec["Favorable"]):,}',
             "Undecided": f'{_gr_int(rec["Undecided"]):,}',
             "Against": f'{_gr_int(rec["Against"]):,}',
@@ -14610,7 +14703,12 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
             "Yard Signs": f'{_gr_int(rec["Yard Signs"]):,}',
             "Contact Share": _gr_percent(contacts, denom_contacts),
         })
-    return sorted(out, key=lambda x: (_gr_int(x.get("Contacts")), _gr_int(x.get("Assigned")), x.get("Area", "")), reverse=True)
+
+    def sort_key(x):
+        # Keep matched universe rows above unmatched bucket, then by assigned/contact load.
+        unmatched = 1 if x.get("Area") == "Unmatched Contact Records" else 0
+        return (unmatched, -_gr_int(x.get("Assigned")), -_gr_int(x.get("Contacts")), x.get("Area", ""))
+    return sorted(out, key=sort_key)
 
 def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
     # Legacy fallback: contact-only area rows. The reporting page now calls
@@ -14844,6 +14942,8 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
     # including areas with zero contacts, instead of only showing synced-list names.
     universe_sources = _gr_source_universes_for_reporting(campaign_id, selected_program)
     universe_rows = _gr_universe_rows_for_sources(universe_sources, max_rows_per_source=75000)
+    if not universe_rows:
+        universe_rows = _gr_campaign_universe_rows_for_reporting(max_rows=150000)
 
     if selected_program != "All Programs":
         rows = [r for r in rows_all if _gr_row_program(r) == selected_program]
