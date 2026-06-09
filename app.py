@@ -1,5 +1,5 @@
 # Candidate Connect LIVE
-# C4.6.2 WEB MOBILE RESULTS READER - no duplicate refresh button — Final Hybrid Cloud App v44 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
+# C4.6.2 WEB MOBILE RESULTS READER - no duplicate refresh button — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 # v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
@@ -134,28 +134,10 @@ div[data-baseweb="select"] input {
     min-width: 2rem !important;
 }
 
-/* clean compact multiselect/dropdown controls */
-.stMultiSelect div[data-baseweb="select"] {
-    min-height: 42px !important;
-    height: 42px !important;
-}
-
+/* keep multiselect controls from crushing selected labels */
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 42px !important;
-    height: 42px !important;
-    display: flex !important;
+    min-height: 44px !important;
     align-items: center !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    overflow: visible !important;
-}
-
-.stMultiSelect div[data-baseweb="select"] input,
-.stMultiSelect div[data-baseweb="select"] span {
-    line-height: 22px !important;
-    height: auto !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
 }
 
 /* login/setup card */
@@ -252,7 +234,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     color: #071d3a !important;
     font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
     font-size: 27px !important;
-    line-height: 1 !important;
+    line-height: .92 !important;
     letter-spacing: .02em !important;
     text-transform: uppercase !important;
     padding-left: 18px !important;
@@ -287,9 +269,9 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 [data-testid="stSidebar"] {
     background: #e6ddcc !important;
     border-right: 2px solid #9f151c !important;
-    min-width: 400px !important;
-    width: 400px !important;
-    max-width: 400px !important;
+    min-width: 250px !important;
+    width: 250px !important;
+    max-width: 250px !important;
 }
 
 [data-testid="stSidebar"] > div:first-child {
@@ -306,7 +288,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     min-height: 38px !important;
     height: 38px !important;
     max-height: 38px !important;
-    width: 400px !important;
+    width: 100% !important;
     padding: 5px 12px !important;
     margin: 0 0 4px 0 !important;
     border-radius: 8px !important;
@@ -365,7 +347,7 @@ input {
     background: #ffffff !important;
     color: #071d3a !important;
     border-color: #8b8171 !important;
-    font-size: 9pt !important;
+    font-size: 10pt !important;
 }
 
 [data-baseweb="popover"],
@@ -735,47 +717,6 @@ div[role="tooltip"] *,
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
     opacity: 1 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-/* FINAL OVERRIDE: fix clipped Choose options text in multiselect filters */
-.stMultiSelect div[data-baseweb="select"] {
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
-}
-
-.stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
-    padding: 0 10px !important;
-    display: flex !important;
-    align-items: center !important;
-    overflow: visible !important;
-}
-
-.stMultiSelect div[data-baseweb="select"] [data-baseweb="placeholder"],
-.stMultiSelect div[data-baseweb="select"] div[role="combobox"],
-.stMultiSelect div[data-baseweb="select"] input {
-    height: 22px !important;
-    min-height: 22px !important;
-    max-height: 22px !important;
-    line-height: 22px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    overflow: visible !important;
-    color: #071d3a !important;
-    -webkit-text-fill-color: #071d3a !important;
-}
-
-.stMultiSelect div[data-baseweb="select"] svg {
-    margin-top: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -14875,9 +14816,9 @@ section[data-testid="stSidebar"],
   transform: translateX(0px) !important;
   margin-left: 0px !important;
   left: 0px !important;
-  min-width: 400px !important;
-  width: 400px !important;
-  max-width: 400px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+  max-width: 250px !important;
   z-index: 999990 !important;
 }
 section[data-testid="stSidebar"][aria-expanded="false"],
@@ -15557,7 +15498,7 @@ button[data-baseweb="tab"] *,
 }
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
   background-color: var(--cc-red) !important;
-  height: 10px !important;
+  height: 4px !important;
 }
 
 /* Forms and dropdowns */
@@ -15859,7 +15800,7 @@ small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!importa
 [data-testid="stSidebar"] .stButton>button *,[data-testid="stSidebar"] .stButton>button span,[data-testid="stSidebar"] .stButton>button p{text-align:left!important;justify-content:flex-start!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:10px!important;}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
 [data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
 input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
 [data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
