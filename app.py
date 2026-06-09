@@ -14816,9 +14816,9 @@ section[data-testid="stSidebar"],
   transform: translateX(0px) !important;
   margin-left: 0px !important;
   left: 0px !important;
-  min-width: 250px !important;
-  width: 250px !important;
-  max-width: 250px !important;
+  min-width: 400px !important;
+  width: 400px !important;
+  max-width: 400px !important;
   z-index: 999990 !important;
 }
 section[data-testid="stSidebar"][aria-expanded="false"],
