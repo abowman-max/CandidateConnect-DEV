@@ -15800,7 +15800,7 @@ small,.stCaption,[data-testid="stCaptionContainer"]{color:var(--cc-gray)!importa
 [data-testid="stSidebar"] .stButton>button *,[data-testid="stSidebar"] .stButton>button span,[data-testid="stSidebar"] .stButton>button p{text-align:left!important;justify-content:flex-start!important;}
 .stButton>button:disabled,div[data-testid="stDownloadButton"]>button:disabled{background:#d8cfc0!important;color:#111!important;-webkit-text-fill-color:#111!important;border:1px solid #b9ad99!important;opacity:1!important;}
 div[data-testid="stTabs"] button,div[data-testid="stTabs"] button *,[role="tab"],[role="tab"] *{background:transparent!important;border:none!important;box-shadow:none!important;color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;font-weight:900!important;}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:4px!important;}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background-color:var(--cc-red)!important;height:10px!important;}
 [data-baseweb="select"]>div,[data-baseweb="input"]>div,textarea,input{background:#fff!important;color:#000!important;-webkit-text-fill-color:#000!important;border-color:#111!important;caret-color:#000!important;}
 input::placeholder,textarea::placeholder{color:#5f6b7a!important;-webkit-text-fill-color:#5f6b7a!important;opacity:1!important;}
 [data-baseweb="select"] input,[data-baseweb="select"] span,[data-baseweb="select"] div{color:var(--cc-blue)!important;-webkit-text-fill-color:var(--cc-blue)!important;}
