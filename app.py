@@ -1,5 +1,5 @@
 # Candidate Connect LIVE
-# C4.6.2 WEB MOBILE RESULTS READER - no duplicate refresh button — Final Hybrid Cloud App v43 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
+# C4.6.2 WEB MOBILE RESULTS READER - no duplicate refresh button — Final Hybrid Cloud App v44 SMART_TURF_GENERATION_v43B_TURF_REVIEW_MAP
 # Full safe filters + guarded export.
 # v21p: keeps v21o phone fix and makes saved universes survive app reload/reboot via URL persistence.
 # v44B DEV: Actual turf map using street-instance centroids; fixes duplicate county street names and wrong township dots.
@@ -269,9 +269,9 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 [data-testid="stSidebar"] {
     background: #e6ddcc !important;
     border-right: 2px solid #9f151c !important;
-    min-width: 250px !important;
-    width: 250px !important;
-    max-width: 250px !important;
+    min-width: 300px !important;
+    width: 300px !important;
+    max-width: 300px !important;
 }
 
 [data-testid="stSidebar"] > div:first-child {
