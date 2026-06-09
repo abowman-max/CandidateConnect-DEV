@@ -16616,27 +16616,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# C4.6.100 HARD FINAL OVERRIDE — compact readable filter dropdowns/multiselects.
-# Added after clipping was fixed but controls were still too tall.
-# This is intentionally the LAST filter CSS so it wins over older theme blocks.
+# C4.6.101 HARD FINAL OVERRIDE — tighter compact readable filter dropdowns/multiselects.
+# This is intentionally last. It reduces the filter boxes to match the left menu buttons.
 st.markdown("""
-<style id="cc-compact-filter-controls-20260608-v100">
+<style id="cc-compact-filter-controls-20260608-v101">
 /* Candidate Connect compact Streamlit/BaseWeb dropdown controls */
 div[data-testid="stSelectbox"],
 div[data-testid="stMultiSelect"],
 .stSelectbox,
 .stMultiSelect {
-    margin-bottom: 0.32rem !important;
+    margin-top: 0 !important;
+    margin-bottom: 0.24rem !important;
 }
 
 div[data-testid="stSelectbox"] label,
 div[data-testid="stMultiSelect"] label,
 .stSelectbox label,
 .stMultiSelect label {
-    margin-bottom: 0.08rem !important;
+    margin-bottom: 0.04rem !important;
     padding-bottom: 0 !important;
-    font-size: 10pt !important;
-    line-height: 1.15 !important;
+    font-size: 9.5pt !important;
+    line-height: 1.08 !important;
     font-weight: 600 !important;
 }
 
@@ -16645,13 +16645,13 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"],
 .stSelectbox div[data-baseweb="select"],
 .stMultiSelect div[data-baseweb="select"] {
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
+    min-height: 34px !important;
+    height: 34px !important;
+    max-height: 34px !important;
     overflow: visible !important;
     box-sizing: border-box !important;
-    font-size: 10pt !important;
-    line-height: 18px !important;
+    font-size: 9.5pt !important;
+    line-height: 16px !important;
 }
 
 /* The visible white rounded box */
@@ -16659,21 +16659,21 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
 .stSelectbox div[data-baseweb="select"] > div,
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 38px !important;
-    height: 38px !important;
-    max-height: 38px !important;
+    min-height: 34px !important;
+    height: 34px !important;
+    max-height: 34px !important;
     box-sizing: border-box !important;
     display: flex !important;
     align-items: center !important;
     background: #ffffff !important;
     border: 1px solid #111111 !important;
     border-radius: 9px !important;
-    padding: 0 9px !important;
+    padding: 0 8px !important;
     margin: 0 !important;
     overflow: visible !important;
 }
 
-/* BaseWeb inner containers: keep them from adding extra vertical blank space */
+/* BaseWeb inner containers: remove the extra vertical blank space */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div > div,
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"],
@@ -16682,9 +16682,9 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="listbox"],
 .stSelectbox div[data-baseweb="select"] > div > div,
 .stMultiSelect div[data-baseweb="select"] > div > div {
-    min-height: 20px !important;
-    height: 20px !important;
-    max-height: 20px !important;
+    min-height: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
     display: flex !important;
     align-items: center !important;
     padding: 0 !important;
@@ -16698,11 +16698,11 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] input,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
 .stSelectbox div[data-baseweb="select"] input,
 .stMultiSelect div[data-baseweb="select"] input {
-    height: 20px !important;
-    min-height: 20px !important;
-    max-height: 20px !important;
-    line-height: 20px !important;
-    font-size: 10pt !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    font-size: 9.5pt !important;
     font-weight: 500 !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -16722,11 +16722,11 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span:not([data-baseweb
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
 .stSelectbox div[data-baseweb="select"] span:not([data-baseweb="tag"]),
 .stMultiSelect div[data-baseweb="select"] span:not([data-baseweb="tag"]) {
-    height: 20px !important;
-    min-height: 20px !important;
-    max-height: 20px !important;
-    line-height: 20px !important;
-    font-size: 10pt !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    font-size: 9.5pt !important;
     font-weight: 500 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -16742,14 +16742,14 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-basew
 /* Selected chips stay compact without clipping. */
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] span[data-baseweb="tag"],
 .stMultiSelect div[data-baseweb="select"] span[data-baseweb="tag"] {
-    min-height: 20px !important;
-    height: 20px !important;
-    max-height: 20px !important;
-    line-height: 18px !important;
-    font-size: 9pt !important;
+    min-height: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
+    line-height: 16px !important;
+    font-size: 8.5pt !important;
     display: inline-flex !important;
     align-items: center !important;
-    margin: 0 4px 0 0 !important;
+    margin: 0 3px 0 0 !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
 }
@@ -16762,8 +16762,8 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
     align-self: center !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
-    width: 16px !important;
-    height: 16px !important;
+    width: 14px !important;
+    height: 14px !important;
 }
 </style>
 """, unsafe_allow_html=True)
