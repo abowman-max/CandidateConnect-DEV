@@ -13567,6 +13567,52 @@ def _c433_mobile_assignment_item_from_a34_package(package: dict) -> dict:
     return item
 
 
+def _c433_assignment_merge_key(item: dict) -> str:
+    """Stable key for replacing the same work item without deleting other lists.
+
+    Mobile assignment files are per-user. A user may have multiple active
+    assignment lists from different programs/universes, so publishing one
+    generated package must update only that work item and preserve the others.
+    """
+    if not isinstance(item, dict):
+        return ""
+    candidates = [
+        item.get("assignment_id"),
+        item.get("source_work_item_id"),
+        (item.get("assignment") or {}).get("mobile_assignment_id") if isinstance(item.get("assignment"), dict) else "",
+        (item.get("assignment") or {}).get("source_work_item_id") if isinstance(item.get("assignment"), dict) else "",
+    ]
+    for val in candidates:
+        val = clean_value(val)
+        if val:
+            return val
+    fallback = "|".join([
+        clean_value(item.get("program_id") or item.get("program_name")),
+        clean_value(item.get("assignment_name") or item.get("label")),
+        clean_value(item.get("street") or item.get("precinct")),
+    ])
+    return hashlib.md5(fallback.encode("utf-8")).hexdigest() if fallback.strip("|") else ""
+
+
+def _c433_existing_mobile_assignments_for_user(path: str) -> list[dict]:
+    """Read the current per-user mobile assignment file from R2, if it exists."""
+    try:
+        raw = _ops_json_get(path, {})
+    except Exception:
+        raw = {}
+    if isinstance(raw, dict):
+        vals = raw.get("assignments") or raw.get("work_items") or raw.get("items") or []
+        if isinstance(vals, list):
+            return [x for x in vals if isinstance(x, dict)]
+        if isinstance(vals, dict):
+            return [vals]
+        if raw.get("assignment") or raw.get("hierarchy") or raw.get("precincts"):
+            return [raw]
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    return []
+
+
 def _c433_publish_a34_package_to_field_user(campaign_id: str, package: dict) -> tuple[bool, str]:
     username, why = _c433_resolve_field_username_for_mobile_package(campaign_id, package)
     if not username:
@@ -13575,25 +13621,39 @@ def _c433_publish_a34_package_to_field_user(campaign_id: str, package: dict) -> 
     item = _c433_mobile_assignment_item_from_a34_package(package)
     path = _c433_mobile_assignment_user_path(campaign_id, username)
 
-    # C4.6.19: source of truth export.
-    # Previously this merged the new package into whatever was already in R2,
-    # so deleted/old assignments stayed on the mobile app forever. For the
-    # current Assign screen, Generate Mobile Assignment Package should publish
-    # exactly the selected active work item for this user unless/until we add a
-    # deliberate "publish all active work items" control.
+    # C4.6.45: merge, do not overwrite.
+    # One field user can be assigned multiple active programs/lists. The prior
+    # payload wrote "assignments": [item], so generating Program B replaced
+    # Program A. This keeps all other active items and updates only the current
+    # assignment/work item.
+    existing = _c433_existing_mobile_assignments_for_user(path)
+    new_key = _c433_assignment_merge_key(item)
+    merged = []
+    seen = set()
+    for old_item in existing:
+        old_key = _c433_assignment_merge_key(old_item)
+        if new_key and old_key == new_key:
+            continue
+        if old_key and old_key in seen:
+            continue
+        if old_key:
+            seen.add(old_key)
+        merged.append(old_item)
+    merged.append(item)
+
     payload = {
-        "version": 2,
+        "version": 3,
         "package_type": "candidate_connect_field_user_assignments",
         "campaign_id": _ops_slug(campaign_id),
         "username": _ops_slug(username),
         "source_username": username,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "replace_local_assignments": True,
-        "assignments": [item],
+        "assignments": merged,
     }
     ok, msg = _put_json_to_r2_key(path, payload)
     if ok:
-        return True, f"Published 1 assignment item(s) to {path} ({why})."
+        return True, f"Published {len(merged):,} assignment item(s) to {path} ({why})."
     return False, f"R2 publish failed for {path}: {msg}"
 
 
