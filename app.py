@@ -14336,6 +14336,31 @@ def render_program_manager_a2(campaign_id: str | None = None):
                     else:
                         st.error(msg)
 
+                st.markdown("---")
+                st.markdown("##### Delete Program")
+                st.caption("Deletes this program plus its saved work items, assignments, contact lists, and generated walk packets. Campaign users and voter data are not deleted.")
+                confirm_delete = st.checkbox(
+                    f"Confirm delete program: {clean_value(current.get('name')) or 'Selected Program'}",
+                    key=f"pm_c46_confirm_delete_program_{campaign_id}_{pid}",
+                )
+                if st.button(
+                    "Delete Program",
+                    key=f"pm_c46_delete_program_{campaign_id}_{pid}",
+                    type="primary",
+                    disabled=not confirm_delete,
+                ):
+                    ok, msg, summary = _cascade_delete_program_a21(campaign_id, pid)
+                    if ok:
+                        st.success(
+                            f"Program deleted. Removed {summary.get('lists', 0)} list(s), "
+                            f"{summary.get('assignments', 0)} assignment(s), and "
+                            f"{summary.get('packets', 0)} walk packet(s)."
+                        )
+                        st.session_state.pop(f"pm_c46_open_program_id_{campaign_id}", None)
+                        st.rerun()
+                    else:
+                        st.error(f"Could not delete program: {msg}")
+
         with st.expander("Create New Program", expanded=not bool(programs)):
             with st.form(f"program_manager_c46_create_{campaign_id}"):
                 a, b, c = st.columns([1.2, 1, 1])
