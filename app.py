@@ -347,7 +347,7 @@ input {
     background: #ffffff !important;
     color: #071d3a !important;
     border-color: #8b8171 !important;
-    font-size: 10pt !important;
+    font-size: 9pt !important;
 }
 
 [data-baseweb="popover"],
