@@ -12684,38 +12684,130 @@ def _program_status_options() -> list[str]:
 
 
 def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[str, str], dict[str, str]]:
-    """Return assignable program users.
+    """Return campaign-scoped assignable program users.
 
-    C4.6.31: Campaign Organization volunteers are the main source, but the
-    logged-in candidate/campaign user must also be assignable even if they were
-    not separately entered as a volunteer. This keeps the candidate in the same
-    assignment dropdown as team/volunteers.
+    Sources are intentionally combined:
+      1) Campaign Organization team/volunteer roster
+      2) Approved app/security users for the same campaign
+      3) The currently logged-in user, if campaign-scoped
+
+    This lets a campaign admin, manager, candidate, staffer, or volunteer receive
+    the same mobile assignment package without having to duplicate every app user
+    in Campaign Organization.  It remains campaign-scoped, so users from other
+    campaigns are not shown.
     """
+    campaign_slug = _ops_slug(campaign_id or _active_campaign_id())
+
     try:
-        people = load_team_people_store(campaign_id).get("people", []) or []
+        people = load_team_people_store(campaign_slug).get("people", []) or []
     except Exception:
         people = []
-    active = [p for p in people if str(p.get("status", "Active")).lower() in {"active", "prospect", ""}]
 
-    # Add current app user as an assignable person if not already present.
+    active: list[dict] = [
+        dict(p) for p in people
+        if str((p or {}).get("status", "Active")).strip().lower() in {"active", "prospect", ""}
+    ]
+
+    def _person_email_key(person: dict) -> str:
+        return clean_value(
+            (person or {}).get("email")
+            or (person or {}).get("field_username")
+            or (person or {}).get("username")
+            or (person or {}).get("login_username")
+        ).lower()
+
+    def _campaign_match(user_rec: dict) -> bool:
+        if not isinstance(user_rec, dict):
+            return False
+        vals = [
+            user_rec.get("campaign_id"),
+            user_rec.get("campaign"),
+            user_rec.get("campaign_name"),
+            user_rec.get("assigned_campaign"),
+            user_rec.get("campaign_slug"),
+        ]
+        for val in vals:
+            if val and _ops_slug(val) == campaign_slug:
+                return True
+
+        # Some stores keep campaign access as a list.
+        for key in ("campaign_ids", "campaigns", "allowed_campaigns", "campaign_access"):
+            raw = user_rec.get(key)
+            if isinstance(raw, list):
+                for val in raw:
+                    if isinstance(val, dict):
+                        val = val.get("campaign_id") or val.get("campaign") or val.get("campaign_name")
+                    if val and _ops_slug(val) == campaign_slug:
+                        return True
+        return False
+
+    def _security_user_to_person(username: str, user_rec: dict) -> dict:
+        email = clean_value(user_rec.get("email") or username)
+        name = clean_value(
+            user_rec.get("name")
+            or user_rec.get("full_name")
+            or user_rec.get("display_name")
+            or user_rec.get("first_last")
+            or email
+        )
+        role = clean_value(user_rec.get("role") or user_rec.get("account_role") or "Campaign User")
+        return {
+            "person_id": "auth-" + hashlib.md5((email or username).lower().encode("utf-8")).hexdigest()[:10],
+            "name": name or email or username,
+            "role": role,
+            "status": "Active",
+            "email": email,
+            "field_username": clean_value(user_rec.get("field_username") or username or email),
+            "source": "security_store",
+        }
+
+    # Add approved/active app users attached to this campaign.
+    try:
+        sec = load_security_store() or {}
+        sec_users = (sec.get("users") or {}) if isinstance(sec, dict) else {}
+    except Exception:
+        sec_users = {}
+
+    existing_emails = {_person_email_key(p) for p in active if _person_email_key(p)}
+    existing_ids = {clean_value((p or {}).get("person_id")) for p in active if clean_value((p or {}).get("person_id"))}
+
+    for username, user_rec in (sec_users or {}).items():
+        if not isinstance(user_rec, dict):
+            continue
+        role_l = clean_value(user_rec.get("role") or user_rec.get("account_role")).lower()
+        if role_l == "super admin":
+            continue
+        status_l = clean_value(user_rec.get("status") or user_rec.get("account_status") or "active").lower()
+        if status_l in {"disabled", "inactive", "denied", "deleted", "rejected"}:
+            continue
+        if not _campaign_match(user_rec):
+            continue
+
+        person = _security_user_to_person(clean_value(username), user_rec)
+        email_key = _person_email_key(person)
+        pid = clean_value(person.get("person_id"))
+        if (email_key and email_key in existing_emails) or (pid and pid in existing_ids):
+            continue
+        active.append(person)
+        if email_key:
+            existing_emails.add(email_key)
+        if pid:
+            existing_ids.add(pid)
+
+    # Add current logged-in campaign user if not already represented.
     try:
         auth_user = current_user() or {}
         auth_username = current_username()
     except Exception:
         auth_user = {}
         auth_username = ""
-    candidate_name = clean_value(auth_user.get("name") or auth_user.get("full_name") or auth_user.get("display_name"))
-    candidate_email = clean_value(auth_user.get("email") or auth_username)
-    existing_emails = {clean_value(p.get("email") or p.get("field_username") or p.get("username")).lower() for p in active}
-    if candidate_email and candidate_email.lower() not in existing_emails:
-        active.append({
-            "person_id": "auth-" + hashlib.md5(candidate_email.lower().encode("utf-8")).hexdigest()[:10],
-            "name": candidate_name or candidate_email,
-            "role": "Candidate/User",
-            "status": "Active",
-            "email": candidate_email,
-            "field_username": candidate_email,
-        })
+
+    if auth_user and _campaign_match(auth_user):
+        person = _security_user_to_person(clean_value(auth_username), auth_user)
+        email_key = _person_email_key(person)
+        pid = clean_value(person.get("person_id"))
+        if (email_key and email_key not in existing_emails) and (not pid or pid not in existing_ids):
+            active.append(person)
 
     labels = []
     label_to_id = {}
@@ -12728,7 +12820,7 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
             pid = "tm-" + hashlib.md5(seed.encode("utf-8")).hexdigest()[:10] if seed else ""
         if not pid:
             continue
-        name = clean_value(person.get("name")) or clean_value(person.get("email")) or "Unnamed"
+        name = clean_value(person.get("name")) or clean_value(person.get("email")) or clean_value(person.get("field_username")) or "Unnamed"
         role = clean_value(person.get("role")) or "Team"
         label = f"{name} — {role}"
         if label in seen_labels:
@@ -12737,6 +12829,7 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
         labels.append(label)
         label_to_id[label] = pid
         id_to_label[pid] = label
+
     return active, labels, label_to_id, id_to_label
 
 
