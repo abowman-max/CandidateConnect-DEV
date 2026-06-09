@@ -399,7 +399,7 @@ button[data-baseweb="tab"] *,
 
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     background-color: #b0121b !important;
-    height: 4px !important;
+    height: 10px !important;
 }
 
 /* cards and dashboard elements */
