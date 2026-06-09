@@ -14455,18 +14455,174 @@ def _gr_geo_key(value: str) -> str:
 
 
 def _gr_contact_match_key(row: dict) -> str:
-    """Stable voter key for matching synced contacts back to the campaign universe."""
+    """Stable voter key for matching synced contacts back to the campaign universe.
+
+    C4.7.6: mobile/web packages have used several voter-id field names over
+    time. Normalize all common aliases before falling back to name/address.
+    """
     if not isinstance(row, dict):
         return ""
-    for key in ["voter_id", "VoterID", "PAID", "PA_Voter_ID", "SURE_ID"]:
+    voter_aliases = [
+        "voter_id", "VoterID", "Voter ID", "VoterId", "voterId",
+        "PAID", "PA_ID", "PA ID", "PA ID Number", "PA_ID_Number",
+        "PA_Voter_ID", "SURE_ID", "StateVoterID", "IDNumber", "ID Number",
+    ]
+    for key in voter_aliases:
         val = _gr_clean(row.get(key))
         if val:
-            return "VID:" + val.upper()
-    name = _gr_clean(row.get("voter_name") or row.get("FullName") or row.get("Name")).upper()
-    addr = _gr_clean(row.get("res_address") or row.get("address") or row.get("household_address") or row.get("Residential Address")).upper()
+            return "VID:" + re.sub(r"[^A-Z0-9]", "", val.upper())
+    name = _gr_clean(row.get("voter_name") or row.get("FullName") or row.get("full_name") or row.get("Name") or row.get("name")).upper()
+    addr = _gr_clean(row.get("res_address") or row.get("address") or row.get("household_address") or row.get("Residential Address") or row.get("Address")).upper()
     if name or addr:
-        return "NA:" + name + "|" + addr
+        return "NA:" + re.sub(r"\s+", " ", name) + "|" + re.sub(r"\s+", " ", addr)
     return ""
+
+
+def _gr_contact_voter_id(row: dict) -> str:
+    """Return just the normalized voter id portion, if present."""
+    key = _gr_contact_match_key(row)
+    return key[4:] if key.startswith("VID:") else ""
+
+
+def _gr_mobile_assignment_ids(row: dict) -> set[str]:
+    ids = set()
+    for key in [
+        "assignment_id", "mobile_assignment_id", "source_work_item_id",
+        "source_assignment_id", "work_assignment_id", "package_id",
+        "packet_id", "list_id",
+    ]:
+        val = _gr_clean((row or {}).get(key))
+        if val:
+            ids.add(val)
+    return ids
+
+
+def _gr_build_reporting_voter_index(campaign_id: str) -> tuple[dict, dict, dict]:
+    """Build voter/package lookup tables from the current saved mobile work packages.
+
+    This is the missing bridge: synced mobile contacts should be attributed by
+    their voter_id back to the exact voter row that was sent to the field app,
+    not by stale list names or guessed municipality fallbacks.
+    """
+    voter_by_key, package_by_assignment, program_by_assignment = {}, {}, {}
+
+    def add_voter(v: dict, meta: dict):
+        if not isinstance(v, dict):
+            return
+        vv = dict(v)
+        # Carry package/program context onto the voter row for later contact enrichment.
+        for k, val in (meta or {}).items():
+            if val and not _gr_clean(vv.get(k)):
+                vv[k] = val
+        key = _gr_contact_match_key(vv)
+        if key and key not in voter_by_key:
+            voter_by_key[key] = vv
+
+    def add_package(pkg: dict, wrapper: dict | None = None):
+        if not isinstance(pkg, dict):
+            return
+        wrapper = wrapper or {}
+        program = pkg.get("program") if isinstance(pkg.get("program"), dict) else {}
+        assignment = pkg.get("assignment") if isinstance(pkg.get("assignment"), dict) else {}
+        program_name = _gr_clean(program.get("name") or wrapper.get("program_name"))
+        program_id = _gr_clean(program.get("program_id") or wrapper.get("program_id"))
+        assignment_name = _gr_clean(assignment.get("name") or wrapper.get("name") or wrapper.get("assignment_name"))
+        ids = set()
+        for src in [pkg, wrapper, assignment]:
+            if isinstance(src, dict):
+                ids.update(_gr_mobile_assignment_ids(src))
+        for key in ["package_id", "mobile_assignment_id", "source_work_item_id"]:
+            val = _gr_clean(pkg.get(key) or assignment.get(key) or wrapper.get(key))
+            if val:
+                ids.add(val)
+        meta = {
+            "program_name": program_name,
+            "program_id": program_id,
+            "assignment_name": assignment_name,
+        }
+        for aid in ids:
+            package_by_assignment[aid] = pkg
+            program_by_assignment[aid] = meta
+        for v in (pkg.get("voters") if isinstance(pkg.get("voters"), list) else []):
+            add_voter(v, meta)
+        # Also index nested hierarchy voters when present.
+        for pc in (pkg.get("hierarchy") if isinstance(pkg.get("hierarchy"), list) else []):
+            if not isinstance(pc, dict):
+                continue
+            pc_name = _gr_clean(pc.get("precinct") or pc.get("Precinct"))
+            for st_obj in (pc.get("streets") or []):
+                if not isinstance(st_obj, dict):
+                    continue
+                for hh in (st_obj.get("households") or []):
+                    if not isinstance(hh, dict):
+                        continue
+                    hh_voters = hh.get("voters") if isinstance(hh.get("voters"), list) else []
+                    for v in hh_voters:
+                        vv = dict(v or {})
+                        if pc_name and not _gr_clean(vv.get("Precinct")):
+                            vv["Precinct"] = pc_name
+                        add_voter(vv, meta)
+
+    # Program candidate walk packages are the source used to build mobile assignments.
+    try:
+        store = load_program_candidate_walk_packages_store(campaign_id)
+        for wrapper in (store.get("packages") or []):
+            if not isinstance(wrapper, dict):
+                continue
+            pkg = wrapper.get("package") if isinstance(wrapper.get("package"), dict) else {}
+            # Wrapper itself carries package_id/program_id/name; embedded package carries voters.
+            add_package(pkg, wrapper)
+    except Exception:
+        pass
+
+    # Older smart-turf packets also contain voter rows.
+    try:
+        walk_store = load_walk_packets_store(campaign_id)
+        for p in (walk_store.get("packets") or []):
+            if isinstance(p, dict):
+                add_package(p, p)
+    except Exception:
+        pass
+
+    return voter_by_key, package_by_assignment, program_by_assignment
+
+
+def _gr_enrich_contacts_from_reporting_index(campaign_id: str, rows: list[dict]) -> list[dict]:
+    voter_by_key, package_by_assignment, program_by_assignment = _gr_build_reporting_voter_index(campaign_id)
+    if not rows:
+        return []
+    geo_pairs = [
+        ("County", "county"), ("Municipality", "municipality"), ("Precinct", "precinct"),
+        ("School District", "school_district"), ("School Region", "school_region"),
+        ("State House", "state_house"), ("State Senate", "state_senate"), ("Congressional", "congressional"),
+        ("Party", "party"), ("Gender", "gender"), ("Age", "age"), ("FullName", "voter_name"),
+    ]
+    out = []
+    for raw in rows or []:
+        r = dict(raw or {})
+        # Program/assignment from mobile package ids.
+        for aid in _gr_mobile_assignment_ids(r):
+            meta = program_by_assignment.get(aid) or {}
+            if meta:
+                if not _gr_clean(r.get("program_name")) and _gr_clean(meta.get("program_name")):
+                    r["program_name"] = _gr_clean(meta.get("program_name"))
+                if not _gr_clean(r.get("program_id")) and _gr_clean(meta.get("program_id")):
+                    r["program_id"] = _gr_clean(meta.get("program_id"))
+                if not _gr_clean(r.get("assignment_name")) and _gr_clean(meta.get("assignment_name")):
+                    r["assignment_name"] = _gr_clean(meta.get("assignment_name"))
+                break
+        v = voter_by_key.get(_gr_contact_match_key(r), {})
+        if v:
+            for display_key, lower_key in geo_pairs:
+                val = _gr_clean(v.get(display_key) or v.get(lower_key))
+                if not val:
+                    continue
+                if not _gr_clean(r.get(display_key)):
+                    r[display_key] = val
+                if not _gr_clean(r.get(lower_key)):
+                    r[lower_key] = val
+        out.append(r)
+    return out
 
 
 def _gr_source_universes_for_reporting(campaign_id: str, selected_program: str = "All Programs") -> list[str]:
@@ -14665,10 +14821,15 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
         rec["Assigned"] += 1
 
     valid_area_keys = {_gr_geo_key(k) for k in areas.keys()}
+    valid_real_areas = [k for k in areas.keys() if _gr_geo_key(k) and _gr_clean(k).lower() not in {"unknown", "whole universe", "area / best available"}]
+    single_universe_area = valid_real_areas[0] if len(valid_real_areas) == 1 else ""
 
-    # Add synced contact outcomes. If the contact cannot be matched/enriched to a
-    # real universe area, do NOT let legacy list/packet labels become area rows.
-    # Put those rare records in an explicit unmatched bucket instead.
+    # Add synced contact outcomes. If a mobile sync row has no geo fields but the
+    # selected reporting universe contains exactly one real area for the selected
+    # break (common for single-municipality campaign universes), attribute the
+    # contact to that area instead of creating a false unmatched bucket.
+    # If there are multiple possible areas and the row still cannot be matched,
+    # keep it in an explicit unmatched bucket so the data issue is visible.
     for r in rows or []:
         area = _gr_clean(_gr_area_value_by_break(r, break_by))
         area_key = _gr_geo_key(area)
@@ -14926,7 +15087,10 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         programs = []
     counts = _program_manager_counts_c46(campaign_id, programs)
     mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
-    rows_all = _gr_dedupe_rows(_gr_enrich_rows_with_assignment_geo(campaign_id, mobile.get("synced_rows") or mobile.get("rows") or []))
+    # C4.7.6: Enrich synced contacts from the actual mobile/candidate-walk voter packages
+    # BEFORE program filtering. This keeps all 19 synced door contacts in the selected
+    # program and attributes them to their true voter geography by voter_id.
+    rows_all = _gr_dedupe_rows(_gr_enrich_contacts_from_reporting_index(campaign_id, _gr_enrich_rows_with_assignment_geo(campaign_id, mobile.get("synced_rows") or mobile.get("rows") or [])))
     total_assigned_all = _gr_int(counts.get("total_voters"))
 
     program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
@@ -14950,7 +15114,7 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
     else:
         rows = rows_all
 
-    rows = _gr_enrich_contacts_from_universe(rows, universe_rows)
+    rows = _gr_enrich_contacts_from_reporting_index(campaign_id, _gr_enrich_contacts_from_universe(rows, universe_rows))
     rows = _gr_filter_contacts_to_universe(rows, universe_rows)
     total_assigned = len(universe_rows) if universe_rows else total_assigned_all
 
@@ -17372,3 +17536,6 @@ div[data-testid="stMultiSelect"] > div {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# C4.7.8 — Grassroots Reporting single-area contact attribution fix.
+# If selected universe has one area, contacts without mobile geo are assigned there.
