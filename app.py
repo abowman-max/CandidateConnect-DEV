@@ -12841,8 +12841,18 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
             merged_users.setdefault(str(k).strip(), v)
     user_items = list(merged_users.items())
 
-    existing_emails = {_email_key(p) for p in active if _email_key(p)}
+    # Dedupe carefully:
+    # - Roster/Field App users often share the same email as a Campaign Admin.
+    # - We should skip a security account only when its actual login/username is already
+    #   represented in the roster, NOT merely because the email matches.
+    # This keeps "abowman@..." Field User and "abowman50" Campaign Admin separately assignable.
+    existing_logins = set()
     existing_ids = {_safe_clean(p.get("person_id")) for p in active if _safe_clean(p.get("person_id"))}
+    for p in active:
+        for k in ("field_username", "username", "login_username", "email"):
+            v = _safe_clean(p.get(k)).lower()
+            if v:
+                existing_logins.add(v)
 
     for username, u in user_items:
         if not isinstance(u, dict):
@@ -12855,16 +12865,28 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
         status_l = _safe_clean(u.get("status") or u.get("account_status") or "active").lower()
         if status_l in {"disabled", "inactive", "denied", "deleted", "rejected", "pending", "pending_approval"}:
             continue
+
         person = _security_user_to_person(username, u)
-        ek = _email_key(person)
         pk = _safe_clean(person.get("person_id"))
-        if (ek and ek in existing_emails) or (pk and pk in existing_ids):
+        login_candidates = {
+            _safe_clean(username).lower(),
+            _safe_clean(person.get("username")).lower(),
+            _safe_clean(person.get("field_username")).lower(),
+            _safe_clean(u.get("username")).lower(),
+            _safe_clean(u.get("login_username")).lower(),
+        }
+        login_candidates = {x for x in login_candidates if x}
+
+        # Skip if this exact login is already represented, or if the generated auth id is already present.
+        # Do NOT skip just because email matches; one person can have a campaign-admin account
+        # and a field-user/mobile login using the same email.
+        if (pk and pk in existing_ids) or (login_candidates and any(x in existing_logins for x in login_candidates)):
             continue
+
         active.append(person)
-        if ek:
-            existing_emails.add(ek)
         if pk:
             existing_ids.add(pk)
+        existing_logins.update(login_candidates)
 
     # 3) Current logged-in user as a final campaign-scoped fallback
     try:
@@ -12876,10 +12898,18 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
     if isinstance(auth_user, dict) and auth_user:
         if _user_matches_campaign(auth_user, aliases) or _ops_slug(auth_user.get("campaign_id") or auth_user.get("campaign") or "") == campaign_slug:
             person = _security_user_to_person(auth_username, auth_user)
-            ek = _email_key(person)
             pk = _safe_clean(person.get("person_id"))
-            if (not ek or ek not in existing_emails) and (not pk or pk not in existing_ids):
+            login_candidates = {
+                _safe_clean(auth_username).lower(),
+                _safe_clean(person.get("username")).lower(),
+                _safe_clean(person.get("field_username")).lower(),
+            }
+            login_candidates = {x for x in login_candidates if x}
+            if (not pk or pk not in existing_ids) and (not login_candidates or not any(x in existing_logins for x in login_candidates)):
                 active.append(person)
+                if pk:
+                    existing_ids.add(pk)
+                existing_logins.update(login_candidates)
 
     labels: list[str] = []
     label_to_id: dict[str, str] = {}
