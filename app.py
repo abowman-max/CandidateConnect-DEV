@@ -288,7 +288,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     min-height: 38px !important;
     height: 38px !important;
     max-height: 38px !important;
-    width: 100% !important;
+    width: 400px !important;
     padding: 5px 12px !important;
     margin: 0 0 4px 0 !important;
     border-radius: 8px !important;
