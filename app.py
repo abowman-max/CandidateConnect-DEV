@@ -1655,18 +1655,36 @@ def cc_is_active_mobile_assignment(rec):
 
 
 def cc_precinct_value_from_record(rec):
-    """Best-effort precinct field resolver used by mobile package hierarchy."""
+    """Best-effort precinct field resolver used by mobile package hierarchy.
+
+    C4.6.45: be aggressive about PA precinct column aliases. If a whole-universe
+    mobile package shows "Unassigned Precinct", it usually means the export
+    received a valid voter row but the precinct column was named differently.
+    """
     if not isinstance(rec, dict):
         return ""
     for key in [
         "Precinct", "PRECINCT", "precinct",
-        "PrecinctName", "precinct_name",
-        "Voting Precinct", "voting_precinct",
-        "CountyPrecinct", "county_precinct",
+        "PrecinctName", "precinct_name", "PRECINCT_NAME",
+        "Precinct Name", "precinct name", "Precinct_Label", "precinct_label",
+        "Voting Precinct", "voting_precinct", "Election Precinct", "election_precinct",
+        "CountyPrecinct", "county_precinct", "PCT", "Pct", "pct",
+        "WardPrecinct", "ward_precinct", "Ward/Precinct", "Ward Precinct",
+        "District", "district_name",
     ]:
         val = clean_value(rec.get(key))
-        if val:
+        if val and val.lower() not in {"unknown", "none", "nan", "unassigned precinct"}:
             return val
+
+    # Last-resort: some saved-universe rows carry the hierarchy in household_key:
+    # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS
+    hk = clean_value(rec.get("household_key") or rec.get("Household Key") or rec.get("HouseholdID") or "")
+    if "|" in hk:
+        parts = [x.strip() for x in hk.split("|")]
+        if len(parts) >= 3 and clean_value(parts[2]):
+            return clean_value(parts[2])
+
+    # Do not silently hide the problem, but keep the bucket visible.
     return "Unassigned Precinct"
 
 
@@ -15398,15 +15416,20 @@ def _gr_universe_rows_from_assigned_work_packages(campaign_id: str, selected_pro
 
 
 def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
-    """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row."""
+    """Copy true campaign-universe geography onto synced contact rows.
+
+    C4.6.45: contacts can be valid even when older mobile rows saved voter names
+    into voter_id. Match by real voter id, household_key/address, and then by
+    precinct from household_key so district breaks do not create false
+    "unmatched" buckets.
+    """
     if not rows or not universe_rows:
         return rows or []
+
     voter_by_key = {}
-    for v in universe_rows or []:
-        key = _gr_contact_match_key(v)
-        if key:
-            voter_by_key[key] = v
-    out = []
+    voter_by_hh = {}
+    precinct_geo = {}
+
     geo_keys = [
         ("County", "county"),
         ("Municipality", "municipality"),
@@ -15417,15 +15440,66 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
         ("State Senate", "state_senate"),
         ("Congressional", "congressional"),
     ]
+
+    for v in universe_rows or []:
+        if not isinstance(v, dict):
+            continue
+        ck = _gr_contact_match_key(v)
+        hk = _gr_household_match_key(v)
+        if ck:
+            voter_by_key[ck] = v
+        if hk:
+            voter_by_hh[hk] = v
+
+        # Unique geography by precinct for rows that only have household_key
+        # county/muni/precinct but need school/state/congressional breaks.
+        pk = _gr_geo_key(_gr_area_value_by_break(v, "Precinct"))
+        if pk:
+            existing = precinct_geo.get(pk)
+            candidate = {}
+            for display_key, lower_key in geo_keys:
+                candidate[display_key] = _gr_clean(v.get(display_key) or v.get(lower_key))
+            if not existing:
+                precinct_geo[pk] = candidate
+            else:
+                # If different rows disagree on a field, leave that field blank
+                # rather than inventing a district.
+                for k, val in list(existing.items()):
+                    if val and candidate.get(k) and _gr_geo_key(val) != _gr_geo_key(candidate.get(k)):
+                        existing[k] = ""
+
+    out = []
     for raw in rows or []:
         r = dict(raw or {})
-        v = voter_by_key.get(_gr_contact_match_key(r), {})
+        v = voter_by_key.get(_gr_contact_match_key(r)) or voter_by_hh.get(_gr_household_match_key(r)) or {}
+
+        # If no exact voter/household match, use household_key precinct to pull
+        # district fields from the selected campaign universe.
+        hk_precinct = _gr_household_key_geo(r, "Precinct")
+        if not v and hk_precinct:
+            v = precinct_geo.get(_gr_geo_key(hk_precinct), {}) or {}
+
+        # Always populate direct household_key geography for the three basic
+        # geography breaks; this is authoritative mobile package geography.
+        for base_break, display_key, lower_key in [
+            ("County", "County", "county"),
+            ("Municipality", "Municipality", "municipality"),
+            ("Precinct", "Precinct", "precinct"),
+        ]:
+            hv = _gr_household_key_geo(r, base_break)
+            if hv and not _gr_is_blank_geo_value(hv):
+                r[display_key] = hv
+                r[lower_key] = hv
+
         if v:
             for display_key, lower_key in geo_keys:
-                if ((not _gr_clean(r.get(display_key))) or _gr_is_blank_geo_value(r.get(display_key))) and _gr_clean(v.get(display_key)):
-                    r[display_key] = _gr_clean(v.get(display_key))
-                if ((not _gr_clean(r.get(lower_key))) or _gr_is_blank_geo_value(r.get(lower_key))) and _gr_clean(v.get(display_key)):
-                    r[lower_key] = _gr_clean(v.get(display_key))
+                val = _gr_clean(v.get(display_key) or v.get(lower_key))
+                if not val:
+                    continue
+                if ((not _gr_clean(r.get(display_key))) or _gr_is_blank_geo_value(r.get(display_key))):
+                    r[display_key] = val
+                if ((not _gr_clean(r.get(lower_key))) or _gr_is_blank_geo_value(r.get(lower_key))):
+                    r[lower_key] = val
         out.append(r)
     return out
 
@@ -15547,9 +15621,13 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
         })
 
     def sort_key(x):
-        # Keep matched universe rows above unmatched bucket, then by assigned/contact load.
+        # Put areas with actual contact activity first so the manager immediately
+        # sees where test/field contacts landed, then show the full remaining
+        # universe by assigned load. Keep unmatched visible but last.
         unmatched = 1 if x.get("Area") == "Unmatched Contact Records" else 0
-        return (unmatched, -_gr_int(x.get("Assigned")), -_gr_int(x.get("Contacts")), x.get("Area", ""))
+        contacts = _gr_int(x.get("Contacts"))
+        assigned = _gr_int(x.get("Assigned"))
+        return (unmatched, 0 if contacts > 0 else 1, -contacts, -assigned, x.get("Area", ""))
     return sorted(out, key=sort_key)
 
 def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
@@ -15854,7 +15932,10 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
 
     with coverage_tab:
         area_rows = _gr_area_rows_by_break_with_universe(rows, universe_rows, area_break) if universe_rows else _gr_area_rows_by_break(rows, area_break, total_assigned)
-        st.markdown(_c46_html_table(area_rows, ["Area", "Assigned", "Contacts", "Not Contacted", "Contact Rate", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
+        # Show the full campaign/program coverage table, not just the first 15 rows.
+        # This is required for field testing: untouched precincts need to show as 0,
+        # and contacted precincts need to be visible.
+        st.markdown(_c46_html_table(area_rows, ["Area", "Assigned", "Contacts", "Not Contacted", "Contact Rate", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title="Area / Precinct Management View", max_rows=300), unsafe_allow_html=True)
         remaining_row = [{"Metric": "Not contacted / remaining", "Count": f"{remaining:,}" if total_assigned else "—", "Manager interpretation": "Use this to decide whether the next push should be a new contact pass or follow-up/recontact work."}]
         st.markdown(_c46_html_table(remaining_row, ["Metric", "Count", "Manager interpretation"], title="Uncontacted Universe", max_rows=1), unsafe_allow_html=True)
 
