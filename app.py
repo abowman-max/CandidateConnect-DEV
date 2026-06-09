@@ -12684,21 +12684,56 @@ def _program_status_options() -> list[str]:
 
 
 def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[str, str], dict[str, str]]:
+    """Return assignable program users.
+
+    C4.6.31: Campaign Organization volunteers are the main source, but the
+    logged-in candidate/campaign user must also be assignable even if they were
+    not separately entered as a volunteer. This keeps the candidate in the same
+    assignment dropdown as team/volunteers.
+    """
     try:
         people = load_team_people_store(campaign_id).get("people", []) or []
     except Exception:
         people = []
     active = [p for p in people if str(p.get("status", "Active")).lower() in {"active", "prospect", ""}]
+
+    # Add current app user as an assignable person if not already present.
+    try:
+        auth_user = current_user() or {}
+        auth_username = current_username()
+    except Exception:
+        auth_user = {}
+        auth_username = ""
+    candidate_name = clean_value(auth_user.get("name") or auth_user.get("full_name") or auth_user.get("display_name"))
+    candidate_email = clean_value(auth_user.get("email") or auth_username)
+    existing_emails = {clean_value(p.get("email") or p.get("field_username") or p.get("username")).lower() for p in active}
+    if candidate_email and candidate_email.lower() not in existing_emails:
+        active.append({
+            "person_id": "auth-" + hashlib.md5(candidate_email.lower().encode("utf-8")).hexdigest()[:10],
+            "name": candidate_name or candidate_email,
+            "role": "Candidate/User",
+            "status": "Active",
+            "email": candidate_email,
+            "field_username": candidate_email,
+        })
+
     labels = []
     label_to_id = {}
     id_to_label = {}
+    seen_labels = set()
     for person in active:
         pid = clean_value(person.get("person_id"))
         if not pid:
+            seed = clean_value(person.get("email") or person.get("field_username") or person.get("name"))
+            pid = "tm-" + hashlib.md5(seed.encode("utf-8")).hexdigest()[:10] if seed else ""
+        if not pid:
             continue
-        name = clean_value(person.get("name")) or "Unnamed"
+        name = clean_value(person.get("name")) or clean_value(person.get("email")) or "Unnamed"
         role = clean_value(person.get("role")) or "Team"
         label = f"{name} — {role}"
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
         labels.append(label)
         label_to_id[label] = pid
         id_to_label[pid] = label
@@ -13086,7 +13121,7 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
             "mobile_assignment_id": mobile_assignment_id,
             "source_work_item_id": package_id,
             "name": clean_value(work_item.get("name")) or street_area,
-            "assigned_to": assignee,
+            "assigned_to": "Unassigned",
             "assigned_to_list": assignee_list,
             "street_area": street_area,
             "selected_precinct": clean_value(work_item.get("selected_precinct") or embedded.get("selected_precinct")),
@@ -13517,17 +13552,14 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 st.metric("Streets", f"{df['Street Norm'].nunique():,}")
 
             st.markdown("##### Assignment Packaging")
-            p1, p2 = st.columns([1.1, 1])
-            with p1:
-                packaging = st.radio(
-                    "How should this work be broken down?",
-                    ["Whole universe as one assignment", "Selected precincts as one assignment", "Selected street as one assignment"],
-                    index=0,
-                    key=f"a3_packaging_method_{campaign_id}_{pid}_{key_suffix}",
-                )
-            with p2:
-                assignee_labels = _a3_program_assigned_user_labels(program, user_id_to_label)
-                assignee = st.selectbox("Prepare for", ["Unassigned / Candidate"] + assignee_labels, key=f"a3_assignee_{campaign_id}_{pid}_{key_suffix}")
+            packaging = st.radio(
+                "How should this work be broken down?",
+                ["Whole universe as one assignment", "Selected precincts as one assignment", "Selected street as one assignment"],
+                index=0,
+                key=f"a3_packaging_method_{campaign_id}_{pid}_{key_suffix}",
+            )
+            # Assignment happens on the Assign tab. Build only creates the reusable work item.
+            assignee = "Unassigned / Candidate"
 
             selected_df = df.copy()
             scope = "Whole Universe"
@@ -13602,8 +13634,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 _a3_preview_voters_limited(selected_df, limit=5)
 
             st.markdown("##### Save Flexible Work Package")
-            st.caption("This saves one assignment package that can contain many precincts and streets. The mobile app receives the full hierarchy at once: assignment → precinct → street → household → voter.")
-            pkg = _a3_program_work_package(campaign_id, program, scope, selected_df, assignee, selected_precinct_label, selected_street_label)
+            st.caption("This saves one reusable work package. Assign it to one or more users on the Assign tab, then generate the mobile package.")
+            pkg = _a3_program_work_package(campaign_id, program, scope, selected_df, "Unassigned / Candidate", selected_precinct_label, selected_street_label)
             save_col, dl_col = st.columns(2)
             disabled = selected_df is None or selected_df.empty
             with save_col:
@@ -13621,7 +13653,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                         "program_name": clean_value(program.get("name")),
                         "name": " — ".join([x for x in name_bits if x]),
                         "scope": scope,
-                        "assigned_to": assignee,
+                        "assigned_to": "Unassigned",
                         "selected_precinct": pkg.get("selected_precinct"),
                         "selected_street": pkg.get("selected_street"),
                         "household_count": pkg.get("household_count"),
@@ -13675,7 +13707,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         with a1:
             st.metric("Saved Work Items", f"{len(saved):,}")
         with a2:
-            st.metric("Assigned", f"{sum(1 for x in saved if clean_value(x.get('assigned_to')) and clean_value(x.get('assigned_to')).lower() not in {'unassigned', 'unassigned / candidate'}):,}")
+            st.metric("Assigned", f"{sum(1 for x in saved if (x.get('assigned_to_list') if isinstance(x.get('assigned_to_list'), list) else []) or (clean_value(x.get('assigned_to')) and clean_value(x.get('assigned_to')).lower() not in {'unassigned', 'unassigned / candidate'})):,}")
         with a3:
             st.metric("Program Users", f"{len(assignee_labels):,}")
         if not saved:
@@ -13748,6 +13780,8 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
             save_col, delete_col = st.columns([1, 1])
             with save_col:
                 if st.button("Save Assignment", type="primary", key=f"a331_save_assignment_{campaign_id}_{pid}_{key_suffix}"):
+                    # C4.6.31: lightweight metadata save only. Heavy voter JSON publishing
+                    # is reserved for "Generate Mobile Assignment Package" below.
                     all_pkgs = store.get("packages") or []
                     now = datetime.now().isoformat(timespec="seconds")
                     assigned_label = "; ".join([clean_value(v) for v in new_assignees if clean_value(v)])
@@ -13804,10 +13838,11 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
     # C4.6.17: mobile export removes deleted assignments and groups whole-universe work by precinct.
 
                 if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{key_suffix}"):
-                    ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
+                    with st.spinner("Publishing mobile assignment package to selected user(s). Large whole-universe packages can take a moment..."):
+                        ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
                         st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{key_suffix}"] = mobile_pkg
-                        st.success("C4.4 export complete: full household/voter package was uploaded to R2 and is available to the Field App now.")
+                        st.success("Mobile assignment package uploaded to R2 and available to the Field App now.")
                         st.code(msg)
                     else:
                         st.error(msg)
@@ -13822,7 +13857,13 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 )
 
 def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
-    """Small Program workspace summary; intentionally defensive so the UI never blocks."""
+    """Small Program workspace summary; intentionally defensive so the UI never blocks.
+
+    C4.6.31: Door-to-door work packages are the current source of truth for
+    Grassroots Build & Assign. Older summary cards only counted legacy
+    outreach_assignments/walk_packets, which made dashboards show 0 even after
+    a saved/assigned mobile work package existed.
+    """
     try:
         contact_lists = load_contact_lists_store(campaign_id).get("contact_lists", []) or []
     except Exception:
@@ -13836,9 +13877,14 @@ def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
     except Exception:
         packets_all = []
     try:
+        work_pkg_store = load_program_candidate_walk_packages_store(campaign_id)
+        work_packages_all = work_pkg_store.get("packages", []) or []
+    except Exception:
+        work_packages_all = []
+    try:
         mobile = _c46_mobile_outreach_summary(campaign_id)
     except Exception:
-        mobile = {"rows": [], "queue": [], "result_counts": {}}
+        mobile = {"rows": [], "synced_rows": [], "queue": [], "result_counts": {}}
 
     active_ids = _active_program_ids_a21(programs)
     active_programs = [p for p in programs if clean_value(p.get("program_id")) in active_ids]
@@ -13847,18 +13893,68 @@ def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
         lid = clean_value(cl.get("list_id"))
         if lid:
             list_program_lookup[lid] = clean_value(cl.get("program_id"))
+
     active_assignments = [a for a in assignments_all if _assignment_program_id_a21(a, list_program_lookup) in active_ids]
     active_assignment_ids = {clean_value(a.get("assignment_id")) for a in active_assignments if clean_value(a.get("assignment_id"))}
     active_packets = [p for p in packets_all if clean_value(p.get("assignment_id")) in active_assignment_ids]
-    total_voters, completed_voters, package_results = _packet_progress_for_assignments(active_packets)
-    contacts = int(len(mobile.get("synced_rows") or []) or completed_voters or 0)
+
+    # Current door-to-door packages.
+    active_work_packages = [p for p in work_packages_all if clean_value(p.get("program_id")) in active_ids]
+    assigned_work_packages = []
+    for p in active_work_packages:
+        assigned_list = p.get("assigned_to_list") if isinstance(p.get("assigned_to_list"), list) else []
+        assigned_to = clean_value(p.get("assigned_to"))
+        if assigned_list or (assigned_to and assigned_to.lower() not in {"unassigned", "unassigned / candidate"}):
+            assigned_work_packages.append(p)
+
+    legacy_total_voters, legacy_completed_voters, package_results = _packet_progress_for_assignments(active_packets)
+    work_total_voters = sum(int(p.get("voter_count") or 0) for p in assigned_work_packages)
+    # If a package exists but is not assigned yet, expose it as planned work under package_results
+    # but do not call it assigned voters.
+    total_voters = work_total_voters or legacy_total_voters
+
+    contacts = int(len(mobile.get("synced_rows") or []) or legacy_completed_voters or 0)
+    completed_voters = contacts
     pct_complete = (completed_voters / total_voters * 100.0) if total_voters else 0.0
     queue = mobile.get("queue") or []
+
+    # Package results used by reports/cards.
+    package_results = list(package_results or [])
+    for p in active_work_packages:
+        package_results.append({
+            "assignment_id": clean_value(p.get("package_id")),
+            "program_id": clean_value(p.get("program_id")),
+            "program_name": clean_value(p.get("program_name")),
+            "assignment_name": clean_value(p.get("name")),
+            "assigned_to": clean_value(p.get("assigned_to")),
+            "assigned_to_list": p.get("assigned_to_list") if isinstance(p.get("assigned_to_list"), list) else [],
+            "voter_count": int(p.get("voter_count") or 0),
+            "household_count": int(p.get("household_count") or 0),
+            "status": clean_value(p.get("status") or "Ready"),
+        })
+
+    combined_assignments = list(active_assignments)
+    for p in assigned_work_packages:
+        combined_assignments.append({
+            "assignment_id": clean_value(p.get("package_id")),
+            "program_id": clean_value(p.get("program_id")),
+            "program_name": clean_value(p.get("program_name")),
+            "team_member_name": clean_value(p.get("assigned_to")),
+            "assigned_to": clean_value(p.get("assigned_to")),
+            "assigned_to_list": p.get("assigned_to_list") if isinstance(p.get("assigned_to_list"), list) else [],
+            "voter_count": int(p.get("voter_count") or 0),
+            "assigned_voters": int(p.get("voter_count") or 0),
+            "status": clean_value(p.get("status") or "Assigned"),
+        })
+
     return {
         "programs": programs,
         "active_programs": active_programs,
         "contact_lists": contact_lists,
-        "assignments": active_assignments,
+        "assignments": combined_assignments,
+        "legacy_assignments": active_assignments,
+        "work_packages": active_work_packages,
+        "assigned_work_packages": assigned_work_packages,
         "packets": active_packets,
         "total_voters": int(total_voters or 0),
         "completed_voters": int(completed_voters or 0),
@@ -13875,12 +13971,19 @@ def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
 def _program_manager_top_workers_c46(counts: dict, people_lookup: dict, user_id_to_label: dict, limit: int = 5) -> list[dict]:
     workers = {}
     for a in counts.get("assignments") or []:
-        uid = clean_value(a.get("person_id") or a.get("user_id") or a.get("assigned_user_id"))
-        name = clean_value(a.get("team_member_name")) or user_id_to_label.get(uid, uid) or "Unassigned"
-        rec = workers.setdefault(uid or name, {"Worker": name, "Program": "—", "Assigned": 0, "Completed": 0})
-        rec["Assigned"] += int(a.get("voter_count") or a.get("assigned_voters") or 0)
-        if clean_value(a.get("program_name")):
-            rec["Program"] = clean_value(a.get("program_name"))
+        assignees = a.get("assigned_to_list") if isinstance(a.get("assigned_to_list"), list) else []
+        if not assignees:
+            single = clean_value(a.get("team_member_name") or a.get("assigned_to") or user_id_to_label.get(clean_value(a.get("person_id") or a.get("user_id") or a.get("assigned_user_id")), ""))
+            if single:
+                assignees = [single]
+        if not assignees:
+            assignees = ["Unassigned"]
+        for name in assignees:
+            name = clean_value(name) or "Unassigned"
+            rec = workers.setdefault(name, {"Worker": name, "Program": "—", "Assigned": 0, "Completed": 0})
+            rec["Assigned"] += int(a.get("voter_count") or a.get("assigned_voters") or 0)
+            if clean_value(a.get("program_name")):
+                rec["Program"] = clean_value(a.get("program_name"))
     for r in counts.get("mobile", {}).get("synced_rows") or []:
         who = clean_value(r.get("username") or r.get("field_user") or r.get("user") or r.get("created_by")) or "Unknown"
         rec = workers.setdefault(who, {"Worker": who, "Program": clean_value(r.get("assignment_name")) or "Field App", "Assigned": 0, "Completed": 0})
