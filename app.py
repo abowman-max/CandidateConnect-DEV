@@ -14249,9 +14249,9 @@ def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
 def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     break_by = _gr_clean(break_by)
     aliases = {
-        "County": ["county", "County", "COUNTY"],
-        "Municipality": ["municipality", "Municipality", "MUNICIPALITY", "muni", "Muni"],
-        "Precinct": ["precinct", "Precinct", "precinct_name", "PrecinctName", "Voting Precinct"],
+        "County": ["county", "County", "COUNTY", "county_name", "County Name"],
+        "Municipality": ["municipality", "Municipality", "MUNICIPALITY", "muni", "Muni", "municipality_clean", "Municipality_Clean", "Municipality_1"],
+        "Precinct": ["precinct", "Precinct", "precinct_name", "PrecinctName", "Voting Precinct", "selected_precinct"],
         "School District": ["school_district", "School District", "SchoolDistrict", "schooldistrict"],
         "School Region": ["school_region", "School Region", "SchoolRegion"],
         "State House": ["state_house", "State House", "STH", "state_house_district"],
@@ -14274,6 +14274,179 @@ def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     if break_by == "Program":
         return _gr_row_program(row)
     return "Unknown"
+
+
+# C4.7.3 — Enrich grassroots reporting rows with assignment/list/packet geography.
+def _gr_first_geo_value(source, *keys) -> str:
+    """Return the first non-empty scalar/list value for a geo field."""
+    if not isinstance(source, dict):
+        return ""
+    for key in keys:
+        val = source.get(key)
+        if isinstance(val, (list, tuple, set)):
+            for item in val:
+                item = _gr_clean(item)
+                if item:
+                    return item
+        else:
+            val = _gr_clean(val)
+            if val:
+                return val
+    return ""
+
+
+def _gr_enrich_rows_with_assignment_geo(campaign_id: str, rows: list[dict]) -> list[dict]:
+    """Patch mobile result rows so reporting can group by Municipality/County/etc.
+
+    Older mobile sync rows often only contain assignment_id, voter_id, result, and
+    notes. The geography lives on the outreach assignment, contact list saved
+    universe, or smart-turf packet. This keeps the report from showing "Unknown"
+    when the campaign/list clearly has one municipality such as York Township.
+    """
+    if not rows:
+        return []
+
+    try:
+        assignments = load_outreach_assignments_store(campaign_id).get("assignments", []) or []
+    except Exception:
+        assignments = []
+    try:
+        contact_lists = load_contact_lists_store(campaign_id).get("contact_lists", []) or []
+    except Exception:
+        contact_lists = []
+    try:
+        packets = load_walk_packets_store(campaign_id).get("packets", []) or []
+    except Exception:
+        packets = []
+
+    assignment_by_id = { _gr_clean(a.get("assignment_id")): a for a in assignments if _gr_clean(a.get("assignment_id")) }
+    list_by_id = { _gr_clean(cl.get("list_id")): cl for cl in contact_lists if _gr_clean(cl.get("list_id")) }
+    packets_by_assignment = {}
+    packet_by_id = {}
+    for p in packets:
+        if not isinstance(p, dict):
+            continue
+        aid = _gr_clean(p.get("assignment_id"))
+        if aid:
+            packets_by_assignment.setdefault(aid, []).append(p)
+        for pk in ["packet_id", "package_id", "mobile_assignment_id", "source_work_item_id"]:
+            pid = _gr_clean(p.get(pk))
+            if pid:
+                packet_by_id[pid] = p
+
+    # Useful final fallback for campaign-scoped accounts. Do not overwrite row-level data.
+    try:
+        scope = security_scope_filters()
+    except Exception:
+        scope = {}
+
+    def source_universe_filters(cl: dict) -> dict:
+        src = _gr_clean(cl.get("source_saved_universe") or cl.get("universe") or cl.get("saved_universe"))
+        if not src:
+            return {}
+        try:
+            filters, special = _mobile_saved_universe_payload(src)
+            return filters or {}
+        except Exception:
+            return {}
+
+    out = []
+    for raw in rows:
+        r = dict(raw or {})
+        aid = _gr_clean(
+            r.get("assignment_id")
+            or r.get("source_assignment_id")
+            or r.get("work_assignment_id")
+        )
+        assn = assignment_by_id.get(aid, {})
+        lid = _gr_clean(r.get("list_id") or assn.get("list_id"))
+        cl = list_by_id.get(lid, {})
+
+        packet = {}
+        for pk in ["packet_id", "package_id", "source_work_item_id", "mobile_assignment_id"]:
+            pid = _gr_clean(r.get(pk))
+            if pid and pid in packet_by_id:
+                packet = packet_by_id.get(pid, {})
+                break
+        if not packet:
+            ap = packets_by_assignment.get(aid) or []
+            if len(ap) == 1:
+                packet = ap[0]
+            elif ap:
+                # Try to match by precinct/street/household/voter when multiple packets exist.
+                hh = _gr_clean(r.get("household_key") or r.get("Household Key"))
+                vid = _gr_clean(r.get("voter_id") or r.get("PAID") or r.get("VoterID"))
+                street = _gr_clean(r.get("street") or r.get("street_name") or r.get("Street Name"))
+                for cand in ap:
+                    if street and street == _gr_clean(cand.get("street_group") or cand.get("selected_street") or cand.get("Street Name")):
+                        packet = cand; break
+                    voters = cand.get("voters") if isinstance(cand.get("voters"), list) else []
+                    if hh or vid:
+                        for v in voters[:5000]:
+                            if hh and hh == _gr_clean(v.get("Household Key") or v.get("household_key")):
+                                packet = cand; break
+                            if vid and vid == _gr_clean(v.get("PAID") or v.get("voter_id") or v.get("VoterID")):
+                                packet = cand; break
+                        if packet:
+                            break
+
+        filters = source_universe_filters(cl)
+
+        # Names/programs from assignment/list when mobile rows do not carry them.
+        if not _gr_clean(r.get("assignment_name")):
+            r["assignment_name"] = _gr_clean(assn.get("name") or assn.get("assignment_name"))
+        if not _gr_clean(r.get("program_name")):
+            r["program_name"] = _gr_clean(assn.get("program_name") or cl.get("program_name"))
+
+        # Geo from packet first, then row/list saved-universe filters, then campaign security scope.
+        geo_sources = [packet, filters, scope]
+        geo_map = {
+            "County": ("county", "County", "COUNTY"),
+            "Municipality": ("municipality", "Municipality", "MUNICIPALITY", "Municipality_1", "municipality_clean"),
+            "Precinct": ("precinct", "Precinct", "selected_precinct", "precinct_name"),
+            "School District": ("school_district", "School District", "SchoolDistrict"),
+            "School Region": ("school_region", "School Region", "SchoolRegion"),
+            "State House": ("state_house", "State House", "STH", "state_house_district"),
+            "State Senate": ("state_senate", "State Senate", "STS", "state_senate_district"),
+            "Congressional": ("congressional", "Congressional", "USC", "congressional_district"),
+        }
+        for canonical, keys in geo_map.items():
+            existing = _gr_first_geo_value(r, *keys)
+            if existing:
+                # Also mirror common lowercase keys so report aliases find it reliably.
+                if canonical == "Municipality" and not _gr_clean(r.get("municipality")):
+                    r["municipality"] = existing
+                if canonical == "County" and not _gr_clean(r.get("county")):
+                    r["county"] = existing
+                if canonical == "Precinct" and not _gr_clean(r.get("precinct")):
+                    r["precinct"] = existing
+                continue
+            fill = ""
+            for src in geo_sources:
+                fill = _gr_first_geo_value(src, *keys)
+                if fill:
+                    break
+            if fill:
+                r[canonical] = fill
+                # Common normalized aliases used by the report grouping function.
+                if canonical == "Municipality":
+                    r["municipality"] = fill
+                elif canonical == "County":
+                    r["county"] = fill
+                elif canonical == "Precinct":
+                    r["precinct"] = fill
+                elif canonical == "School District":
+                    r["school_district"] = fill
+                elif canonical == "School Region":
+                    r["school_region"] = fill
+                elif canonical == "State House":
+                    r["state_house"] = fill
+                elif canonical == "State Senate":
+                    r["state_senate"] = fill
+                elif canonical == "Congressional":
+                    r["congressional"] = fill
+        out.append(r)
+    return out
 
 def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
     areas = {}
@@ -14486,7 +14659,7 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         programs = []
     counts = _program_manager_counts_c46(campaign_id, programs)
     mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
-    rows_all = _gr_dedupe_rows(mobile.get("synced_rows") or mobile.get("rows") or [])
+    rows_all = _gr_dedupe_rows(_gr_enrich_rows_with_assignment_geo(campaign_id, mobile.get("synced_rows") or mobile.get("rows") or []))
     total_assigned_all = _gr_int(counts.get("total_voters"))
 
     program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
@@ -16616,65 +16789,64 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# C4.6.102 HARD FINAL OVERRIDE — 30px compact readable filter dropdowns/multiselects.
-# This is intentionally last. It forces the BaseWeb controls down to button-like height.
+# C4.6.101 HARD FINAL OVERRIDE — tighter compact readable filter dropdowns/multiselects.
+# This is intentionally last. It reduces the filter boxes to match the left menu buttons.
 st.markdown("""
-<style id="cc-compact-filter-controls-20260608-v102">
-/* Candidate Connect 30px compact Streamlit/BaseWeb dropdown controls */
+<style id="cc-compact-filter-controls-20260608-v101">
+/* Candidate Connect compact Streamlit/BaseWeb dropdown controls */
 div[data-testid="stSelectbox"],
 div[data-testid="stMultiSelect"],
 .stSelectbox,
 .stMultiSelect {
     margin-top: 0 !important;
-    margin-bottom: 0.18rem !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
+    margin-bottom: 0.24rem !important;
 }
 
 div[data-testid="stSelectbox"] label,
 div[data-testid="stMultiSelect"] label,
 .stSelectbox label,
-.stMultiSelect label,
-div[data-testid="stWidgetLabel"],
-div[data-testid="stWidgetLabel"] * {
-    margin-bottom: 0.02rem !important;
+.stMultiSelect label {
+    margin-bottom: 0.04rem !important;
     padding-bottom: 0 !important;
-    font-size: 8.8pt !important;
-    line-height: 1.0 !important;
+    font-size: 9.5pt !important;
+    line-height: 1.08 !important;
     font-weight: 600 !important;
 }
 
+/* Outer BaseWeb select wrapper */
 div[data-testid="stSelectbox"] div[data-baseweb="select"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"],
 .stSelectbox div[data-baseweb="select"],
 .stMultiSelect div[data-baseweb="select"] {
-    min-height: 30px !important;
-    height: 30px !important;
-    max-height: 30px !important;
+    min-height: 34px !important;
+    height: 34px !important;
+    max-height: 34px !important;
     overflow: visible !important;
     box-sizing: border-box !important;
-    font-size: 8.8pt !important;
-    line-height: 14px !important;
+    font-size: 9.5pt !important;
+    line-height: 16px !important;
 }
 
+/* The visible white rounded box */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
 .stSelectbox div[data-baseweb="select"] > div,
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 30px !important;
-    height: 30px !important;
-    max-height: 30px !important;
+    min-height: 34px !important;
+    height: 34px !important;
+    max-height: 34px !important;
     box-sizing: border-box !important;
     display: flex !important;
     align-items: center !important;
     background: #ffffff !important;
     border: 1px solid #111111 !important;
-    border-radius: 7px !important;
-    padding: 0 7px !important;
+    border-radius: 9px !important;
+    padding: 0 8px !important;
     margin: 0 !important;
     overflow: visible !important;
 }
 
+/* BaseWeb inner containers: remove the extra vertical blank space */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div > div,
 div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"],
@@ -16683,9 +16855,9 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="listbox"],
 .stSelectbox div[data-baseweb="select"] > div > div,
 .stMultiSelect div[data-baseweb="select"] > div > div {
-    min-height: 16px !important;
-    height: 16px !important;
-    max-height: 16px !important;
+    min-height: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
     display: flex !important;
     align-items: center !important;
     padding: 0 !important;
@@ -16694,15 +16866,16 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="listbox"],
     box-sizing: border-box !important;
 }
 
+/* Actual placeholder/input text */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] input,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
 .stSelectbox div[data-baseweb="select"] input,
 .stMultiSelect div[data-baseweb="select"] input {
-    height: 16px !important;
-    min-height: 16px !important;
-    max-height: 16px !important;
-    line-height: 16px !important;
-    font-size: 8.8pt !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    font-size: 9.5pt !important;
     font-weight: 500 !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -16713,6 +16886,7 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
     caret-color: #071d3a !important;
 }
 
+/* Placeholder rendered as div/span in some Streamlit versions */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] [data-baseweb="placeholder"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] [data-baseweb="placeholder"],
 .stSelectbox div[data-baseweb="select"] [data-baseweb="placeholder"],
@@ -16721,11 +16895,11 @@ div[data-testid="stSelectbox"] div[data-baseweb="select"] span:not([data-baseweb
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
 .stSelectbox div[data-baseweb="select"] span:not([data-baseweb="tag"]),
 .stMultiSelect div[data-baseweb="select"] span:not([data-baseweb="tag"]) {
-    height: 16px !important;
-    min-height: 16px !important;
-    max-height: 16px !important;
-    line-height: 16px !important;
-    font-size: 8.8pt !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 18px !important;
+    font-size: 9.5pt !important;
     font-weight: 500 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -16738,13 +16912,14 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-basew
     text-transform: none !important;
 }
 
+/* Selected chips stay compact without clipping. */
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] span[data-baseweb="tag"],
 .stMultiSelect div[data-baseweb="select"] span[data-baseweb="tag"] {
-    min-height: 16px !important;
-    height: 16px !important;
-    max-height: 16px !important;
-    line-height: 14px !important;
-    font-size: 8.0pt !important;
+    min-height: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
+    line-height: 16px !important;
+    font-size: 8.5pt !important;
     display: inline-flex !important;
     align-items: center !important;
     margin: 0 3px 0 0 !important;
@@ -16752,6 +16927,7 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] span[data-baseweb="t
     padding-bottom: 0 !important;
 }
 
+/* Arrow alignment */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] svg,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
 .stSelectbox div[data-baseweb="select"] svg,
@@ -16759,13 +16935,8 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
     align-self: center !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
-    width: 13px !important;
-    height: 13px !important;
-}
-
-div[data-testid="stSelectbox"] > div,
-div[data-testid="stMultiSelect"] > div {
-    gap: 0 !important;
+    width: 14px !important;
+    height: 14px !important;
 }
 </style>
 """, unsafe_allow_html=True)
