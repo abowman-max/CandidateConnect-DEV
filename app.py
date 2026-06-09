@@ -16616,49 +16616,75 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# C4.6.99 HARD FINAL OVERRIDE — compact readable filter dropdowns/multiselects.
-# Added 2026-06-08 after BaseWeb select clipping regression.
+# C4.6.100 HARD FINAL OVERRIDE — compact readable filter dropdowns/multiselects.
+# Added after clipping was fixed but controls were still too tall.
+# This is intentionally the LAST filter CSS so it wins over older theme blocks.
 st.markdown("""
-<style id="cc-hard-final-filter-override-20260608">
-/* Scope to Streamlit selectbox/multiselect widgets only, not buttons/tabs/tables. */
+<style id="cc-compact-filter-controls-20260608-v100">
+/* Candidate Connect compact Streamlit/BaseWeb dropdown controls */
+div[data-testid="stSelectbox"],
+div[data-testid="stMultiSelect"],
+.stSelectbox,
+.stMultiSelect {
+    margin-bottom: 0.32rem !important;
+}
+
+div[data-testid="stSelectbox"] label,
+div[data-testid="stMultiSelect"] label,
+.stSelectbox label,
+.stMultiSelect label {
+    margin-bottom: 0.08rem !important;
+    padding-bottom: 0 !important;
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+    font-weight: 600 !important;
+}
+
+/* Outer BaseWeb select wrapper */
 div[data-testid="stSelectbox"] div[data-baseweb="select"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"],
 .stSelectbox div[data-baseweb="select"],
 .stMultiSelect div[data-baseweb="select"] {
-    min-height: 46px !important;
-    height: auto !important;
-    max-height: none !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
     overflow: visible !important;
     box-sizing: border-box !important;
+    font-size: 10pt !important;
+    line-height: 18px !important;
 }
 
-/* Visible white rounded control box */
+/* The visible white rounded box */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
 .stSelectbox div[data-baseweb="select"] > div,
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 46px !important;
-    height: 46px !important;
-    max-height: 46px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
     box-sizing: border-box !important;
     display: flex !important;
     align-items: center !important;
     background: #ffffff !important;
     border: 1px solid #111111 !important;
     border-radius: 9px !important;
-    padding: 0 10px !important;
+    padding: 0 9px !important;
     margin: 0 !important;
     overflow: visible !important;
 }
 
-/* BaseWeb internal value and input containers. Do NOT let them create the tall blank box. */
+/* BaseWeb inner containers: keep them from adding extra vertical blank space */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div > div,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="combobox"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="listbox"],
 .stSelectbox div[data-baseweb="select"] > div > div,
 .stMultiSelect div[data-baseweb="select"] > div > div {
-    min-height: 26px !important;
-    height: 26px !important;
-    max-height: 26px !important;
+    min-height: 20px !important;
+    height: 20px !important;
+    max-height: 20px !important;
     display: flex !important;
     align-items: center !important;
     padding: 0 !important;
@@ -16667,16 +16693,16 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div > div,
     box-sizing: border-box !important;
 }
 
-/* The visible 'Choose options' text is usually the input placeholder in BaseWeb. */
+/* Actual placeholder/input text */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] input,
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
 .stSelectbox div[data-baseweb="select"] input,
 .stMultiSelect div[data-baseweb="select"] input {
-    height: 24px !important;
-    min-height: 24px !important;
-    max-height: 24px !important;
-    line-height: 24px !important;
-    font-size: 14px !important;
+    height: 20px !important;
+    min-height: 20px !important;
+    max-height: 20px !important;
+    line-height: 20px !important;
+    font-size: 10pt !important;
     font-weight: 500 !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -16687,25 +16713,25 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
     caret-color: #071d3a !important;
 }
 
-/* If Streamlit/BaseWeb renders placeholder as a div/span instead of input placeholder. */
+/* Placeholder rendered as div/span in some Streamlit versions */
 div[data-testid="stSelectbox"] div[data-baseweb="select"] [data-baseweb="placeholder"],
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] [data-baseweb="placeholder"],
 .stSelectbox div[data-baseweb="select"] [data-baseweb="placeholder"],
 .stMultiSelect div[data-baseweb="select"] [data-baseweb="placeholder"],
-div[data-testid="stSelectbox"] div[data-baseweb="select"] span,
-div[data-testid="stMultiSelect"] div[data-baseweb="select"] span,
-.stSelectbox div[data-baseweb="select"] span,
-.stMultiSelect div[data-baseweb="select"] span {
-    line-height: 24px !important;
-    min-height: 24px !important;
-    height: auto !important;
-    max-height: none !important;
+div[data-testid="stSelectbox"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+.stSelectbox div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+.stMultiSelect div[data-baseweb="select"] span:not([data-baseweb="tag"]) {
+    height: 20px !important;
+    min-height: 20px !important;
+    max-height: 20px !important;
+    line-height: 20px !important;
+    font-size: 10pt !important;
+    font-weight: 500 !important;
     display: inline-flex !important;
     align-items: center !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
     transform: none !important;
     overflow: visible !important;
     color: #071d3a !important;
@@ -16713,16 +16739,17 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] span,
     text-transform: none !important;
 }
 
-/* Selected chips should fit without stretching the whole filter to huge heights. */
+/* Selected chips stay compact without clipping. */
 div[data-testid="stMultiSelect"] div[data-baseweb="select"] span[data-baseweb="tag"],
 .stMultiSelect div[data-baseweb="select"] span[data-baseweb="tag"] {
-    min-height: 22px !important;
-    height: 22px !important;
-    max-height: 22px !important;
-    line-height: 20px !important;
+    min-height: 20px !important;
+    height: 20px !important;
+    max-height: 20px !important;
+    line-height: 18px !important;
+    font-size: 9pt !important;
     display: inline-flex !important;
     align-items: center !important;
-    margin: 1px 4px 1px 0 !important;
+    margin: 0 4px 0 0 !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
 }
@@ -16735,21 +16762,8 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
     align-self: center !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
-}
-
-/* Label-to-control spacing */
-div[data-testid="stSelectbox"],
-div[data-testid="stMultiSelect"],
-.stSelectbox,
-.stMultiSelect {
-    margin-bottom: 0.45rem !important;
-}
-div[data-testid="stSelectbox"] label,
-div[data-testid="stMultiSelect"] label,
-.stSelectbox label,
-.stMultiSelect label {
-    margin-bottom: 0.15rem !important;
-    padding-bottom: 0 !important;
+    width: 16px !important;
+    height: 16px !important;
 }
 </style>
 """, unsafe_allow_html=True)
