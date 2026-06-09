@@ -234,7 +234,7 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
     color: #071d3a !important;
     font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif !important;
     font-size: 27px !important;
-    line-height: .92 !important;
+    line-height: 1 !important;
     letter-spacing: .02em !important;
     text-transform: uppercase !important;
     padding-left: 18px !important;
