@@ -13032,10 +13032,12 @@ def _a34_mobile_assignment_package_key(campaign_id: str, mobile_assignment_id: s
 
 
 def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_item: dict) -> dict:
-    """Build the mobile-ready payload consumed by the future field app.
+    """Build the mobile-ready payload consumed by the field app.
 
-    This intentionally uses the already-saved work item/package, not the full
-    voter universe, so generating the mobile handoff is fast and safe.
+    C4.6.23: supports assigning the same saved work item to one or more
+    program users. The package keeps both:
+      - assignment["assigned_to"] as a readable label/string
+      - assignment["assigned_to_list"] as the canonical multi-user list
     """
     work_item = work_item or {}
     program = program or {}
@@ -13046,7 +13048,18 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
     mobile_assignment_id = "ma-" + hashlib.md5(f"a34|{campaign_id}|{clean_value(program.get('program_id'))}|{package_id}".encode("utf-8")).hexdigest()[:12]
     street_area = clean_value(work_item.get("assignment_target") or work_item.get("selected_street") or work_item.get("selected_precinct") or work_item.get("scope")) or "Assigned Area"
     embedded_program = embedded.get("program") if isinstance(embedded.get("program"), dict) else {}
-    assignee = clean_value(work_item.get("assigned_to") or embedded_program.get("assigned_to"))
+
+    assignee_list = work_item.get("assigned_to_list")
+    if not isinstance(assignee_list, list):
+        assignee_list = []
+    assignee_list = [clean_value(x) for x in assignee_list if clean_value(x)]
+    if not assignee_list:
+        single = clean_value(work_item.get("assigned_to") or embedded_program.get("assigned_to"))
+        if single and single.lower() not in {"unassigned", "unassigned / candidate"}:
+            # Backward-compatible split for older records saved as "A; B".
+            assignee_list = [clean_value(x) for x in re.split(r"\s*;\s*", single) if clean_value(x)]
+    assignee = "; ".join(assignee_list) if assignee_list else clean_value(work_item.get("assigned_to") or embedded_program.get("assigned_to"))
+
     result_options = [
         "Favorable",
         "Undecided",
@@ -13074,6 +13087,7 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
             "source_work_item_id": package_id,
             "name": clean_value(work_item.get("name")) or street_area,
             "assigned_to": assignee,
+            "assigned_to_list": assignee_list,
             "street_area": street_area,
             "selected_precinct": clean_value(work_item.get("selected_precinct") or embedded.get("selected_precinct")),
             "selected_street": clean_value(work_item.get("selected_street") or embedded.get("selected_street")),
@@ -13109,7 +13123,6 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
         "voters": voters,
         "offline_sync_queue": [],
     }
-
 
 
 
@@ -13276,21 +13289,63 @@ def _c433_publish_a34_package_to_field_user(campaign_id: str, package: dict) -> 
 
 
 def _a34_save_mobile_assignment_package(campaign_id: str, package: dict) -> tuple[bool, str]:
+    """Archive and publish a mobile assignment.
+
+    C4.6.23: if the work item is assigned to multiple people, publish one
+    user-specific package per selected assignee. This lets the same door-to-door
+    list appear on each selected user's mobile app without duplicating the
+    universe/package build step.
+    """
     mobile_id = clean_value(((package or {}).get("assignment") or {}).get("mobile_assignment_id"))
     if not mobile_id:
         return False, "No mobile assignment id was generated."
 
-    # Keep the original campaign archive copy for audit/debugging.
+    assignment = (package or {}).get("assignment") or {}
+    assignee_list = assignment.get("assigned_to_list")
+    if not isinstance(assignee_list, list):
+        assignee_list = []
+    assignee_list = [clean_value(x) for x in assignee_list if clean_value(x)]
+    if not assignee_list:
+        single = clean_value(assignment.get("assigned_to"))
+        if single and single.lower() not in {"unassigned", "unassigned / candidate"}:
+            assignee_list = [clean_value(x) for x in re.split(r"\s*;\s*", single) if clean_value(x)]
+
+    # Always keep the original campaign archive copy for audit/debugging.
     archive_ok, archive_msg = _put_json_to_r2_key(_a34_mobile_assignment_package_key(campaign_id, mobile_id), package)
     if not archive_ok:
         return False, archive_msg
 
-    # C4.3.3: also publish to the separate Field App download path.
-    publish_ok, publish_msg = _c433_publish_a34_package_to_field_user(campaign_id, package)
-    if not publish_ok:
-        return False, publish_msg
-    return True, publish_msg
+    # No assignee selected: keep the old behavior and let the resolver return a clear message.
+    if not assignee_list:
+        publish_ok, publish_msg = _c433_publish_a34_package_to_field_user(campaign_id, package)
+        if not publish_ok:
+            return False, publish_msg
+        return True, publish_msg
 
+    messages = []
+    failures = []
+    for assignee in assignee_list:
+        try:
+            user_pkg = json.loads(json.dumps(package, ensure_ascii=False))
+        except Exception:
+            user_pkg = dict(package or {})
+        user_assignment = user_pkg.setdefault("assignment", {})
+        user_assignment["assigned_to"] = assignee
+        user_assignment["assigned_to_list"] = assignee_list
+        user_assignment["mobile_assignment_id"] = "ma-" + hashlib.md5(f"{mobile_id}|{assignee}".encode("utf-8")).hexdigest()[:12]
+        user_archive_ok, user_archive_msg = _put_json_to_r2_key(_a34_mobile_assignment_package_key(campaign_id, user_assignment["mobile_assignment_id"]), user_pkg)
+        if not user_archive_ok:
+            failures.append(user_archive_msg)
+            continue
+        publish_ok, publish_msg = _c433_publish_a34_package_to_field_user(campaign_id, user_pkg)
+        if publish_ok:
+            messages.append(publish_msg)
+        else:
+            failures.append(publish_msg)
+
+    if failures:
+        return False, "Some mobile assignments failed: " + " | ".join(failures[:5])
+    return True, f"Published {len(messages):,} mobile assignment package(s): " + " | ".join(messages[:5])
 
 
 def _a3_compact_select_list(label: str, options: list[str], default_selected: list[str] | None = None, key_prefix: str = "a3_select", max_visible: int = 30) -> list[str]:
@@ -13638,26 +13693,54 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     return "Entire selected precinct"
                 return scope or "Selected work item"
 
+            def _a331_assignee_display(x):
+                vals = x.get("assigned_to_list")
+                if isinstance(vals, list):
+                    vals = [clean_value(v) for v in vals if clean_value(v)]
+                else:
+                    vals = []
+                if vals:
+                    return "; ".join(vals)
+                return clean_value(x.get("assigned_to")) or "Unassigned"
+
             assign_rows = [{
                 "Work Item": clean_value(x.get("name")),
-                "Assigned To": clean_value(x.get("assigned_to")) or "Unassigned",
+                "Assigned To": _a331_assignee_display(x),
                 "Street / Area": clean_value(x.get("assignment_target")) or _a331_area_label(x),
                 "Status": clean_value(x.get("status")) or "Ready",
                 "Households": int(x.get("household_count") or 0),
                 "Voters": int(x.get("voter_count") or 0),
                 "Due Date": clean_value(x.get("due_date")),
             } for x in saved]
-            cc_table(pd.DataFrame(assign_rows), height=260, key=f"a33_assign_rows_{campaign_id}_{pid}_{key_suffix}")
-            labels = [f"{clean_value(x.get('name'))} — {int(x.get('household_count') or 0):,} HH / {int(x.get('voter_count') or 0):,} voters — {clean_value(x.get('assigned_to')) or 'Unassigned'}" for x in saved]
+            cc_table(pd.DataFrame(assign_rows), height=220, key=f"a33_assign_rows_{campaign_id}_{pid}_{key_suffix}")
+            labels = [f"{clean_value(x.get('name'))} — {int(x.get('household_count') or 0):,} HH / {int(x.get('voter_count') or 0):,} voters — {_a331_assignee_display(x)}" for x in saved]
             choice = st.selectbox("Work item", labels, key=f"a33_assign_pkg_{campaign_id}_{pid}_{key_suffix}")
             idx = labels.index(choice)
             chosen = saved[idx]
             selected_id = clean_value(chosen.get("package_id"))
             area_label = clean_value(chosen.get("assignment_target")) or _a331_area_label(chosen)
             st.markdown(f"**Street / Area:** {area_label}")
+            existing_assignees = chosen.get("assigned_to_list")
+            if isinstance(existing_assignees, list):
+                existing_assignees = [clean_value(v) for v in existing_assignees if clean_value(v) in assignee_labels]
+            else:
+                existing_assignees = []
+            if not existing_assignees:
+                old_assignee = clean_value(chosen.get("assigned_to"))
+                if old_assignee in assignee_labels:
+                    existing_assignees = [old_assignee]
+                elif old_assignee:
+                    existing_assignees = [clean_value(v) for v in re.split(r"\s*;\s*", old_assignee) if clean_value(v) in assignee_labels]
+
             c1, c2 = st.columns(2)
             with c1:
-                new_assignee = st.selectbox("Assign to", assignee_labels, key=f"a33_assign_user_{campaign_id}_{pid}_{key_suffix}")
+                new_assignees = st.multiselect(
+                    "Assign to",
+                    assignee_labels,
+                    default=existing_assignees,
+                    key=f"a33_assign_users_multi_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
+                    help="Select one or more program users. The same work item can be published to each selected user's mobile app.",
+                )
                 status = st.selectbox("Status", ["Ready", "Assigned", "In Progress", "Completed", "Paused"], index=1, key=f"a33_assign_status_{campaign_id}_{pid}_{key_suffix}")
             with c2:
                 due_date = st.text_input("Due date", value=clean_value(chosen.get("due_date")), placeholder="YYYY-MM-DD", key=f"a33_due_date_{campaign_id}_{pid}_{key_suffix}")
@@ -13667,9 +13750,11 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                 if st.button("Save Assignment", type="primary", key=f"a331_save_assignment_{campaign_id}_{pid}_{key_suffix}"):
                     all_pkgs = store.get("packages") or []
                     now = datetime.now().isoformat(timespec="seconds")
+                    assigned_label = "; ".join([clean_value(v) for v in new_assignees if clean_value(v)])
                     for item in all_pkgs:
                         if clean_value(item.get("package_id")) == selected_id:
-                            item["assigned_to"] = new_assignee
+                            item["assigned_to"] = assigned_label or "Unassigned"
+                            item["assigned_to_list"] = [clean_value(v) for v in new_assignees if clean_value(v)]
                             item["assignment_type"] = clean_value(item.get("assignment_type")) or "Door-to-Door Work"
                             item["assignment_target"] = area_label
                             item["due_date"] = clean_value(due_date)
@@ -13678,9 +13763,11 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                             item["assigned_at"] = item.get("assigned_at") or now
                             item["updated_at"] = now
                             if isinstance(item.get("package"), dict):
-                                item["package"].setdefault("program", {})["assigned_to"] = new_assignee
+                                item["package"].setdefault("program", {})["assigned_to"] = assigned_label
+                                item["package"].setdefault("program", {})["assigned_to_list"] = [clean_value(v) for v in new_assignees if clean_value(v)]
                                 item["package"]["assignment"] = {
-                                    "assigned_to": new_assignee,
+                                    "assigned_to": assigned_label,
+                                    "assigned_to_list": [clean_value(v) for v in new_assignees if clean_value(v)],
                                     "assignment_type": "Door-to-Door Work",
                                     "assignment_target": area_label,
                                     "due_date": clean_value(due_date),
@@ -13690,7 +13777,10 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     store["packages"] = all_pkgs
                     ok, msg = save_program_candidate_walk_packages_store(campaign_id, store)
                     if ok:
-                        st.success("Assignment saved. This work item will later appear in the assigned user's mobile app.")
+                        if new_assignees:
+                            st.success(f"Assignment saved for {len(new_assignees):,} user(s). Generate the mobile assignment package next.")
+                        else:
+                            st.success("Assignment saved as unassigned.")
                         st.rerun()
                     else:
                         st.error(msg)
