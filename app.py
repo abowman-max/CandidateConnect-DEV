@@ -12483,23 +12483,22 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
     except Exception:
         packets_all = []
 
-    active_ids = _active_program_ids_a21(programs)
-    list_program_lookup = {}
-    for cl in contact_lists:
-        lid = clean_value(cl.get("list_id"))
-        if lid:
-            list_program_lookup[lid] = clean_value(cl.get("program_id"))
-
-    assignments = [a for a in assignments_all if _assignment_program_id_a21(a, list_program_lookup) in active_ids]
-    active_assignment_ids = {clean_value(a.get("assignment_id")) for a in assignments if clean_value(a.get("assignment_id"))}
-    packets = [p for p in packets_all if clean_value(p.get("assignment_id")) in active_assignment_ids]
-    active_programs = [p for p in programs if clean_value(p.get("program_id")) in active_ids]
-
-    total_voters, completed_voters, package_results = _packet_progress_for_assignments(packets)
+    # Shared Grassroots metrics: use the same Program -> Work Package -> Assignment
+    # source of truth as Programs and Reporting, not the legacy walk_packets table.
+    counts = _program_manager_counts_c46(campaign_id, programs)
+    contact_lists = counts.get("contact_lists") or contact_lists
+    assignments = counts.get("assignments") or []
+    packets = counts.get("packets") or []
+    active_programs = counts.get("active_programs") or []
+    total_voters = int(counts.get("total_voters") or 0)
+    completed_voters = int(counts.get("completed_voters") or 0)
+    package_results = counts.get("package_results") or {}
     remaining_voters = max(total_voters - completed_voters, 0)
-    pct_complete = (completed_voters / total_voters * 100.0) if total_voters else 0.0
-    mobile = _c46_mobile_outreach_summary(campaign_id)
+    pct_complete = float(counts.get("completion_pct") or ((completed_voters / total_voters * 100.0) if total_voters else 0.0))
+    mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
     result_counts = mobile.get("result_counts") or {}
+    if not isinstance(package_results, dict):
+        package_results = {}
     queue = mobile.get("queue") or []
     queue_counts = _c46_queue_counts(queue)
     next_action = _c46_top_next_action(mobile, active_programs, total_voters, completed_voters)
@@ -15028,6 +15027,83 @@ def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int =
     return list(by_key.values())
 
 
+def _gr_universe_rows_from_assigned_work_packages(campaign_id: str, selected_program: str = "All Programs") -> list[dict]:
+    """Return voter rows from the current assigned Grassroots work packages.
+
+    This is the shared reporting universe for the new Program -> Build -> Assign flow.
+    It prevents Reporting from falling back to the broader campaign scope when a
+    saved-universe/contact-list record is missing or stale. A work package is counted
+    once even if it is assigned to multiple users.
+    """
+    try:
+        programs = load_outreach_programs_store(campaign_id).get("programs") or []
+    except Exception:
+        programs = []
+    active_ids = _active_program_ids_a21(programs)
+    pid_to_name = {_gr_clean(p.get("program_id")): _gr_clean(p.get("name")) for p in programs if _gr_clean(p.get("program_id"))}
+
+    try:
+        store = load_program_candidate_walk_packages_store(campaign_id)
+        packages = store.get("packages") or []
+    except Exception:
+        packages = []
+
+    def is_assigned_package(pkg: dict) -> bool:
+        assigned_list = pkg.get("assigned_to_list") if isinstance(pkg.get("assigned_to_list"), list) else []
+        assigned_to = _gr_clean(pkg.get("assigned_to"))
+        if assigned_list:
+            return True
+        return bool(assigned_to and assigned_to.lower() not in {"unassigned", "unassigned / candidate", "unassigned/candidate"})
+
+    # Prefer assigned packages because Reporting is measuring assigned universe.
+    scoped = []
+    for pkg in packages or []:
+        if not isinstance(pkg, dict):
+            continue
+        pid = _gr_clean(pkg.get("program_id"))
+        pname = _gr_clean(pkg.get("program_name")) or pid_to_name.get(pid, "")
+        if active_ids and pid and pid not in active_ids:
+            continue
+        if selected_program != "All Programs" and pname != selected_program:
+            continue
+        if is_assigned_package(pkg):
+            scoped.append(pkg)
+
+    # If no assigned package exists yet, allow ready packages so the UI can still preview planned scope.
+    if not scoped:
+        for pkg in packages or []:
+            if not isinstance(pkg, dict):
+                continue
+            pid = _gr_clean(pkg.get("program_id"))
+            pname = _gr_clean(pkg.get("program_name")) or pid_to_name.get(pid, "")
+            if active_ids and pid and pid not in active_ids:
+                continue
+            if selected_program != "All Programs" and pname != selected_program:
+                continue
+            scoped.append(pkg)
+
+    by_key = {}
+    for pkg in scoped:
+        inner = pkg.get("package") if isinstance(pkg.get("package"), dict) else {}
+        voters = inner.get("voters") if isinstance(inner.get("voters"), list) else []
+        if not voters and isinstance(pkg.get("voters"), list):
+            voters = pkg.get("voters") or []
+        for v in voters or []:
+            if not isinstance(v, dict):
+                continue
+            row = dict(v)
+            row.setdefault("program_id", _gr_clean(pkg.get("program_id")))
+            row.setdefault("program_name", _gr_clean(pkg.get("program_name")))
+            row.setdefault("assignment_name", _gr_clean(pkg.get("name")))
+            row.setdefault("assignment_id", _gr_clean(pkg.get("package_id")))
+            key = _gr_contact_match_key(row) or _gr_household_match_key(row)
+            if not key:
+                key = "ROW:" + str(len(by_key))
+            if key not in by_key:
+                by_key[key] = row
+    return list(by_key.values())
+
+
 def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
     """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row."""
     if not rows or not universe_rows:
@@ -15416,8 +15492,12 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
     # Build the true reporting universe from the CURRENT contact lists for the selected program.
     # This is what makes Municipality/Precinct/etc show every area in the campaign universe,
     # including areas with zero contacts, instead of only showing synced-list names.
-    universe_sources = _gr_source_universes_for_reporting(campaign_id, selected_program)
-    universe_rows = _gr_universe_rows_for_sources(universe_sources, max_rows_per_source=75000)
+    # Use the current assigned Program work packages as the primary source of truth.
+    # This keeps Dashboard, Programs, Assign, and Reporting aligned on the same voter universe.
+    universe_rows = _gr_universe_rows_from_assigned_work_packages(campaign_id, selected_program)
+    if not universe_rows:
+        universe_sources = _gr_source_universes_for_reporting(campaign_id, selected_program)
+        universe_rows = _gr_universe_rows_for_sources(universe_sources, max_rows_per_source=75000)
     if not universe_rows:
         universe_rows = _gr_campaign_universe_rows_for_reporting(max_rows=150000)
 
