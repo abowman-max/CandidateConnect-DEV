@@ -14245,9 +14245,46 @@ def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
 
 
 
+
+def _gr_household_key_geo(row: dict, break_by: str) -> str:
+    """Parse mobile household_key geography.
+
+    Mobile results store package geography as:
+        COUNTY|MUNICIPALITY|PRECINCT|ADDRESS
+
+    This is authoritative for contact reporting geography when voter-id lookup
+    fails or when older mobile rows stored voter names in voter_id.
+    """
+    if not isinstance(row, dict):
+        return ""
+    hk = _gr_clean(row.get("household_key") or row.get("Household Key") or row.get("householdKey"))
+    if not hk or "|" not in hk:
+        return ""
+    parts = [str(x).strip() for x in hk.split("|")]
+    if len(parts) < 3:
+        return ""
+    wanted = _gr_clean(break_by).lower()
+    if wanted == "county":
+        return _gr_clean(parts[0])
+    if wanted == "municipality":
+        return _gr_clean(parts[1])
+    if wanted == "precinct":
+        return _gr_clean(parts[2])
+    return ""
+
+
 # C4.7.2 — Grassroots Reporting area-break selector + PDF packet
 def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     break_by = _gr_clean(break_by)
+
+    # Mobile contact rows carry exact package geography in household_key:
+    # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS. Prefer it first for these breaks
+    # so stale assignment/list labels cannot create false unmatched rows.
+    if break_by in {"County", "Municipality", "Precinct"}:
+        hk_val = _gr_household_key_geo(row, break_by)
+        if hk_val and not _gr_is_blank_geo_value(hk_val):
+            return hk_val
+
     aliases = {
         "County": ["county", "County", "COUNTY", "county_name", "County Name"],
         "Municipality": ["municipality", "Municipality", "MUNICIPALITY", "muni", "Muni", "municipality_clean", "Municipality_Clean", "Municipality_1"],
@@ -14267,13 +14304,6 @@ def _gr_area_value_by_break(row: dict, break_by: str) -> str:
         # Ignore placeholder values so valid mobile household_key geography can win.
         if val and not _gr_is_blank_geo_value(val):
             return val
-
-    # Mobile results carry exact package geography here:
-    # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS
-    if break_by in {"County", "Municipality", "Precinct"}:
-        hk_val = _gr_household_key_geo(row, break_by)
-        if hk_val:
-            return hk_val
 
     # Fall back gracefully when the mobile result record does not carry every geo field yet.
     if break_by == "Precinct":
