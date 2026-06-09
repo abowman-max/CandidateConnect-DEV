@@ -14469,11 +14469,54 @@ def _gr_is_blank_geo_value(value: str) -> bool:
     return val in {"", "unknown", "whole universe", "area / best available", "unmatched contact records", "none", "nan"}
 
 
+def _gr_looks_like_real_voter_id(value: str) -> bool:
+    """Return True only for real voter-id-looking values, not voter names.
+
+    Some early mobile rows accidentally saved the voter name in voter_id
+    (for example, "Richard A Dellinger" or "James L Shue; Josephine Shue").
+    Treating those names as IDs caused Reporting to drop otherwise valid
+    mobile contacts from the program/universe join.
+    """
+    val = _gr_clean(value)
+    if not val:
+        return False
+    # PA voter ids in our data are numeric/hyphen style, e.g. 011937881-67.
+    # Be permissive for future IDs, but require real digit content and reject
+    # obvious names/household name lists.
+    if ";" in val or "," in val:
+        return False
+    if re.search(r"[A-Za-z]", val) and " " in val:
+        return False
+    digits = re.sub(r"\D", "", val)
+    return len(digits) >= 5
+
+
+def _gr_household_match_key(row: dict) -> str:
+    """Fallback match key based on household geography/address from mobile package."""
+    if not isinstance(row, dict):
+        return ""
+    hk = _gr_clean(row.get("household_key") or row.get("Household Key"))
+    if hk:
+        parts = [p.strip().upper() for p in hk.split("|") if p.strip()]
+        if len(parts) >= 4:
+            return "HH:" + "|".join(parts[:4])
+        return "HH:" + re.sub(r"\s+", " ", hk.upper())
+    county = _gr_clean(row.get("County") or row.get("county")).upper()
+    muni = _gr_clean(row.get("Municipality") or row.get("municipality")).upper()
+    precinct = _gr_clean(row.get("Precinct") or row.get("precinct")).upper()
+    addr = _gr_clean(row.get("household_address") or row.get("res_address") or row.get("Residential Address") or row.get("Address") or row.get("address")).upper()
+    if county or muni or precinct or addr:
+        return "HH:" + "|".join([county, muni, precinct, re.sub(r"\s+", " ", addr)])
+    return ""
+
+
 def _gr_contact_match_key(row: dict) -> str:
     """Stable voter key for matching synced contacts back to the campaign universe.
 
-    C4.7.6: mobile/web packages have used several voter-id field names over
-    time. Normalize all common aliases before falling back to name/address.
+    Important: only real voter IDs are allowed to become VID keys. Older mobile
+    rows sometimes wrote voter names into voter_id; those must fall through to
+    name/address or household matching so reporting keeps and geo-attributes
+    every synced field result.
     """
     if not isinstance(row, dict):
         return ""
@@ -14484,13 +14527,15 @@ def _gr_contact_match_key(row: dict) -> str:
     ]
     for key in voter_aliases:
         val = _gr_clean(row.get(key))
-        if val:
+        if val and _gr_looks_like_real_voter_id(val):
             return "VID:" + re.sub(r"[^A-Z0-9]", "", val.upper())
+
     name = _gr_clean(row.get("voter_name") or row.get("FullName") or row.get("full_name") or row.get("Name") or row.get("name")).upper()
     addr = _gr_clean(row.get("res_address") or row.get("address") or row.get("household_address") or row.get("Residential Address") or row.get("Address")).upper()
     if name or addr:
         return "NA:" + re.sub(r"\s+", " ", name) + "|" + re.sub(r"\s+", " ", addr)
-    return ""
+
+    return _gr_household_match_key(row)
 
 
 def _gr_contact_voter_id(row: dict) -> str:
@@ -14807,17 +14852,45 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
 
 
 def _gr_filter_contacts_to_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
-    """Keep report scope tied to the current program/list universe; avoid deleted list residue when possible."""
+    """Keep report scope tied to the current program/list universe without losing valid mobile contacts.
+
+    A synced mobile row may have a bad voter_id from an older mobile build, but
+    still carry an authoritative household_key:
+        COUNTY|MUNICIPALITY|PRECINCT|ADDRESS
+    That row belongs in the campaign/program universe and must be counted.
+    """
     if not rows or not universe_rows:
         return rows or []
+
     universe_keys = { _gr_contact_match_key(v) for v in universe_rows or [] if _gr_contact_match_key(v) }
-    if not universe_keys:
+    universe_hh_keys = { _gr_household_match_key(v) for v in universe_rows or [] if _gr_household_match_key(v) }
+    universe_counties = { _gr_geo_key(_gr_area_value_by_break(v, "County")) for v in universe_rows or [] if _gr_area_value_by_break(v, "County") }
+    universe_munis = { _gr_geo_key(_gr_area_value_by_break(v, "Municipality")) for v in universe_rows or [] if _gr_area_value_by_break(v, "Municipality") }
+    universe_precincts = { _gr_geo_key(_gr_area_value_by_break(v, "Precinct")) for v in universe_rows or [] if _gr_area_value_by_break(v, "Precinct") }
+
+    if not universe_keys and not universe_munis and not universe_precincts:
         return rows or []
+
     filtered = []
     for r in rows or []:
         key = _gr_contact_match_key(r)
-        # Keep rows without a voter key because some older mobile rows only have household/notes.
-        if not key or key in universe_keys:
+        hh_key = _gr_household_match_key(r)
+        hk_county = _gr_geo_key(_gr_household_key_geo(r, "County"))
+        hk_muni = _gr_geo_key(_gr_household_key_geo(r, "Municipality"))
+        hk_precinct = _gr_geo_key(_gr_household_key_geo(r, "Precinct"))
+
+        if key and key in universe_keys:
+            filtered.append(r); continue
+        if hh_key and hh_key in universe_hh_keys:
+            filtered.append(r); continue
+        # If the household_key says the contact is inside this campaign universe,
+        # keep it even when the older voter_id field is malformed.
+        if hk_precinct and hk_precinct in universe_precincts:
+            filtered.append(r); continue
+        if hk_muni and hk_muni in universe_munis and (not universe_counties or not hk_county or hk_county in universe_counties):
+            filtered.append(r); continue
+        # Keep rows with no match key at all rather than hiding synced results.
+        if not key and not hh_key:
             filtered.append(r)
     return filtered
 
@@ -14850,11 +14923,12 @@ def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[d
         area = _gr_clean(_gr_area_value_by_break(r, break_by))
 
         # For mobile results, household_key is authoritative for County/Municipality/Precinct:
-        # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS. Use it whenever the row carries
-        # placeholder geo such as Unknown or Whole Universe.
-        if break_by in {"County", "Municipality", "Precinct"} and _gr_is_blank_geo_value(area):
+        # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS. Prefer it whenever it is present,
+        # because some reporting enrichment passes can leave placeholder or stale
+        # assignment/list names on the row.
+        if break_by in {"County", "Municipality", "Precinct"}:
             hk_area = _gr_household_key_geo(r, break_by)
-            if hk_area:
+            if hk_area and not _gr_is_blank_geo_value(hk_area):
                 area = hk_area
 
         area_key = _gr_geo_key(area)
@@ -17569,3 +17643,6 @@ div[data-testid="stMultiSelect"] > div {
 # If selected universe has one area, contacts without mobile geo are assigned there.
 
 # C4.7.9 Grassroots reporting geo attribution fix: ignores placeholder geo and maps mobile household_key to campaign universe areas.
+
+
+# C4.7.10 Grassroots reporting: real voter-id validation + household_key geo attribution fix.
