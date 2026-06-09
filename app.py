@@ -739,6 +739,47 @@ div[role="tooltip"] *,
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* FINAL OVERRIDE: fix clipped Choose options text in multiselect filters */
+.stMultiSelect div[data-baseweb="select"] {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+}
+
+.stMultiSelect div[data-baseweb="select"] > div {
+    min-height: 38px !important;
+    height: 38px !important;
+    max-height: 38px !important;
+    padding: 0 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: visible !important;
+}
+
+.stMultiSelect div[data-baseweb="select"] [data-baseweb="placeholder"],
+.stMultiSelect div[data-baseweb="select"] div[role="combobox"],
+.stMultiSelect div[data-baseweb="select"] input {
+    height: 22px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    line-height: 22px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: visible !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+}
+
+.stMultiSelect div[data-baseweb="select"] svg {
+    margin-top: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
 VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
