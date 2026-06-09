@@ -399,7 +399,7 @@ button[data-baseweb="tab"] *,
 
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
     background-color: #b0121b !important;
-    height: 10px !important;
+    height: 4px !important;
 }
 
 /* cards and dashboard elements */
@@ -15498,7 +15498,7 @@ button[data-baseweb="tab"] *,
 }
 div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
   background-color: var(--cc-red) !important;
-  height: 4px !important;
+  height: 10px !important;
 }
 
 /* Forms and dropdowns */
