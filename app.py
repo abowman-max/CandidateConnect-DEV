@@ -14448,11 +14448,177 @@ def _gr_enrich_rows_with_assignment_geo(campaign_id: str, rows: list[dict]) -> l
         out.append(r)
     return out
 
+
+# C4.7.4 — Grassroots reporting true universe-area coverage.
+def _gr_geo_key(value: str) -> str:
+    return re.sub(r"\s+", " ", _gr_clean(value)).strip().upper()
+
+
+def _gr_contact_match_key(row: dict) -> str:
+    """Stable voter key for matching synced contacts back to the campaign universe."""
+    if not isinstance(row, dict):
+        return ""
+    for key in ["voter_id", "VoterID", "PAID", "PA_Voter_ID", "SURE_ID"]:
+        val = _gr_clean(row.get(key))
+        if val:
+            return "VID:" + val.upper()
+    name = _gr_clean(row.get("voter_name") or row.get("FullName") or row.get("Name")).upper()
+    addr = _gr_clean(row.get("res_address") or row.get("address") or row.get("household_address") or row.get("Residential Address")).upper()
+    if name or addr:
+        return "NA:" + name + "|" + addr
+    return ""
+
+
+def _gr_source_universes_for_reporting(campaign_id: str, selected_program: str = "All Programs") -> list[str]:
+    """Current contact-list saved universes only. This avoids old/deleted lists driving area tables."""
+    try:
+        contact_lists = load_contact_lists_store(campaign_id).get("contact_lists") or []
+    except Exception:
+        contact_lists = []
+    try:
+        programs = load_outreach_programs_store(campaign_id).get("programs") or []
+    except Exception:
+        programs = []
+    pid_to_name = { _gr_clean(p.get("program_id")): _gr_clean(p.get("name")) for p in programs if _gr_clean(p.get("program_id")) }
+    out = []
+    seen = set()
+    for cl in contact_lists:
+        if not isinstance(cl, dict):
+            continue
+        pname = _gr_clean(cl.get("program_name")) or pid_to_name.get(_gr_clean(cl.get("program_id")), "")
+        if selected_program != "All Programs" and pname != selected_program:
+            continue
+        src = _gr_clean(cl.get("source_saved_universe") or cl.get("saved_universe") or cl.get("universe"))
+        if src and src not in seen:
+            seen.add(src)
+            out.append(src)
+    if not out and selected_program != "All Programs":
+        for p in programs:
+            if _gr_clean(p.get("name")) == selected_program:
+                src = _gr_clean(p.get("source_saved_universe") or p.get("saved_universe") or p.get("universe"))
+                if src and src not in seen:
+                    out.append(src); seen.add(src)
+    return out
+
+
+def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int = 75000) -> list[dict]:
+    """Pull the voters that make up the selected reporting universe, then dedupe them."""
+    by_key = {}
+    for src in sources or []:
+        try:
+            voters, meta = _mobile_voters_from_saved_universe(src, max_rows=max_rows_per_source)
+        except Exception:
+            voters = []
+        for v in voters or []:
+            if not isinstance(v, dict):
+                continue
+            key = _gr_contact_match_key(v)
+            if not key:
+                key = "ROW:" + str(len(by_key))
+            if key not in by_key:
+                by_key[key] = v
+    return list(by_key.values())
+
+
+def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
+    """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row."""
+    if not rows or not universe_rows:
+        return rows or []
+    voter_by_key = {}
+    for v in universe_rows or []:
+        key = _gr_contact_match_key(v)
+        if key:
+            voter_by_key[key] = v
+    out = []
+    geo_keys = [
+        ("County", "county"),
+        ("Municipality", "municipality"),
+        ("Precinct", "precinct"),
+        ("School District", "school_district"),
+        ("School Region", "school_region"),
+        ("State House", "state_house"),
+        ("State Senate", "state_senate"),
+        ("Congressional", "congressional"),
+    ]
+    for raw in rows or []:
+        r = dict(raw or {})
+        v = voter_by_key.get(_gr_contact_match_key(r), {})
+        if v:
+            for display_key, lower_key in geo_keys:
+                if not _gr_clean(r.get(display_key)) and _gr_clean(v.get(display_key)):
+                    r[display_key] = _gr_clean(v.get(display_key))
+                if not _gr_clean(r.get(lower_key)) and _gr_clean(v.get(display_key)):
+                    r[lower_key] = _gr_clean(v.get(display_key))
+        out.append(r)
+    return out
+
+
+def _gr_filter_contacts_to_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
+    """Keep report scope tied to the current program/list universe; avoid deleted list residue when possible."""
+    if not rows or not universe_rows:
+        return rows or []
+    universe_keys = { _gr_contact_match_key(v) for v in universe_rows or [] if _gr_contact_match_key(v) }
+    if not universe_keys:
+        return rows or []
+    filtered = []
+    for r in rows or []:
+        key = _gr_contact_match_key(r)
+        # Keep rows without a voter key because some older mobile rows only have household/notes.
+        if not key or key in universe_keys:
+            filtered.append(r)
+    return filtered
+
+
+def _gr_area_rows_by_break_with_universe(rows: list[dict], universe_rows: list[dict], break_by: str) -> list[dict]:
+    """Area table based on every area in the campaign universe, not only areas with contacts."""
+    areas = {}
+    # Seed all areas from assigned/campaign universe with zeroes.
+    for v in universe_rows or []:
+        area = _gr_area_value_by_break(v, break_by)
+        area = _gr_clean(area) or "Unknown"
+        rec = areas.setdefault(area, {"Area": area, "Assigned": 0, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
+        rec["Assigned"] += 1
+    # Add synced contact outcomes into the proper area.
+    for r in rows or []:
+        area = _gr_area_value_by_break(r, break_by)
+        area = _gr_clean(area) or "Unknown"
+        rec = areas.setdefault(area, {"Area": area, "Assigned": 0, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
+        rec["Contacts"] += 1
+        result = _gr_result_label(r.get("result"))
+        if result in rec:
+            rec[result] += 1
+        if _gr_truthy(r.get("follow_up")) or _gr_truthy(r.get("needs_follow_up")):
+            rec["Follow-Ups"] += 1
+        if _gr_truthy(r.get("yard_sign")):
+            rec["Yard Signs"] += 1
+    denom_contacts = max(len(rows or []), 1)
+    out = []
+    for rec in areas.values():
+        assigned = _gr_int(rec.get("Assigned"))
+        contacts = _gr_int(rec.get("Contacts"))
+        out.append({
+            "Area": rec["Area"],
+            "Assigned": f"{assigned:,}" if assigned else "0",
+            "Contacts": f"{contacts:,}",
+            "Not Contacted": f"{max(assigned - contacts, 0):,}" if assigned else "0",
+            "Contact Rate": _gr_percent(contacts, assigned) if assigned else "0.0%",
+            "Favorable": f'{_gr_int(rec["Favorable"]):,}',
+            "Undecided": f'{_gr_int(rec["Undecided"]):,}',
+            "Against": f'{_gr_int(rec["Against"]):,}',
+            "Not Home": f'{_gr_int(rec["Not Home"]):,}',
+            "Follow-Ups": f'{_gr_int(rec["Follow-Ups"]):,}',
+            "Yard Signs": f'{_gr_int(rec["Yard Signs"]):,}',
+            "Contact Share": _gr_percent(contacts, denom_contacts),
+        })
+    return sorted(out, key=lambda x: (_gr_int(x.get("Contacts")), _gr_int(x.get("Assigned")), x.get("Area", "")), reverse=True)
+
 def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int = 0) -> list[dict]:
+    # Legacy fallback: contact-only area rows. The reporting page now calls
+    # _gr_area_rows_by_break_with_universe() when it can load the campaign universe.
     areas = {}
     for r in rows or []:
         area = _gr_area_value_by_break(r, break_by)
-        rec = areas.setdefault(area, {"Area": area, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
+        rec = areas.setdefault(area, {"Area": area, "Assigned": 0, "Contacts": 0, "Favorable": 0, "Undecided": 0, "Against": 0, "Not Home": 0, "Follow-Ups": 0, "Yard Signs": 0})
         rec["Contacts"] += 1
         result = _gr_result_label(r.get("result"))
         if result in rec:
@@ -14467,7 +14633,10 @@ def _gr_area_rows_by_break(rows: list[dict], break_by: str, total_assigned: int 
         contacts = _gr_int(rec["Contacts"])
         out.append({
             "Area": rec["Area"],
+            "Assigned": "0",
             "Contacts": f"{contacts:,}",
+            "Not Contacted": "0",
+            "Contact Rate": "—",
             "Favorable": f'{_gr_int(rec["Favorable"]):,}',
             "Undecided": f'{_gr_int(rec["Undecided"]):,}',
             "Against": f'{_gr_int(rec["Against"]):,}',
@@ -14619,7 +14788,7 @@ def _gr_report_pdf_bytes(
     chart_tbl.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP")]))
     story.append(chart_tbl)
     story.append(Spacer(1, 0.16 * inch))
-    story.extend(table_from_rows(area_rows, ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title=f"Area Management View - {area_break}", max_rows=18))
+    story.extend(table_from_rows(area_rows, ["Area", "Assigned", "Contacts", "Not Contacted", "Contact Rate", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title=f"Area Management View - {area_break}", max_rows=18))
     story.append(PageBreak())
 
     story.extend(table_from_rows(worker_rows, ["Worker", "Contacts", "Favorable", "Not Home", "Follow-Ups"], title="Personnel / Worker Production", max_rows=18))
@@ -14670,12 +14839,20 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         index=1,
         key=f"gr_report_area_break_{campaign_id}",
     )
+    # Build the true reporting universe from the CURRENT contact lists for the selected program.
+    # This is what makes Municipality/Precinct/etc show every area in the campaign universe,
+    # including areas with zero contacts, instead of only showing synced-list names.
+    universe_sources = _gr_source_universes_for_reporting(campaign_id, selected_program)
+    universe_rows = _gr_universe_rows_for_sources(universe_sources, max_rows_per_source=75000)
+
     if selected_program != "All Programs":
         rows = [r for r in rows_all if _gr_row_program(r) == selected_program]
-        total_assigned = total_assigned_all
     else:
         rows = rows_all
-        total_assigned = total_assigned_all
+
+    rows = _gr_enrich_contacts_from_universe(rows, universe_rows)
+    rows = _gr_filter_contacts_to_universe(rows, universe_rows)
+    total_assigned = len(universe_rows) if universe_rows else total_assigned_all
 
     contacted = len(rows)
     remaining = max(total_assigned - contacted, 0) if total_assigned else 0
@@ -14697,7 +14874,7 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         unsafe_allow_html=True,
     )
 
-    weak_areas = _gr_area_rows_by_break(rows, area_break, total_assigned)[:5]
+    weak_areas = _gr_area_rows_by_break_with_universe(rows, universe_rows, area_break)[:5] if universe_rows else _gr_area_rows_by_break(rows, area_break, total_assigned)[:5]
     recs = _gr_management_recommendations(total_assigned, contacted, result_counts, queue_count, weak_areas)
     st.markdown(_c46_html_table(recs, ["Priority", "Finding", "What it means", "Recommended move"], title="Management Readout", max_rows=5), unsafe_allow_html=True)
 
@@ -14727,8 +14904,8 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
             st.markdown(_c46_html_table(_gr_breakdown_rows(rows, "Result", lambda r: _gr_result_label(r.get("result"))), ["Result", "Contacts", "Share"], title="Contacts by Result", max_rows=10), unsafe_allow_html=True)
 
     with coverage_tab:
-        area_rows = _gr_area_rows_by_break(rows, area_break, total_assigned)
-        st.markdown(_c46_html_table(area_rows, ["Area", "Contacts", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
+        area_rows = _gr_area_rows_by_break_with_universe(rows, universe_rows, area_break) if universe_rows else _gr_area_rows_by_break(rows, area_break, total_assigned)
+        st.markdown(_c46_html_table(area_rows, ["Area", "Assigned", "Contacts", "Not Contacted", "Contact Rate", "Favorable", "Undecided", "Against", "Not Home", "Follow-Ups", "Yard Signs", "Contact Share"], title="Area / Precinct Management View", max_rows=15), unsafe_allow_html=True)
         remaining_row = [{"Metric": "Not contacted / remaining", "Count": f"{remaining:,}" if total_assigned else "—", "Manager interpretation": "Use this to decide whether the next push should be a new contact pass or follow-up/recontact work."}]
         st.markdown(_c46_html_table(remaining_row, ["Metric", "Count", "Manager interpretation"], title="Uncontacted Universe", max_rows=1), unsafe_allow_html=True)
 
@@ -16937,6 +17114,161 @@ div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
     margin-bottom: 0 !important;
     width: 14px !important;
     height: 14px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# C4.6.102 HARD FINAL OVERRIDE — 30px compact readable filter dropdowns/multiselects.
+# This is intentionally last. It forces the BaseWeb controls down to button-like height.
+st.markdown("""
+<style id="cc-compact-filter-controls-20260608-v102">
+/* Candidate Connect 30px compact Streamlit/BaseWeb dropdown controls */
+div[data-testid="stSelectbox"],
+div[data-testid="stMultiSelect"],
+.stSelectbox,
+.stMultiSelect {
+    margin-top: 0 !important;
+    margin-bottom: 0.18rem !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+div[data-testid="stSelectbox"] label,
+div[data-testid="stMultiSelect"] label,
+.stSelectbox label,
+.stMultiSelect label,
+div[data-testid="stWidgetLabel"],
+div[data-testid="stWidgetLabel"] * {
+    margin-bottom: 0.02rem !important;
+    padding-bottom: 0 !important;
+    font-size: 8.8pt !important;
+    line-height: 1.0 !important;
+    font-weight: 600 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"],
+.stSelectbox div[data-baseweb="select"],
+.stMultiSelect div[data-baseweb="select"] {
+    min-height: 30px !important;
+    height: 30px !important;
+    max-height: 30px !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    font-size: 8.8pt !important;
+    line-height: 14px !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    min-height: 30px !important;
+    height: 30px !important;
+    max-height: 30px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    background: #ffffff !important;
+    border: 1px solid #111111 !important;
+    border-radius: 7px !important;
+    padding: 0 7px !important;
+    margin: 0 !important;
+    overflow: visible !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div > div,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="combobox"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="listbox"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] div[role="listbox"],
+.stSelectbox div[data-baseweb="select"] > div > div,
+.stMultiSelect div[data-baseweb="select"] > div > div {
+    min-height: 16px !important;
+    height: 16px !important;
+    max-height: 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] input,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] input,
+.stSelectbox div[data-baseweb="select"] input,
+.stMultiSelect div[data-baseweb="select"] input {
+    height: 16px !important;
+    min-height: 16px !important;
+    max-height: 16px !important;
+    line-height: 16px !important;
+    font-size: 8.8pt !important;
+    font-weight: 500 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+    overflow: visible !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    caret-color: #071d3a !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] [data-baseweb="placeholder"],
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] [data-baseweb="placeholder"],
+.stSelectbox div[data-baseweb="select"] [data-baseweb="placeholder"],
+.stMultiSelect div[data-baseweb="select"] [data-baseweb="placeholder"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+.stSelectbox div[data-baseweb="select"] span:not([data-baseweb="tag"]),
+.stMultiSelect div[data-baseweb="select"] span:not([data-baseweb="tag"]) {
+    height: 16px !important;
+    min-height: 16px !important;
+    max-height: 16px !important;
+    line-height: 16px !important;
+    font-size: 8.8pt !important;
+    font-weight: 500 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+    overflow: visible !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    text-transform: none !important;
+}
+
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] span[data-baseweb="tag"],
+.stMultiSelect div[data-baseweb="select"] span[data-baseweb="tag"] {
+    min-height: 16px !important;
+    height: 16px !important;
+    max-height: 16px !important;
+    line-height: 14px !important;
+    font-size: 8.0pt !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    margin: 0 3px 0 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] svg,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] svg,
+.stSelectbox div[data-baseweb="select"] svg,
+.stMultiSelect div[data-baseweb="select"] svg {
+    align-self: center !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    width: 13px !important;
+    height: 13px !important;
+}
+
+div[data-testid="stSelectbox"] > div,
+div[data-testid="stMultiSelect"] > div {
+    gap: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
