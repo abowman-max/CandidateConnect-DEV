@@ -13320,7 +13320,7 @@ def _a34_build_mobile_assignment_package(campaign_id: str, program: dict, work_i
             "mobile_assignment_id": mobile_assignment_id,
             "source_work_item_id": package_id,
             "name": clean_value(work_item.get("name")) or street_area,
-            "assigned_to": "Unassigned",
+            "assigned_to": assignee or "Unassigned",
             "assigned_to_list": assignee_list,
             "street_area": street_area,
             "selected_precinct": clean_value(work_item.get("selected_precinct") or embedded.get("selected_precinct")),
@@ -14038,30 +14038,48 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                         st.error(msg)
 
             st.markdown("##### Mobile Assignment Package")
-            st.caption("C4.4: Exports the full household/voter walk package to R2 so the Field App can load it now after Refresh / Download Assignments.")
-            mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
+            st.caption("C4.6.44: Assignment edits are lightweight. The full voter/household JSON is built only when you click Generate, so changing the Assign To picker does not freeze the page.")
+            pkg_state_key = f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{selected_id}_{key_suffix}"
+            msg_state_key = f"a34_mobile_pkg_msg_{campaign_id}_{pid}_{selected_id}_{key_suffix}"
             m1, m2 = st.columns(2)
             with m1:
-    # C4.6.17: mobile export removes deleted assignments and groups whole-universe work by precinct.
-
-                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{key_suffix}"):
-                    with st.spinner("Publishing mobile assignment package to selected user(s). Large whole-universe packages can take a moment..."):
+                # C4.6.44: Do NOT build the mobile package during normal page reruns.
+                # Whole-universe packages can contain thousands of voters and were causing
+                # the Assign page to sit in Streamlit's grey executing state whenever the
+                # multiselect changed. Build/publish only on this explicit click.
+                if st.button("Generate Mobile Assignment Package", type="primary", key=f"a34_generate_mobile_assignment_{campaign_id}_{pid}_{selected_id}_{key_suffix}"):
+                    with st.spinner("Building and publishing the mobile assignment package to selected user(s). Large whole-universe packages can take a moment..."):
+                        mobile_pkg = _a34_build_mobile_assignment_package(campaign_id, program, chosen)
                         ok, msg = _a34_save_mobile_assignment_package(campaign_id, mobile_pkg)
                     if ok:
-                        st.session_state[f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{key_suffix}"] = mobile_pkg
+                        st.session_state[pkg_state_key] = mobile_pkg
+                        st.session_state[msg_state_key] = msg
                         st.success("Mobile assignment package uploaded to R2 and available to the Field App now.")
                         st.code(msg)
                     else:
                         st.error(msg)
             with m2:
-                ready_pkg = st.session_state.get(f"a34_mobile_pkg_ready_{campaign_id}_{pid}_{key_suffix}") or mobile_pkg
-                st.download_button(
-                    "Download Mobile Assignment JSON",
-                    json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
-                    file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
-                    mime="application/json",
-                    key=f"a34_download_mobile_assignment_{campaign_id}_{pid}_{key_suffix}",
-                )
+                ready_pkg = st.session_state.get(pkg_state_key)
+                if ready_pkg:
+                    st.download_button(
+                        "Download Mobile Assignment JSON",
+                        json.dumps(ready_pkg, ensure_ascii=False, indent=2).encode("utf-8"),
+                        file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
+                        mime="application/json",
+                        key=f"a34_download_mobile_assignment_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
+                    )
+                    if st.session_state.get(msg_state_key):
+                        st.caption(st.session_state.get(msg_state_key))
+                else:
+                    st.download_button(
+                        "Download Mobile Assignment JSON",
+                        data=b"",
+                        file_name=f"{_ops_slug(program.get('name') or 'program')}_{_ops_slug(area_label)}_mobile_assignment.json",
+                        mime="application/json",
+                        key=f"a34_download_mobile_assignment_disabled_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
+                        disabled=True,
+                        help="Generate the mobile assignment package first.",
+                    )
 
 def _program_manager_counts_c46(campaign_id: str, programs: list[dict]) -> dict:
     """Small Program workspace summary; intentionally defensive so the UI never blocks.
