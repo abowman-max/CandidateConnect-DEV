@@ -134,10 +134,28 @@ div[data-baseweb="select"] input {
     min-width: 2rem !important;
 }
 
-/* keep multiselect controls from crushing selected labels */
+/* clean compact multiselect/dropdown controls */
+.stMultiSelect div[data-baseweb="select"] {
+    min-height: 42px !important;
+    height: 42px !important;
+}
+
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 30px !important;
+    min-height: 42px !important;
+    height: 42px !important;
+    display: flex !important;
     align-items: center !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    overflow: visible !important;
+}
+
+.stMultiSelect div[data-baseweb="select"] input,
+.stMultiSelect div[data-baseweb="select"] span {
+    line-height: 22px !important;
+    height: auto !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 /* login/setup card */
