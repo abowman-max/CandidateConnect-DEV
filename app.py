@@ -136,7 +136,7 @@ div[data-baseweb="select"] input {
 
 /* keep multiselect controls from crushing selected labels */
 .stMultiSelect div[data-baseweb="select"] > div {
-    min-height: 36px !important;
+    min-height: 30px !important;
     align-items: center !important;
 }
 
