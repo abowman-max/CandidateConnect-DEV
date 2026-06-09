@@ -13861,7 +13861,15 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         st.caption("Saved walk packages become simple work items. Pick what to assign, who should work it, and when it is due.")
         store = load_program_candidate_walk_packages_store(campaign_id)
         saved = [x for x in (store.get("packages") or []) if clean_value(x.get("program_id")) == pid]
-        assignee_labels = list(user_labels)  # C4.6.41: allow assignment to any campaign-scoped app user or roster person
+        # C4.6.43: Assignment recipients are campaign-scoped people, not only
+        # users already attached to the selected program. This includes Campaign
+        # Organization roster people plus app/security users for this campaign
+        # (campaign admins, managers, field users, staff/candidate accounts).
+        try:
+            _assign_people, assignee_labels, _assign_label_to_id, _assign_id_to_label = _program_user_labels(campaign_id)
+        except Exception:
+            assignee_labels = list((user_id_to_label or {}).values())
+        assignee_labels = sorted([clean_value(x) for x in assignee_labels if clean_value(x)])
         a1, a2, a3 = st.columns(3)
         with a1:
             st.metric("Saved Work Items", f"{len(saved):,}")
