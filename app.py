@@ -14246,6 +14246,29 @@ def _gr_area_rows(rows: list[dict], total_assigned: int) -> list[dict]:
 
 
 # C4.7.2 — Grassroots Reporting area-break selector + PDF packet
+def _gr_household_key_geo(row: dict, which: str = "") -> str:
+    """Extract County/Municipality/Precinct from mobile household_key.
+
+    Mobile records already carry a reliable household_key in this shape:
+        COUNTY|MUNICIPALITY|PRECINCT|ADDRESS
+    Use it as a reporting geo source when explicit geo columns are missing.
+    """
+    if not isinstance(row, dict):
+        return ""
+    hk = _gr_clean(row.get("household_key") or row.get("Household Key"))
+    if not hk or "|" not in hk:
+        return ""
+    parts = [_gr_clean(p) for p in hk.split("|")]
+    which_norm = _gr_clean(which).lower()
+    if which_norm == "county" and len(parts) >= 1:
+        return parts[0]
+    if which_norm == "municipality" and len(parts) >= 2:
+        return parts[1]
+    if which_norm == "precinct" and len(parts) >= 3:
+        return parts[2]
+    return ""
+
+
 def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     break_by = _gr_clean(break_by)
     aliases = {
@@ -14262,10 +14285,20 @@ def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     }
     if break_by == "Area / Best Available":
         return _gr_row_area(row)
+
     for key in aliases.get(break_by, []):
         val = _gr_clean(row.get(key))
         if val:
             return val
+
+    # Mobile sync rows always should have household_key. It contains the exact
+    # county/municipality/precinct from the voter package even when the result row
+    # did not save separate geo columns.
+    if break_by in {"County", "Municipality", "Precinct"}:
+        hk_val = _gr_household_key_geo(row, break_by)
+        if hk_val:
+            return hk_val
+
     # Fall back gracefully when the mobile result record does not carry every geo field yet.
     if break_by == "Precinct":
         return _gr_row_area(row)
@@ -14276,7 +14309,7 @@ def _gr_area_value_by_break(row: dict, break_by: str) -> str:
     return "Unknown"
 
 
-# C4.7.3 — Enrich grassroots reporting rows with assignment/list/packet geography.
+# C4.7.3# C4.7.3 — Enrich grassroots reporting rows with assignment/list/packet geography.
 def _gr_first_geo_value(source, *keys) -> str:
     """Return the first non-empty scalar/list value for a geo field."""
     if not isinstance(source, dict):
@@ -14457,22 +14490,48 @@ def _gr_geo_key(value: str) -> str:
 def _gr_contact_match_key(row: dict) -> str:
     """Stable voter key for matching synced contacts back to the campaign universe.
 
-    C4.7.6: mobile/web packages have used several voter-id field names over
-    time. Normalize all common aliases before falling back to name/address.
+    Important fix: older mobile rows sometimes stored a voter NAME in the
+    ``voter_id`` field. Do not treat those as real IDs. If the value has no
+    digits, fall back to name/address matching instead of creating a fake VID key
+    that can never match the voter file.
     """
     if not isinstance(row, dict):
         return ""
+
     voter_aliases = [
         "voter_id", "VoterID", "Voter ID", "VoterId", "voterId",
         "PAID", "PA_ID", "PA ID", "PA ID Number", "PA_ID_Number",
         "PA_Voter_ID", "SURE_ID", "StateVoterID", "IDNumber", "ID Number",
     ]
+
+    skipped_name_like_id = ""
     for key in voter_aliases:
         val = _gr_clean(row.get(key))
-        if val:
-            return "VID:" + re.sub(r"[^A-Z0-9]", "", val.upper())
-    name = _gr_clean(row.get("voter_name") or row.get("FullName") or row.get("full_name") or row.get("Name") or row.get("name")).upper()
-    addr = _gr_clean(row.get("res_address") or row.get("address") or row.get("household_address") or row.get("Residential Address") or row.get("Address")).upper()
+        if not val:
+            continue
+        # Real PA voter IDs contain digits. Names accidentally saved into voter_id
+        # do not. Treat name-like voter_id values as names, not IDs.
+        if not re.search(r"\d", val):
+            if key.lower().replace(" ", "_") in {"voter_id", "voterid", "voter_id"}:
+                skipped_name_like_id = val
+            continue
+        return "VID:" + re.sub(r"[^A-Z0-9]", "", val.upper())
+
+    name = _gr_clean(
+        row.get("voter_name")
+        or skipped_name_like_id
+        or row.get("FullName")
+        or row.get("full_name")
+        or row.get("Name")
+        or row.get("name")
+    ).upper()
+    addr = _gr_clean(
+        row.get("res_address")
+        or row.get("address")
+        or row.get("household_address")
+        or row.get("Residential Address")
+        or row.get("Address")
+    ).upper()
     if name or addr:
         return "NA:" + re.sub(r"\s+", " ", name) + "|" + re.sub(r"\s+", " ", addr)
     return ""
@@ -14759,14 +14818,19 @@ def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int =
 
 
 def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
-    """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row."""
-    if not rows or not universe_rows:
-        return rows or []
+    """If a mobile sync row lacks precinct/municipality, copy it from the matched voter row.
+
+    Also parse county/municipality/precinct directly from household_key, because
+    field results synced from the mobile app already carry that voter-package key.
+    """
+    if not rows:
+        return []
     voter_by_key = {}
     for v in universe_rows or []:
         key = _gr_contact_match_key(v)
         if key:
             voter_by_key[key] = v
+
     out = []
     geo_keys = [
         ("County", "county"),
@@ -14780,6 +14844,17 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
     ]
     for raw in rows or []:
         r = dict(raw or {})
+
+        # Household key is authoritative for these three fields in mobile results:
+        # COUNTY|MUNICIPALITY|PRECINCT|ADDRESS.
+        for display_key, lower_key in [("County", "county"), ("Municipality", "municipality"), ("Precinct", "precinct")]:
+            hk_val = _gr_household_key_geo(r, display_key)
+            if hk_val:
+                if not _gr_clean(r.get(display_key)):
+                    r[display_key] = hk_val
+                if not _gr_clean(r.get(lower_key)):
+                    r[lower_key] = hk_val
+
         v = voter_by_key.get(_gr_contact_match_key(r), {})
         if v:
             for display_key, lower_key in geo_keys:
@@ -14792,18 +14867,46 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
 
 
 def _gr_filter_contacts_to_universe(rows: list[dict], universe_rows: list[dict]) -> list[dict]:
-    """Keep report scope tied to the current program/list universe; avoid deleted list residue when possible."""
+    """Keep report scope tied to the selected universe without dropping valid mobile contacts.
+
+    Older mobile rows can have voter names in voter_id or household-level records.
+    Those are still valid campaign contacts and should count. If the direct voter
+    key does not match, retain rows that carry campaign household_key geography.
+    """
     if not rows or not universe_rows:
         return rows or []
-    universe_keys = { _gr_contact_match_key(v) for v in universe_rows or [] if _gr_contact_match_key(v) }
+
+    universe_keys = {_gr_contact_match_key(v) for v in universe_rows or [] if _gr_contact_match_key(v)}
     if not universe_keys:
         return rows or []
+
+    # Valid campaign area keys let us keep household-key-based mobile rows that
+    # don't match by voter id/name formatting but clearly belong in the universe.
+    valid_counties = {_gr_geo_key(_gr_area_value_by_break(v, "County")) for v in universe_rows or []}
+    valid_munis = {_gr_geo_key(_gr_area_value_by_break(v, "Municipality")) for v in universe_rows or []}
+    valid_precincts = {_gr_geo_key(_gr_area_value_by_break(v, "Precinct")) for v in universe_rows or []}
+
     filtered = []
     for r in rows or []:
         key = _gr_contact_match_key(r)
-        # Keep rows without a voter key because some older mobile rows only have household/notes.
-        if not key or key in universe_keys:
+        if key and key in universe_keys:
             filtered.append(r)
+            continue
+
+        # Do not drop synced mobile results from the campaign package just because
+        # the voter id field was malformed in older mobile app versions.
+        hk_county = _gr_geo_key(_gr_household_key_geo(r, "County"))
+        hk_muni = _gr_geo_key(_gr_household_key_geo(r, "Municipality"))
+        hk_precinct = _gr_geo_key(_gr_household_key_geo(r, "Precinct"))
+        if (hk_county and hk_county in valid_counties) or (hk_muni and hk_muni in valid_munis) or (hk_precinct and hk_precinct in valid_precincts):
+            filtered.append(r)
+            continue
+
+        # If there is no usable key at all, keep it visible rather than silently
+        # making Dashboard and Reporting disagree.
+        if not key:
+            filtered.append(r)
+
     return filtered
 
 
