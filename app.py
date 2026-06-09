@@ -269,9 +269,9 @@ p, label, .stMarkdown, [data-testid="stMarkdownContainer"] {
 [data-testid="stSidebar"] {
     background: #e6ddcc !important;
     border-right: 2px solid #9f151c !important;
-    min-width: 300px !important;
-    width: 300px !important;
-    max-width: 300px !important;
+    min-width: 400px !important;
+    width: 400px !important;
+    max-width: 400px !important;
 }
 
 [data-testid="stSidebar"] > div:first-child {
