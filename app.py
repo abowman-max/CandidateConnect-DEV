@@ -12815,18 +12815,31 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
     # so relying only on _user_matches_campaign can exclude valid assignable users.
     # visible_user_records_for_current_user already applies campaign security for
     # non-super-admin users, so this is the safest fallback source.
+    # 2a) Include every app/security account visible to the current campaign admin.
+    # This is the assignment source of truth for mobile work: if the account appears
+    # under Account Admin / Current Accounts for this campaign, it can receive a work package.
     visible_usernames = set()
+    visible_users_map = {}
     try:
         visible_users_map = visible_user_records_for_current_user(users_obj) if isinstance(users_obj, dict) else {}
         if isinstance(visible_users_map, dict):
             visible_usernames = {str(k).strip().lower() for k in visible_users_map.keys()}
-            merged = {str(k).strip(): v for k, v in user_items}
-            for k, v in visible_users_map.items():
-                if isinstance(v, dict):
-                    merged.setdefault(str(k).strip(), v)
-            user_items = list(merged.items())
     except Exception:
+        visible_users_map = {}
         visible_usernames = set()
+
+    merged_users = {}
+    # First add explicitly visible campaign accounts. This intentionally does not
+    # require the older program user_ids relationship.
+    if isinstance(visible_users_map, dict):
+        for k, v in visible_users_map.items():
+            if isinstance(v, dict):
+                merged_users[str(k).strip()] = v
+    # Then add any security records that match the campaign by id/name/scope alias.
+    for k, v in user_items:
+        if isinstance(v, dict) and (str(k).strip().lower() in visible_usernames or _user_matches_campaign(v, aliases)):
+            merged_users.setdefault(str(k).strip(), v)
+    user_items = list(merged_users.items())
 
     existing_emails = {_email_key(p) for p in active if _email_key(p)}
     existing_ids = {_safe_clean(p.get("person_id")) for p in active if _safe_clean(p.get("person_id"))}
@@ -12841,9 +12854,6 @@ def _program_user_labels(campaign_id: str) -> tuple[list[dict], list[str], dict[
             continue
         status_l = _safe_clean(u.get("status") or u.get("account_status") or "active").lower()
         if status_l in {"disabled", "inactive", "denied", "deleted", "rejected", "pending", "pending_approval"}:
-            continue
-        uname_key = str(username or "").strip().lower()
-        if not (uname_key in visible_usernames or _user_matches_campaign(u, aliases)):
             continue
         person = _security_user_to_person(username, u)
         ek = _email_key(person)
@@ -13876,11 +13886,11 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
         with a2:
             st.metric("Assigned", f"{sum(1 for x in saved if (x.get('assigned_to_list') if isinstance(x.get('assigned_to_list'), list) else []) or (clean_value(x.get('assigned_to')) and clean_value(x.get('assigned_to')).lower() not in {'unassigned', 'unassigned / candidate'})):,}")
         with a3:
-            st.metric("Program Users", f"{len(assignee_labels):,}")
+            st.metric("Assignable Users", f"{len(assignee_labels):,}")
         if not saved:
             st.info("No saved work items yet. Build and save a candidate walk package first.")
         elif not assignee_labels:
-            st.info("Add program users on the Users tab before assigning door-to-door work.")
+            st.info("Create/link Field App logins or campaign accounts in Campaign Organization / Account Admin before assigning door-to-door work.")
         else:
             def _a331_area_label(x):
                 street = clean_value(x.get("selected_street"))
@@ -13938,7 +13948,7 @@ def render_program_door_to_door_a3(campaign_id: str, program: dict, people_looku
                     assignee_labels,
                     default=existing_assignees,
                     key=f"a33_assign_users_multi_{campaign_id}_{pid}_{selected_id}_{key_suffix}",
-                    help="Select one or more program users. The same work item can be published to each selected user's mobile app.",
+                    help="Select one or more campaign accounts / field app users. The same work item can be published to each selected user's mobile app.",
                 )
                 status = st.selectbox("Status", ["Ready", "Assigned", "In Progress", "Completed", "Paused"], index=1, key=f"a33_assign_status_{campaign_id}_{pid}_{key_suffix}")
             with c2:
@@ -14268,7 +14278,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
 
     with create_edit_tab:
         st.markdown("#### Create/Edit Programs")
-        st.caption("Create a new contact program or update an existing program's users, channels, universe, status, and notes.")
+        st.caption("Create or update the program name, universe, channel, status, and notes. Worker assignment now happens only on Build & Assign → Assign so there is one clear source of truth.")
 
         if programs:
             current = _program_select_c46(programs, campaign_id, "create_edit")
@@ -14296,7 +14306,8 @@ def render_program_manager_a2(campaign_id: str | None = None):
 
                     user_col, channel_col = st.columns([1.55, 1.0])
                     with user_col:
-                        e_users = cc_checkbox_multiselect("Program users", user_labels, default=current_user_labels, key_prefix=f"program_users_edit_{campaign_id}_{pid}", columns=1)
+                        st.markdown("<div class='cc-pillbox'><b>Assignment users</b><br><span style='color:#5f6b7a'>Assign workers on Build & Assign → Assign. Eligible users come from Account Admin / Field App logins.</span></div>", unsafe_allow_html=True)
+                        e_users = current_user_labels
                     with channel_col:
                         e_channels = cc_checkbox_multiselect("Channels", channel_options, default=[c for c in current_channels if c in channel_options], key_prefix=f"program_channels_edit_{campaign_id}_{pid}", columns=1)
 
@@ -14335,7 +14346,8 @@ def render_program_manager_a2(campaign_id: str | None = None):
                 with b:
                     status = st.selectbox("Status", status_options, index=status_options.index("Planning") if "Planning" in status_options else 0, key=f"pm_c46_status_{campaign_id}")
                     channels = cc_checkbox_multiselect("Channels", channel_options, default=["Door-to-Door"], key_prefix=f"program_channels_create_{campaign_id}", columns=1)
-                    assigned_users = cc_checkbox_multiselect("Program users", user_labels, default=[], key_prefix=f"program_users_create_{campaign_id}", columns=1)
+                    st.markdown("<div class='cc-pillbox'><b>Assignment users</b><br><span style='color:#5f6b7a'>After creating the program, assign work to Account Admin / Field App users on Build & Assign → Assign.</span></div>", unsafe_allow_html=True)
+                    assigned_users = []
                 with c:
                     start_date = st.text_input("Start date", placeholder="2026-06-01", key=f"pm_c46_start_{campaign_id}")
                     end_date = st.text_input("End date", placeholder="2026-11-03", key=f"pm_c46_end_{campaign_id}")
