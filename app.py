@@ -12493,6 +12493,7 @@ def render_outreach_dashboard_v1(campaign_id: str, panel_id: str = "dashboard") 
     total_voters = int(counts.get("total_voters") or 0)
     completed_voters = int(counts.get("completed_voters") or 0)
     package_results = counts.get("package_results") or {}
+    list_program_lookup = counts.get("list_program_lookup") or {}
     remaining_voters = max(total_voters - completed_voters, 0)
     pct_complete = float(counts.get("completion_pct") or ((completed_voters / total_voters * 100.0) if total_voters else 0.0))
     mobile = counts.get("mobile") or _c46_mobile_outreach_summary(campaign_id)
