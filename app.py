@@ -2317,6 +2317,8 @@ def _cc_create_persistent_login(store: dict, username: str, days: int = 14) -> s
     return token
 
 def _cc_restore_persistent_login(store: dict) -> bool:
+    if st.session_state.get("cc_force_logout"):
+        return False
     if st.session_state.get("auth_user"):
         return True
     token = str(st.session_state.get("cc_session_token") or _cc_get_query_param("cc_session") or "").strip()
@@ -2348,8 +2350,13 @@ def _cc_logout_current_browser(store: dict | None = None) -> None:
             save_security_store(store)
         except Exception:
             pass
-    for _k in ["auth_user", "auth_username", "cc_session_token"]:
+    st.session_state["cc_force_logout"] = True
+    for _k in ["auth_user", "auth_username", "cc_session_token", "left_section", "view"]:
         st.session_state.pop(_k, None)
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     _cc_clear_persistent_login_token()
 
 
@@ -3644,6 +3651,7 @@ def render_security_gate():
         elif user.get("password_hash") != _password_hash(username_clean, password):
             st.error("Invalid username or password.")
         else:
+            st.session_state.pop("cc_force_logout", None)
             st.session_state["auth_username"] = username_clean
             st.session_state["auth_user"] = user
             if remember_me:
@@ -15755,6 +15763,123 @@ def _gr_universe_rows_for_sources(sources: list[str], max_rows_per_source: int =
     return list(by_key.values())
 
 
+def _gr_package_source_universes_for_reporting(campaign_id: str, selected_program: str = "All Programs") -> list[str]:
+    """Saved-universe names carried by current work packages.
+
+    Reporting uses work packages as the assigned-count source, but those package
+    rows can be slim. This gives us the original saved universe so district fields
+    (school/state/congressional) can be copied back without widening scope.
+    """
+    try:
+        programs = load_outreach_programs_store(campaign_id).get("programs") or []
+    except Exception:
+        programs = []
+    pid_to_name = {_gr_clean(p.get("program_id")): _gr_clean(p.get("name")) for p in programs if _gr_clean(p.get("program_id"))}
+    try:
+        packages = load_program_candidate_walk_packages_store(campaign_id).get("packages") or []
+    except Exception:
+        packages = []
+    out, seen = [], set()
+    for pkg in packages or []:
+        if not isinstance(pkg, dict):
+            continue
+        pname = _gr_clean(pkg.get("program_name")) or pid_to_name.get(_gr_clean(pkg.get("program_id")), "")
+        if selected_program != "All Programs" and pname != selected_program:
+            continue
+        inner = pkg.get("package") if isinstance(pkg.get("package"), dict) else {}
+        for src_obj in (pkg, inner, inner.get("program") if isinstance(inner.get("program"), dict) else {}, inner.get("assignment") if isinstance(inner.get("assignment"), dict) else {}):
+            if not isinstance(src_obj, dict):
+                continue
+            src = _gr_clean(src_obj.get("source_saved_universe") or src_obj.get("saved_universe") or src_obj.get("universe") or src_obj.get("universe_name"))
+            if src and src not in seen:
+                seen.add(src); out.append(src)
+    return out
+
+
+def _gr_enrich_universe_rows_from_full_sources(campaign_id: str, selected_program: str, universe_rows: list[dict]) -> list[dict]:
+    """Fill missing school/state/congressional fields on assigned-package rows.
+
+    This prevents Reporting from showing "Unknown" / "Unmatched Contact Records"
+    for district breaks when the current work package contains only mobile-lite
+    voter rows. The assigned count still comes from the package; only missing
+    geography is copied from the original saved universe or campaign voter rows.
+    """
+    if not universe_rows:
+        return universe_rows or []
+
+    sources = []
+    seen_sources = set()
+    for src in (_gr_package_source_universes_for_reporting(campaign_id, selected_program) + _gr_source_universes_for_reporting(campaign_id, selected_program)):
+        if src and src not in seen_sources:
+            seen_sources.add(src); sources.append(src)
+
+    full_rows = []
+    if sources:
+        try:
+            full_rows = _gr_universe_rows_for_sources(sources, max_rows_per_source=150000)
+        except Exception:
+            full_rows = []
+
+    # If the source universe could not be read, fall back to campaign scope.
+    # We only use it for matching/enrichment, never for assigned totals.
+    if not full_rows:
+        try:
+            full_rows = _gr_campaign_universe_rows_for_reporting(max_rows=200000)
+        except Exception:
+            full_rows = []
+
+    if not full_rows:
+        return universe_rows or []
+
+    full_by_key, full_by_hh = {}, {}
+    full_by_precinct = {}
+    geo_fields = [
+        ("County", "county"), ("Municipality", "municipality"), ("Precinct", "precinct"),
+        ("School District", "school_district"), ("School Region", "school_region"),
+        ("State House", "state_house"), ("State Senate", "state_senate"), ("Congressional", "congressional"),
+        ("Party", "party"), ("Gender", "gender"), ("Age", "age"),
+    ]
+
+    for v in full_rows or []:
+        if not isinstance(v, dict):
+            continue
+        ck = _gr_contact_match_key(v)
+        hk = _gr_household_match_key(v)
+        if ck and ck not in full_by_key:
+            full_by_key[ck] = v
+        if hk and hk not in full_by_hh:
+            full_by_hh[hk] = v
+        pk = _gr_geo_key(_gr_area_value_by_break(v, "Precinct"))
+        if pk:
+            cur = full_by_precinct.get(pk)
+            vals = {dk: _gr_clean(v.get(dk) or v.get(lk)) for dk, lk in geo_fields}
+            if not cur:
+                full_by_precinct[pk] = vals
+            else:
+                for dk, val in vals.items():
+                    if cur.get(dk) and val and _gr_geo_key(cur.get(dk)) != _gr_geo_key(val):
+                        cur[dk] = ""
+
+    out = []
+    for raw in universe_rows or []:
+        r = dict(raw or {})
+        full = full_by_key.get(_gr_contact_match_key(r)) or full_by_hh.get(_gr_household_match_key(r)) or {}
+        if not full:
+            pk = _gr_geo_key(_gr_area_value_by_break(r, "Precinct"))
+            if pk:
+                full = full_by_precinct.get(pk) or {}
+        for dk, lk in geo_fields:
+            val = _gr_clean((full or {}).get(dk) or (full or {}).get(lk))
+            if not val:
+                continue
+            if (not _gr_clean(r.get(dk))) or _gr_is_blank_geo_value(r.get(dk)):
+                r[dk] = val
+            if (not _gr_clean(r.get(lk))) or _gr_is_blank_geo_value(r.get(lk)):
+                r[lk] = val
+        out.append(r)
+    return out
+
+
 def _gr_universe_rows_from_assigned_work_packages(campaign_id: str, selected_program: str = "All Programs") -> list[dict]:
     """Return voter rows from the current assigned Grassroots work packages.
 
@@ -16301,6 +16426,10 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
         universe_rows = _gr_universe_rows_for_sources(universe_sources, max_rows_per_source=75000)
     if not universe_rows:
         universe_rows = _gr_campaign_universe_rows_for_reporting(max_rows=150000)
+
+    # C4.7.9: assigned work packages can be mobile-lite. Reattach full voter
+    # geography for district/school breaks without changing the assigned count.
+    universe_rows = _gr_enrich_universe_rows_from_full_sources(campaign_id, selected_program, universe_rows)
 
     if selected_program != "All Programs":
         rows = [r for r in rows_all if _gr_row_program(r) == selected_program]
