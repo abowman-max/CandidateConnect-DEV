@@ -12999,6 +12999,186 @@ def _program_contact_list_ids(campaign_id: str, program_id: str) -> set[str]:
     return {clean_value(cl.get("list_id")) for cl in contact_lists if clean_value(cl.get("program_id")) == clean_value(program_id)}
 
 
+
+def _c46_mobile_item_program_id(item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    vals = [
+        item.get("program_id"),
+        (item.get("program") or {}).get("program_id") if isinstance(item.get("program"), dict) else "",
+        (item.get("package") or {}).get("program", {}).get("program_id") if isinstance(item.get("package"), dict) and isinstance((item.get("package") or {}).get("program"), dict) else "",
+    ]
+    for v in vals:
+        v = clean_value(v)
+        if v:
+            return v
+    return ""
+
+
+def _c46_mobile_item_program_name(item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    vals = [
+        item.get("program_name"),
+        (item.get("program") or {}).get("name") if isinstance(item.get("program"), dict) else "",
+        (item.get("package") or {}).get("program", {}).get("name") if isinstance(item.get("package"), dict) and isinstance((item.get("package") or {}).get("program"), dict) else "",
+        item.get("assignment_name"),
+        item.get("label"),
+    ]
+    for v in vals:
+        v = clean_value(v)
+        if v:
+            return v
+    return ""
+
+
+def _c46_mobile_item_assignment_key(item: dict) -> str:
+    try:
+        return _c433_assignment_merge_key(item)
+    except Exception:
+        pass
+    vals = [
+        item.get("assignment_id") if isinstance(item, dict) else "",
+        item.get("source_work_item_id") if isinstance(item, dict) else "",
+        (item.get("assignment") or {}).get("mobile_assignment_id") if isinstance(item, dict) and isinstance(item.get("assignment"), dict) else "",
+        (item.get("assignment") or {}).get("source_work_item_id") if isinstance(item, dict) and isinstance(item.get("assignment"), dict) else "",
+    ]
+    for v in vals:
+        v = clean_value(v)
+        if v:
+            return v
+    return ""
+
+
+def _c46_mobile_item_matches(item: dict, program_id: str = "", program_name: str = "", work_item_id: str = "") -> bool:
+    program_id = clean_value(program_id)
+    program_name = clean_value(program_name)
+    work_item_id = clean_value(work_item_id)
+    if work_item_id:
+        key = _c46_mobile_item_assignment_key(item)
+        if key and key == work_item_id:
+            return True
+        if clean_value(item.get("assignment_id")) == work_item_id or clean_value(item.get("source_work_item_id")) == work_item_id:
+            return True
+    if program_id and _c46_mobile_item_program_id(item) == program_id:
+        return True
+    if program_name:
+        pname = _c46_mobile_item_program_name(item)
+        if pname and pname.lower() == program_name.lower():
+            return True
+        # Assignment labels often include "Program — Whole Universe".
+        if pname and program_name.lower() in pname.lower():
+            return True
+    return False
+
+
+def _c46_list_mobile_assignment_user_paths(campaign_id: str) -> list[str]:
+    prefix = f"app_state/mobile_assignments/{_ops_slug(campaign_id)}/"
+    client, _target_name, bucket, err = _r2_client_for_current_app()
+    if client is None:
+        return []
+    paths = []
+    try:
+        token = None
+        while True:
+            kwargs = {"Bucket": bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents") or []:
+                key = clean_value(obj.get("Key"))
+                if key.endswith(".json"):
+                    paths.append(key)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+    except Exception:
+        return []
+    return paths
+
+
+def _c46_username_from_assignment_label(campaign_id: str, label: str) -> str:
+    label = clean_value(label)
+    if not label:
+        return ""
+    try:
+        pkg = {"campaign_id": _ops_slug(campaign_id), "assignment": {"assigned_to": label}}
+        username, _why = _c433_resolve_field_username_for_mobile_package(campaign_id, pkg)
+        return clean_value(username)
+    except Exception:
+        pass
+    first = clean_value(re.split(r"\s+[—-]\s+", label, maxsplit=1)[0])
+    return first
+
+
+def _c46_remove_mobile_assignments_for_scope(
+    campaign_id: str,
+    *,
+    usernames: list[str] | None = None,
+    labels: list[str] | None = None,
+    program_id: str = "",
+    program_name: str = "",
+    work_item_id: str = "",
+) -> tuple[int, int, list[str]]:
+    """Remove stale/deleted assignment items from per-user mobile files.
+
+    Used when a program is deleted or a worker is removed from an assignment.
+    The mobile app treats the server file as source of truth on refresh, so
+    writing filtered files makes old lists disappear from the field app.
+    """
+    paths = []
+    if usernames:
+        for u in usernames:
+            u = clean_value(u)
+            if u:
+                paths.append(_c433_mobile_assignment_user_path(campaign_id, u))
+    if labels:
+        for label in labels:
+            u = _c46_username_from_assignment_label(campaign_id, label)
+            if u:
+                paths.append(_c433_mobile_assignment_user_path(campaign_id, u))
+    if not paths:
+        paths = _c46_list_mobile_assignment_user_paths(campaign_id)
+
+    paths = sorted(set(paths))
+    files_changed = 0
+    items_removed = 0
+    messages = []
+    for path in paths:
+        try:
+            raw = _ops_json_get(path, {})
+        except Exception as exc:
+            messages.append(f"{path}: read failed: {exc}")
+            continue
+        existing = _c433_existing_mobile_assignments_for_user(path)
+        if not existing:
+            continue
+        kept = []
+        removed_here = 0
+        for item in existing:
+            if _c46_mobile_item_matches(item, program_id=program_id, program_name=program_name, work_item_id=work_item_id):
+                removed_here += 1
+            else:
+                kept.append(item)
+        if removed_here <= 0:
+            continue
+        payload = {
+            "version": 3,
+            "package_type": "candidate_connect_field_user_assignments",
+            "campaign_id": _ops_slug(campaign_id),
+            "username": clean_value((raw or {}).get("username") or path.rsplit("/", 1)[-1].replace(".json", "")),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "replace_local_assignments": True,
+            "assignments": kept,
+        }
+        ok, msg = _put_json_to_r2_key(path, payload)
+        if ok:
+            files_changed += 1
+            items_removed += removed_here
+        else:
+            messages.append(f"{path}: write failed: {msg}")
+    return files_changed, items_removed, messages
+
 def _cascade_delete_program_a21(campaign_id: str, program_id: str) -> tuple[bool, str, dict]:
     """Delete a program and its child lists, assignments, and walk packets. Campaign users are never deleted."""
     program_id = clean_value(program_id)
@@ -13039,6 +13219,27 @@ def _cascade_delete_program_a21(campaign_id: str, program_id: str) -> tuple[bool
     if not ok: return False, msg, summary
     ok, msg = save_walk_packets_store(campaign_id, packet_store)
     if not ok: return False, msg, summary
+
+    # C4.6.46: deleted programs must disappear from the Field App after refresh.
+    # Remove matching assignment items from every campaign mobile user package.
+    program_name = ""
+    for p in programs:
+        if clean_value(p.get("program_id")) == program_id:
+            program_name = clean_value(p.get("name"))
+            break
+    try:
+        files_changed, mobile_removed, purge_msgs = _c46_remove_mobile_assignments_for_scope(
+            campaign_id,
+            program_id=program_id,
+            program_name=program_name,
+        )
+        summary["mobile_files"] = files_changed
+        summary["mobile_assignments"] = mobile_removed
+        if purge_msgs:
+            summary["mobile_purge_warnings"] = purge_msgs[:3]
+    except Exception as exc:
+        summary["mobile_purge_error"] = str(exc)
+
     return True, "Program and child outreach work deleted. Campaign users were not deleted.", summary
 
 
@@ -13685,12 +13886,22 @@ def _a34_save_mobile_assignment_package(campaign_id: str, package: dict) -> tupl
     if not archive_ok:
         return False, archive_msg
 
-    # No assignee selected: keep the old behavior and let the resolver return a clear message.
+    # C4.6.46: server package is source of truth. Before publishing this work item
+    # to the selected assignees, remove the same work item from all campaign mobile
+    # user files. This is what turns off a list for a user after they are removed.
+    try:
+        work_item_key = clean_value(assignment.get("source_work_item_id") or mobile_id)
+        _c46_remove_mobile_assignments_for_scope(
+            campaign_id,
+            program_id=clean_value(((package or {}).get("program") or {}).get("program_id")),
+            program_name=clean_value(((package or {}).get("program") or {}).get("name")),
+            work_item_id=work_item_key,
+        )
+    except Exception:
+        pass
+
     if not assignee_list:
-        publish_ok, publish_msg = _c433_publish_a34_package_to_field_user(campaign_id, package)
-        if not publish_ok:
-            return False, publish_msg
-        return True, publish_msg
+        return True, "No users selected. Existing mobile copies of this work item were removed."
 
     messages = []
     failures = []
@@ -14358,35 +14569,75 @@ def _program_manager_top_workers_c46(counts: dict, people_lookup: dict, user_id_
 
 
 def _program_manager_program_rows_c46(programs: list[dict], counts: dict, user_id_to_label: dict) -> list[dict]:
-    list_counts = {}
-    for cl in counts.get("contact_lists") or []:
-        pid = clean_value(cl.get("program_id"))
-        if pid:
-            list_counts[pid] = list_counts.get(pid, 0) + 1
+    """Program-level operations summary.
+
+    C4.6.46: replace the old Top Workers table with the table the campaign
+    manager actually needs: program, assigned people, households/voters,
+    contacted, completion, and follow-up load. Counts come from the same work
+    package + mobile-results source used by Build & Assign.
+    """
     assignment_counts = {}
     assigned_voters = {}
+    assigned_households = {}
+    assigned_users = {}
     for a in counts.get("assignments") or []:
         pid = clean_value(a.get("program_id")) or clean_value(counts.get("list_program_lookup", {}).get(clean_value(a.get("list_id"))))
-        if pid:
-            assignment_counts[pid] = assignment_counts.get(pid, 0) + 1
-            assigned_voters[pid] = assigned_voters.get(pid, 0) + int(a.get("voter_count") or a.get("assigned_voters") or 0)
+        if not pid:
+            continue
+        assignment_counts[pid] = assignment_counts.get(pid, 0) + 1
+        assigned_voters[pid] = assigned_voters.get(pid, 0) + int(a.get("voter_count") or a.get("assigned_voters") or 0)
+        assigned_households[pid] = assigned_households.get(pid, 0) + int(a.get("household_count") or a.get("assigned_households") or 0)
+        assignees = a.get("assigned_to_list") if isinstance(a.get("assigned_to_list"), list) else []
+        if not assignees:
+            single = clean_value(a.get("assigned_to") or a.get("team_member_name"))
+            if single and single.lower() not in {"unassigned", "unassigned / candidate"}:
+                assignees = [x.strip() for x in re.split(r"\s*;\s*", single) if x.strip()]
+        assigned_users.setdefault(pid, set()).update(clean_value(x) for x in assignees if clean_value(x))
+
+    contacts_by_program = {}
+    followups_by_program = {}
+    mobile_rows = (counts.get("mobile") or {}).get("synced_rows") or []
+    for r in mobile_rows:
+        pid = clean_value(r.get("program_id") or r.get("program"))
+        pname = clean_value(r.get("program_name") or "")
+        if not pid and pname:
+            for p in programs:
+                if clean_value(p.get("name")).lower() == pname.lower():
+                    pid = clean_value(p.get("program_id"))
+                    break
+        if not pid:
+            # Last-resort: assignment name often begins with the program/list name.
+            aname = clean_value(r.get("assignment_name") or "")
+            for p in programs:
+                if clean_value(p.get("name")) and clean_value(p.get("name")).lower() in aname.lower():
+                    pid = clean_value(p.get("program_id"))
+                    break
+        if not pid:
+            continue
+        contacts_by_program[pid] = contacts_by_program.get(pid, 0) + 1
+        if bool(r.get("follow_up")) or clean_value(r.get("follow_up")).lower() in {"true", "yes", "1", "y"}:
+            followups_by_program[pid] = followups_by_program.get(pid, 0) + 1
+
     rows = []
     for p in programs:
         pid = clean_value(p.get("program_id"))
         channels = ", ".join(_program_channels(p)) or clean_value(p.get("program_type")) or "—"
-        users = len(_program_user_ids(p))
+        users = sorted([x for x in assigned_users.get(pid, set()) if x])
+        user_display = "; ".join(users[:3]) + (f" +{len(users)-3}" if len(users) > 3 else "")
+        voters = int(assigned_voters.get(pid, 0) or 0)
+        households = int(assigned_households.get(pid, 0) or 0)
+        contacted = int(contacts_by_program.get(pid, 0) or 0)
+        pct = (contacted / voters * 100.0) if voters else 0.0
         rows.append({
             "Program": clean_value(p.get("name")) or "Unnamed",
-            "Status": clean_value(p.get("status")) or "Planning",
-            "Type": channels,
-            "Users": users,
-            "Lists": list_counts.get(pid, 0),
-            "Assignments": assignment_counts.get(pid, 0),
-            "Assigned Voters": f"{assigned_voters.get(pid, 0):,}",
-            "Next Step": "Build list" if list_counts.get(pid, 0) == 0 else ("Assign work" if assignment_counts.get(pid, 0) == 0 else "Track results"),
+            "Assigned To": user_display or "Unassigned",
+            "Households": f"{households:,}",
+            "Voters": f"{voters:,}",
+            "Contacted": f"{contacted:,}",
+            "Completion": f"{pct:.1f}%",
+            "Open Follow-Ups": f"{int(followups_by_program.get(pid, 0) or 0):,}",
         })
     return rows
-
 
 def _program_select_c46(programs: list[dict], campaign_id: str, key_suffix: str = "main") -> dict | None:
     if not programs:
@@ -14432,10 +14683,6 @@ def render_program_manager_a2(campaign_id: str | None = None):
     )
     st.markdown(snap_html, unsafe_allow_html=True)
 
-    worker_rows = _program_manager_top_workers_c46(counts, people_lookup, user_id_to_label, limit=5)
-    if worker_rows:
-        st.markdown(_c46_html_table(worker_rows, ["Worker", "Program", "Completed", "Completion"], title="Top Workers", max_rows=5), unsafe_allow_html=True)
-
     overview_tab, create_edit_tab, build_assign_tab = st.tabs(["Overview", "Create/Edit Programs", "Build & Assign"])
 
     with overview_tab:
@@ -14443,7 +14690,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
         st.caption("Active program list. Setup and edits live under Create/Edit Programs. Work packaging and assignment live under Build & Assign.")
         rows = _program_manager_program_rows_c46(programs, counts, user_id_to_label)
         if rows:
-            st.markdown(_c46_html_table(rows, ["Program", "Status", "Type", "Users", "Lists", "Assignments", "Assigned Voters", "Next Step"], max_rows=12), unsafe_allow_html=True)
+            st.markdown(_c46_html_table(rows, ["Program", "Assigned To", "Households", "Voters", "Contacted", "Completion", "Open Follow-Ups"], max_rows=50), unsafe_allow_html=True)
         else:
             st.info("No programs yet. Create the first outreach program from the Create/Edit Programs tab.")
 
@@ -14525,7 +14772,7 @@ def render_program_manager_a2(campaign_id: str | None = None):
                         st.success(
                             f"Program deleted. Removed {summary.get('lists', 0)} list(s), "
                             f"{summary.get('assignments', 0)} assignment(s), and "
-                            f"{summary.get('packets', 0)} walk packet(s)."
+                            f"{summary.get('packets', 0)} walk packet(s), and " + f"{summary.get('mobile_assignments', 0)} mobile assignment item(s)."
                         )
                         st.session_state.pop(f"pm_c46_open_program_id_{campaign_id}", None)
                         st.rerun()
