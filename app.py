@@ -13179,6 +13179,99 @@ def _c46_remove_mobile_assignments_for_scope(
             messages.append(f"{path}: write failed: {msg}")
     return files_changed, items_removed, messages
 
+
+def _c46_clean_orphaned_mobile_assignments(campaign_id: str) -> tuple[int, int, list[str]]:
+    """Remove mobile assignment items whose program no longer exists in the web app.
+
+    This repairs the common case where a program was deleted before cascade-cleanup
+    existed, leaving a stale item in each user's Field App assignment file.
+    """
+    try:
+        pstore = load_outreach_programs_store(campaign_id)
+        programs = pstore.get("programs") or []
+    except Exception as exc:
+        return 0, 0, [f"Could not load active programs: {exc}"]
+
+    active_ids = {
+        clean_value(p.get("program_id"))
+        for p in programs
+        if clean_value(p.get("program_id"))
+        and clean_value(p.get("status")).lower() not in {"deleted", "archived"}
+    }
+    active_names = {
+        clean_value(p.get("name")).lower()
+        for p in programs
+        if clean_value(p.get("name"))
+        and clean_value(p.get("status")).lower() not in {"deleted", "archived"}
+    }
+
+    def _matches_active_name(name: str) -> bool:
+        n = clean_value(name).lower()
+        if not n:
+            return True  # Do not delete unknown/legacy rows blindly.
+        if n in active_names:
+            return True
+        # Mobile labels commonly look like "Program Name — Whole Universe".
+        for active in active_names:
+            if n.startswith(active + " —") or n.startswith(active + " -") or n.startswith(active + " –"):
+                return True
+        return False
+
+    paths = _c46_list_mobile_assignment_user_paths(campaign_id)
+    files_changed = 0
+    items_removed = 0
+    messages: list[str] = []
+
+    for path in paths:
+        try:
+            raw = _ops_json_get(path, {})
+        except Exception as exc:
+            messages.append(f"{path}: read failed: {exc}")
+            continue
+
+        existing = _c433_existing_mobile_assignments_for_user(path)
+        if not existing:
+            continue
+
+        kept = []
+        removed_here = 0
+        for item in existing:
+            pid = _c46_mobile_item_program_id(item)
+            pname = _c46_mobile_item_program_name(item)
+
+            remove = False
+            if pid and active_ids and pid not in active_ids:
+                remove = True
+            elif pname and not _matches_active_name(pname):
+                remove = True
+
+            if remove:
+                removed_here += 1
+            else:
+                kept.append(item)
+
+        if removed_here <= 0:
+            continue
+
+        payload = {
+            "version": 3,
+            "package_type": "candidate_connect_field_user_assignments",
+            "campaign_id": _ops_slug(campaign_id),
+            "username": clean_value((raw or {}).get("username") or path.rsplit("/", 1)[-1].replace(".json", "")),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "replace_local_assignments": True,
+            "assignments": kept,
+        }
+        ok, msg = _put_json_to_r2_key(path, payload)
+        if ok:
+            files_changed += 1
+            items_removed += removed_here
+        else:
+            messages.append(f"{path}: write failed: {msg}")
+
+    return files_changed, items_removed, messages
+
+
 def _cascade_delete_program_a21(campaign_id: str, program_id: str) -> tuple[bool, str, dict]:
     """Delete a program and its child lists, assignments, and walk packets. Campaign users are never deleted."""
     program_id = clean_value(program_id)
@@ -14779,6 +14872,18 @@ def render_program_manager_a2(campaign_id: str | None = None):
                     else:
                         st.error(f"Could not delete program: {msg}")
 
+                st.markdown("---")
+                st.markdown("##### Clean Deleted Programs from Mobile")
+                st.caption("Use this if an old/deleted program still appears in Reporting or on the Field App. It removes mobile assignment items whose program no longer exists here.")
+                if st.button("Clean Orphaned Mobile Assignments", key=f"pm_c46_clean_orphan_mobile_{campaign_id}", type="secondary"):
+                    files_changed, items_removed, warnings = _c46_clean_orphaned_mobile_assignments(campaign_id)
+                    if items_removed:
+                        st.success(f"Removed {items_removed:,} stale mobile assignment item(s) from {files_changed:,} user file(s). Field users should tap Refresh / Download Assignments.")
+                    else:
+                        st.info("No orphaned mobile assignments were found.")
+                    if warnings:
+                        st.warning("Some cleanup warnings: " + " | ".join(warnings[:3]))
+
         with st.expander("Create New Program", expanded=not bool(programs)):
             with st.form(f"program_manager_c46_create_{campaign_id}"):
                 a, b, c = st.columns([1.2, 1, 1])
@@ -16164,7 +16269,20 @@ def render_grassroots_reporting_v1(campaign_id: str) -> None:
     rows_all = _gr_dedupe_rows(_gr_enrich_contacts_from_reporting_index(campaign_id, _gr_enrich_rows_with_assignment_geo(campaign_id, mobile.get("synced_rows") or mobile.get("rows") or [])))
     total_assigned_all = _gr_int(counts.get("total_voters"))
 
-    program_names = ["All Programs"] + sorted({ _gr_row_program(r) for r in rows_all if _gr_row_program(r) })
+    # C4.6.48: Reporting program scope is the current web-app program list.
+    # Do not let deleted/stale mobile assignments keep old programs alive forever.
+    active_program_names = sorted({
+        clean_value(p.get("name"))
+        for p in programs
+        if clean_value(p.get("name")) and clean_value(p.get("status")).lower() not in {"deleted", "archived"}
+    })
+    active_program_name_set = set(active_program_names)
+    rows_all = [
+        r for r in rows_all
+        if not _gr_row_program(r) or _gr_row_program(r) in active_program_name_set
+    ]
+
+    program_names = ["All Programs"] + active_program_names
     selected_program = st.selectbox("Program scope", program_names if program_names else ["All Programs"], key=f"gr_report_program_{campaign_id}")
     area_break = st.selectbox(
         "Area / district break",
