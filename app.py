@@ -15619,7 +15619,7 @@ def _gr_enrich_contacts_from_reporting_index(campaign_id: str, rows: list[dict])
         v = voter_by_key.get(_gr_contact_match_key(r), {})
         if v:
             for display_key, lower_key in geo_pairs:
-                val = _gr_clean(v.get(display_key) or v.get(lower_key))
+                val = _gr_read_geo_field(v, display_key, lower_key)
                 if not val:
                     continue
                 if (not _gr_clean(r.get(display_key))) or _gr_is_blank_geo_value(r.get(display_key)):
@@ -15628,6 +15628,41 @@ def _gr_enrich_contacts_from_reporting_index(campaign_id: str, rows: list[dict])
                     r[lower_key] = val
         out.append(r)
     return out
+
+
+def _gr_read_geo_field(row: dict, display_key: str, lower_key: str = "") -> str:
+    """Read a reporting geo field across Candidate Connect's common aliases.
+
+    Full voter rows usually store districts as STH/STS/USC, while mobile/report
+    rows may use friendly labels like State House/state_house. This helper keeps
+    contact enrichment from creating false Unknown/Unmatched rows for district
+    breaks.
+    """
+    if not isinstance(row, dict):
+        return ""
+    alias_map = {
+        "County": ["County", "county", "COUNTY", "county_name", "County Name"],
+        "Municipality": ["Municipality", "municipality", "MUNICIPALITY", "muni", "Muni", "municipality_clean", "Municipality_Clean", "Municipality_1"],
+        "Precinct": ["Precinct", "precinct", "precinct_name", "PrecinctName", "Voting Precinct", "selected_precinct"],
+        "School District": ["School District", "school_district", "SchoolDistrict", "schooldistrict"],
+        "School Region": ["School Region", "school_region", "SchoolRegion"],
+        "State House": ["State House", "state_house", "STH", "state_house_district", "State House District", "STH_DIST", "STH_District"],
+        "State Senate": ["State Senate", "state_senate", "STS", "state_senate_district", "State Senate District", "STS_DIST", "STS_District"],
+        "Congressional": ["Congressional", "congressional", "USC", "congressional_district", "Congressional District", "USC_DIST", "USC_District"],
+        "Party": ["Party", "party", "CalculatedParty"],
+        "Gender": ["Gender", "gender"],
+        "Age": ["Age", "age"],
+        "FullName": ["FullName", "full_name", "voter_name", "Name", "name"],
+    }
+    keys = list(alias_map.get(display_key, []))
+    for k in [display_key, lower_key]:
+        if k and k not in keys:
+            keys.append(k)
+    for k in keys:
+        val = _gr_clean(row.get(k))
+        if val and not _gr_is_blank_geo_value(val):
+            return val
+    return ""
 
 
 def _gr_source_universes_for_reporting(campaign_id: str, selected_program: str = "All Programs") -> list[str]:
@@ -15869,7 +15904,7 @@ def _gr_enrich_universe_rows_from_full_sources(campaign_id: str, selected_progra
             if pk:
                 full = full_by_precinct.get(pk) or {}
         for dk, lk in geo_fields:
-            val = _gr_clean((full or {}).get(dk) or (full or {}).get(lk))
+            val = _gr_read_geo_field((full or {}), dk, lk)
             if not val:
                 continue
             if (not _gr_clean(r.get(dk))) or _gr_is_blank_geo_value(r.get(dk)):
@@ -16000,7 +16035,7 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
             existing = precinct_geo.get(pk)
             candidate = {}
             for display_key, lower_key in geo_keys:
-                candidate[display_key] = _gr_clean(v.get(display_key) or v.get(lower_key))
+                candidate[display_key] = _gr_read_geo_field(v, display_key, lower_key)
             if not existing:
                 precinct_geo[pk] = candidate
             else:
@@ -16035,7 +16070,7 @@ def _gr_enrich_contacts_from_universe(rows: list[dict], universe_rows: list[dict
 
         if v:
             for display_key, lower_key in geo_keys:
-                val = _gr_clean(v.get(display_key) or v.get(lower_key))
+                val = _gr_read_geo_field(v, display_key, lower_key)
                 if not val:
                     continue
                 if ((not _gr_clean(r.get(display_key))) or _gr_is_blank_geo_value(r.get(display_key))):
