@@ -16836,51 +16836,43 @@ with st.sidebar:
     elif is_super_admin():
         st.caption("Dataset: Statewide")
 
-    # v28 DEV-only navigation cleanup:
-    # Keep Dashboard top-level, then group operational areas into collapsible rollups.
-    # This is navigation/UI only. It does not change data, auth, filters, saved universes, shards, or R2 behavior.
+    # Candidate Connect v2 Phase 1 Navigation Shell
+    # Navigation/screen placement only. Existing engines, R2, security, filters, PDFs, and data logic are untouched.
     _current_section = st.session_state.get("left_section")
 
-    if st.button("🏠 Dashboard", width="stretch"):
+    def _cc_v2_nav(label, section, view=None, key=None):
+        if st.button(label, width="stretch", key=key or f"nav_v2_{section}"):
+            cc634_set_section(section)
+            if view is not None:
+                st.session_state["view"] = view
+            st.rerun()
+
+    if st.button("🏠 Dashboard", width="stretch", key="nav_v2_dashboard"):
         cc634_set_section(None)
         st.session_state["view"] = "dashboard"
         st.rerun()
 
-    with st.expander("🧠 Voter Intelligence", expanded=_current_section in {"create_universe", "voter_lookup", "mail_ballot_center", "area_intelligence"}):
-        if user_can("create_universe") and st.button("🎯 Create Universe", width="stretch"):
-            cc634_set_section("create_universe"); st.session_state["view"]="targeting"; st.rerun()
-        if user_can("voter_lookup") and st.button("🔎 Voter Lookup", width="stretch"):
-            cc634_set_section("voter_lookup"); st.session_state["view"]="dashboard"; st.rerun()
-        if user_can("mail_ballot_center") and st.button("📬 Mail Ballot Center", width="stretch"):
-            cc634_set_section("mail_ballot_center"); st.session_state["view"]="dashboard"; st.rerun()
-        if user_can("area_intelligence") and st.button("⌂ Area Intelligence", width="stretch"):
-            cc634_set_section("area_intelligence"); st.session_state["view"]="dashboard"; st.rerun()
+    with st.expander("⚙️ Admin", expanded=_current_section in {"my_account", "account_admin", "campaign_organization", "data_admin"}):
+        _cc_v2_nav("👤 My Account", "my_account", "account", key="nav_v2_my_account")
+        if user_can("account_admin"):
+            _cc_v2_nav("🔐 User Accounts", "account_admin", "security", key="nav_v2_user_accounts")
+        _cc_v2_nav("👥 Campaign Contacts", "campaign_organization", "organization", key="nav_v2_campaign_contacts")
+        _cc_v2_nav("🗄️ Data Admin", "data_admin", "data_admin", key="nav_v2_data_admin")
 
-    with st.expander("👥 Campaign Organization", expanded=_current_section in {"campaign_organization"}):
-        if st.button("👥 Team / Volunteers", width="stretch"):
-            cc634_set_section("campaign_organization"); st.session_state["view"]="organization"; st.rerun()
+    _cc_v2_nav("🔎 Voter Lookup", "voter_lookup", "lookup", key="nav_v2_voter_lookup")
+    _cc_v2_nav("🎯 Create Universe", "create_universe", "targeting", key="nav_v2_create_universe")
+    _cc_v2_nav("✉️ Mail Ballot", "mail_ballot_center", "mail_ballot", key="nav_v2_mail_ballot")
+    _cc_v2_nav("📣 Grassroots", "voter_outreach", "outreach", key="nav_v2_grassroots")
+    _cc_v2_nav("🚪 GOTV", "gotv", "gotv", key="nav_v2_gotv")
+    _cc_v2_nav("🗳️ Election Day", "election_day", "election_day", key="nav_v2_election_day")
+    _cc_v2_nav("📊 Reporting", "reporting", "reporting", key="nav_v2_reporting")
 
-    # A3.4 navigation cleanup: Voter Outreach is now a direct nav button.
-    # The duplicate inner Voter Outreach button was removed because the section
-    # itself should open the Outreach Dashboard by default.
-    if st.button("📣 Grassroots Center", width="stretch", key="nav_voter_outreach_main"):
-        cc634_set_section("voter_outreach"); st.session_state["view"]="outreach"; st.rerun()
-
-    with st.expander("🗳️ Election Day", expanded=_current_section in {"election_day"}):
-        if st.button("🗳️ Election Day Operations", width="stretch"):
-            cc634_set_section("election_day"); st.session_state["view"]="election_day"; st.rerun()
-
-    with st.expander("⚙️ Administration", expanded=_current_section in {"my_account", "account_admin"}):
-        if st.button("👤 My Account", width="stretch"):
-            cc634_set_section("my_account"); st.session_state["view"]="account"; st.rerun()
-        if user_can("account_admin") and st.button("🔐 Account Admin", width="stretch"):
-            cc634_set_section("account_admin"); st.session_state["view"]="security"; st.rerun()
-
-    if st.button("Log Out", width="stretch"):
+    if st.button("Log Out", width="stretch", key="nav_v2_logout"):
         _cc_logout_current_browser(load_security_store())
         st.rerun()
     st.divider()
 
+    # Left-panel controls for the active v2 screen. These are the existing controls moved under the new labels.
     if st.session_state.get("left_section") == "create_universe":
         st.markdown("### Create Universe")
         with st.expander("Geography", expanded=False):
@@ -16926,7 +16918,7 @@ with st.sidebar:
             else: st.caption("No saved universes saved yet.")
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
-        st.caption("Search the full statewide active voter file by name, address, PA ID, phone, or email.")
+        st.caption("Search voters by name, address, PA ID, phone, or email.")
         st.text_input("Search voters", key=special_key("lookup_query"), placeholder="Name, county, address, PA ID, phone, email")
         st.selectbox("Max Results", [10,25,50,100], index=1, key=special_key("lookup_max"))
         ca, cb = st.columns(2)
@@ -16939,38 +16931,38 @@ with st.sidebar:
                     _ = st.session_state.pop(k, None)
                 st.rerun()
     elif st.session_state.get("left_section") == "mail_ballot_center":
-        st.markdown("### Mail Ballot Center")
+        st.markdown("### Mail Ballot")
         _has_universe = has_current_universe()
         _label = st.session_state.get("current_universe_label", "None")
-        st.checkbox(
-            f"Use current universe: {_label}",
-            value=_has_universe,
-            disabled=not _has_universe,
-            key=special_key("mb_start_current"),
-        )
+        st.checkbox(f"Use current universe: {_label}", value=_has_universe, disabled=not _has_universe, key=special_key("mb_start_current"))
         if _has_universe:
             st.caption(f"Last applied from Create Universe: {st.session_state.get('current_universe_updated', '')}")
         else:
-            st.caption("Build a universe in Create Universe, click Save / Apply Current Universe, then return here to use it as your Mail Ballot base.")
-    elif st.session_state.get("left_section") == "area_intelligence":
-        st.markdown("### Area Intelligence")
-        st.caption("Select the area on the right.")
+            st.caption("Build and apply a universe in Create Universe, then return here to use it as your Mail Ballot base.")
+    elif st.session_state.get("left_section") == "reporting":
+        st.markdown("### Reporting")
+        st.caption("Area Intelligence and operational reports live here.")
     elif st.session_state.get("left_section") == "my_account":
         st.markdown("### My Account")
-        st.caption("Change your password.")
+        st.caption("Change your password and account details.")
     elif st.session_state.get("left_section") == "campaign_organization":
-        st.markdown("### Campaign Organization")
+        st.markdown("### Campaign Contacts")
         st.caption("Manage team members, volunteers, roles, and assignment readiness.")
+    elif st.session_state.get("left_section") == "data_admin":
+        st.markdown("### Data Admin")
+        st.caption("Phase 1 shell only. Data upload/update workflows are not changed in this pass.")
     elif st.session_state.get("left_section") == "voter_outreach":
-        st.markdown("### Grassroots Center")
+        st.markdown("### Grassroots")
         st.caption("Plan door-to-door, phone, postcard, text, email, and mail-ballot chase programs.")
+    elif st.session_state.get("left_section") == "gotv":
+        st.markdown("### GOTV")
+        st.caption("Phase 1 shell only. GOTV will reuse the Grassroots engine in a later pass.")
     elif st.session_state.get("left_section") == "election_day":
         st.markdown("### Election Day")
-        st.caption("Poll coverage, worker scheduling, turnout tracking, and incident reporting will live here.")
+        st.caption("Poll coverage, scheduling, turnout tracking, and results collection will live here.")
     elif st.session_state.get("left_section") == "account_admin":
-        st.markdown("### Account Admin")
+        st.markdown("### User Accounts")
         st.caption("Manage Candidate Connect accounts and campaign scopes.")
-
 
 
 # v30 DEV-only sidebar compact polish:
@@ -17249,6 +17241,32 @@ button[aria-label*="full screen"] {
 active = active_filters()
 section = st.session_state.get("left_section")
 
+def render_data_admin_workspace():
+    st.markdown("## Data Admin")
+    st.info("Phase 1 Navigation Shell only. The upload/update workflow is intentionally not rebuilt in this pass.")
+    st.caption("Final v2 will handle campaign-contained uploads, field mapping, data-update approvals, and purchased TSS/MIB update notices here.")
+
+def render_gotv_workspace():
+    st.markdown("## GOTV")
+    st.info("Phase 1 Navigation Shell only. GOTV will be built later by reusing the Grassroots program, assignment, output, and mobile-sync engines.")
+    st.caption("No existing workflow was changed in this pass.")
+
+def render_reporting_workspace():
+    st.markdown("## Reporting")
+    st.caption("Phase 1 shell: existing Area Intelligence is preserved and placed under the final v2 Reporting navigation.")
+    tab_area, tab_outreach, tab_mb, tab_gotv, tab_ed = st.tabs(["Area Intelligence", "Grassroots Reports", "Mail Ballot Reports", "GOTV Reports", "Election Day Reports"])
+    with tab_area:
+        render_area_intelligence_workspace()
+    with tab_outreach:
+        campaign_id = _select_ops_campaign_control("reporting_grassroots")
+        render_grassroots_reporting_v1(campaign_id)
+    with tab_mb:
+        st.info("Mail Ballot reports stay preserved for now. The v2 report screen will be built in a later phase.")
+    with tab_gotv:
+        st.info("GOTV reports will be activated after the GOTV module is built.")
+    with tab_ed:
+        st.info("Election Day reports will be activated after the Election Day module is built.")
+
 def render_enhanced_home():
     render_statewide_snapshot()
 
@@ -17257,8 +17275,11 @@ def render_enhanced_home():
 if section == "voter_lookup" and user_can("voter_lookup"): render_voter_lookup_workspace(); st.stop()
 if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_mail_ballot_workspace(); st.stop()
 if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
+if section == "reporting": render_reporting_workspace(); st.stop()
 if section == "campaign_organization": render_campaign_organization_workspace(); st.stop()
+if section == "data_admin": render_data_admin_workspace(); st.stop()
 if section == "voter_outreach": render_voter_outreach_workspace(); st.stop()
+if section == "gotv": render_gotv_workspace(); st.stop()
 if section == "election_day": render_election_day_workspace(); st.stop()
 if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
 if section == "my_account": render_my_account_workspace(); st.stop()
