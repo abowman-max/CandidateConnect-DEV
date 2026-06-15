@@ -1473,6 +1473,98 @@ div[data-testid="stElementToolbar"] svg * {
     stroke: #000000 !important;
     opacity: 1 !important;
 }
+
+
+/* === Phase 1.2B help icon render fix ===
+   Streamlit help icons can render as a filled SVG. If every svg/path is forced
+   to black, the icon becomes a black dot. Hide the native SVG and draw a simple
+   consistent question mark instead. */
+[data-testid="stTooltipHoverTarget"] {
+    width: 18px !important;
+    min-width: 18px !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    padding: 0 !important;
+    margin-left: 4px !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    overflow: visible !important;
+}
+[data-testid="stTooltipHoverTarget"] svg,
+[data-testid="stTooltipHoverTarget"] svg *,
+[data-testid="stTooltipHoverTarget"] path,
+[data-testid="stTooltipHoverTarget"] circle {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+[data-testid="stTooltipHoverTarget"]::after {
+    content: "?" !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 16px !important;
+    height: 16px !important;
+    line-height: 16px !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+[data-testid="stTooltipHoverTarget"]:hover,
+[data-testid="stTooltipHoverTarget"]:focus,
+[data-testid="stTooltipHoverTarget"]:focus-visible,
+[data-testid="stTooltipHoverTarget"]:hover::after,
+[data-testid="stTooltipHoverTarget"]:focus::after,
+[data-testid="stTooltipHoverTarget"]:focus-visible::after {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
+    opacity: 1 !important;
+}
+
+/* Keep popover/help text readable when the user clicks or hovers the new ?. */
+div[data-testid="stTooltipContent"],
+div[role="tooltip"],
+div[data-baseweb="popover"] {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border: 1px solid #b9ad99 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
+    opacity: 1 !important;
+}
+div[data-testid="stTooltipContent"] *,
+div[role="tooltip"] *,
+div[data-baseweb="popover"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
