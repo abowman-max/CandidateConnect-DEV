@@ -17512,8 +17512,7 @@ with st.sidebar:
         st.caption(f"Campaign: {current_user().get('campaign', '')}")
         st.caption(campaign_dataset_status_label())
     elif is_super_admin():
-        st.caption("Candidate Connect campaign app")
-        st.caption("TSS statewide tools move to Jedi")
+        st.caption("Dataset: Statewide")
 
     # Candidate Connect v2 Phase 1 Navigation Shell
     # Navigation-only change. Existing engines are preserved and routed to their current working sections.
@@ -17539,13 +17538,10 @@ with st.sidebar:
 
     _cc_v2_nav_button("🏠 Dashboard", None, "dashboard", key="v2_nav_dashboard")
 
-    with st.expander("⚙️ Admin", expanded=_current_section in {"my_account", "account_admin", "campaign_organization", "campaign_data_admin"}):
+    with st.expander("⚙️ Admin", expanded=_current_section in {"my_account", "account_admin", "campaign_organization"}):
         _cc_v2_nav_button("👤 My Account", "my_account", "account", key="v2_nav_my_account")
-        _cc_v2_nav_button("👥 Campaign Contacts", "campaign_organization", "organization", key="v2_nav_campaign_contacts", allowed=not is_super_admin())
-        _cc_v2_nav_button("🔐 Campaign User Accounts", "account_admin", "security", key="v2_nav_account_admin", allowed=_cc_v2_is_cc_campaign_admin_allowed())
-        _cc_v2_nav_button("🗂️ Campaign Data Admin", "campaign_data_admin", "data_admin", key="v2_nav_campaign_data_admin", allowed=_cc_v2_is_cc_campaign_admin_allowed())
-        if is_super_admin():
-            st.caption("TSS/global support tools are no longer routed in Candidate Connect. Use Jedi for statewide and cross-campaign administration.")
+        _cc_v2_nav_button("👥 Campaign Contacts", "campaign_organization", "organization", key="v2_nav_campaign_contacts")
+        _cc_v2_nav_button("🔐 User Accounts / Data Admin", "account_admin", "security", key="v2_nav_account_admin", allowed=user_can("account_admin"))
 
     with st.expander("🔎 Voter Lookup", expanded=_current_section in {"voter_lookup"}):
         _cc_v2_nav_button("🔎 Search / Household / Detail", "voter_lookup", "dashboard", key="v2_nav_voter_lookup", allowed=user_can("voter_lookup"))
@@ -17621,7 +17617,7 @@ with st.sidebar:
             else: st.caption("No saved universes saved yet.")
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
-        st.caption("Search this campaign voter file by name, address, PA ID, phone, or email.")
+        st.caption("Search the full statewide active voter file by name, address, PA ID, phone, or email.")
         st.text_input("Search voters", key=special_key("lookup_query"), placeholder="Name, county, address, PA ID, phone, email")
         st.selectbox("Max Results", [10,25,50,100], index=1, key=special_key("lookup_max"))
         ca, cb = st.columns(2)
@@ -17663,11 +17659,8 @@ with st.sidebar:
         st.markdown("### Election Day")
         st.caption("Poll coverage, worker scheduling, turnout tracking, and incident reporting will live here.")
     elif st.session_state.get("left_section") == "account_admin":
-        st.markdown("### Campaign User Accounts")
-        st.caption("Manage users inside this campaign only. TSS/global user support belongs in Jedi.")
-    elif st.session_state.get("left_section") == "campaign_data_admin":
-        st.markdown("### Campaign Data Admin")
-        st.caption("Campaign-contained dataset status and uploads. TSS statewide dataset tools belong in Jedi.")
+        st.markdown("### Account Admin")
+        st.caption("Manage Candidate Connect accounts and campaign scopes.")
 
 
 
@@ -17687,78 +17680,6 @@ with st.sidebar:
 
 active = active_filters()
 section = st.session_state.get("left_section")
-
-
-# Candidate Connect v2 Phase 3A — CC/Jedi separation helpers.
-# Candidate Connect is campaign-facing. TSS statewide/global administration moves to Jedi.
-def _cc_v2_phase3a_jedi_moved_notice():
-    st.markdown("## Candidate Connect")
-    st.info(
-        "This Candidate Connect web app is now campaign-facing only. "
-        "TSS statewide administration, statewide voter lookup/edit, statewide MIB tools, "
-        "cross-campaign management, and support-mode functions belong in Jedi."
-    )
-    st.markdown(
-        """
-        **Use a Campaign Admin or Staff User login to test Candidate Connect.**
-
-        Jedi will later provide:
-        - Statewide voter lookup/edit
-        - Statewide MIB center
-        - Campaign account/user support
-        - Campaign dataset maintenance
-        - TSS dataset administration
-        """
-    )
-
-
-def _cc_v2_render_campaign_data_admin_workspace():
-    st.markdown("## Campaign Data Admin")
-    st.caption("Campaign-contained data status and upload/update controls. Statewide/TSS dataset tools belong in Jedi.")
-
-    campaign_id = _cc_v2_campaign_id()
-    status = campaign_dataset_status_label() if 'campaign_dataset_status_label' in globals() else "Campaign dataset status unavailable"
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### Dataset Status")
-        st.markdown(f"**Campaign:** `{html.escape(str(campaign_id or 'Not set'))}`", unsafe_allow_html=True)
-        st.markdown(f"**Status:** {html.escape(str(status))}", unsafe_allow_html=True)
-    with c2:
-        st.markdown("### Data Contract")
-        st.markdown(
-            "Candidate Connect consumes app-ready campaign datasets. "
-            "It should not repair duplicate headers, guessed field names, or TSS statewide structure issues at runtime."
-        )
-
-    st.markdown("### Dataset Separation")
-    st.markdown(
-        """
-        - **Base voter file:** campaign-limited TSS subset or campaign self-provided upload.
-        - **MIB overlay:** separate overlay matched by the exact PA State Voter ID field.
-        - **Self-provided uploads:** mapped once to the Candidate Connect standard schema before app use.
-        - **No mixing:** TSS voter data, MIB overlay data, and self-provided base data remain separate unless the campaign explicitly purchased/approved the source.
-        """
-    )
-
-    st.markdown("### Exact Field Name Rule")
-    st.warning(
-        "Do not add app-side guesses for variant headers here. The Athenix Pipeline must output clean, exact CC standard fields before upload."
-    )
-    try:
-        fields = list(filter_options.columns) if hasattr(filter_options, 'columns') else []
-        if fields:
-            with st.expander("Current filter/speed-table field names visible to CC", expanded=False):
-                st.code("\n".join(map(str, fields[:250])))
-        else:
-            st.caption("No field list available from the loaded filter layer.")
-    except Exception:
-        st.caption("Field list unavailable from the loaded filter layer.")
-
-
-def _cc_v2_is_cc_campaign_admin_allowed():
-    # In Candidate Connect, account/data admin is campaign-scoped only.
-    # Super Admin/global support moves to Jedi and is intentionally not routed here.
-    return (not is_super_admin()) and user_can("account_admin")
 
 
 def _cc_v2_safe_int(value, default=0):
@@ -18183,10 +18104,7 @@ if section == "area_intelligence" and user_can("area_intelligence"): render_area
 if section == "campaign_organization": render_campaign_organization_workspace(); st.stop()
 if section == "voter_outreach": render_voter_outreach_workspace(); st.stop()
 if section == "election_day": render_election_day_workspace(); st.stop()
-if section == "account_admin" and _cc_v2_is_cc_campaign_admin_allowed(): render_account_admin_workspace(filter_options); st.stop()
-if section == "account_admin" and is_super_admin(): _cc_v2_phase3a_jedi_moved_notice(); st.stop()
-if section == "campaign_data_admin" and _cc_v2_is_cc_campaign_admin_allowed(): _cc_v2_render_campaign_data_admin_workspace(); st.stop()
-if section == "campaign_data_admin" and is_super_admin(): _cc_v2_phase3a_jedi_moved_notice(); st.stop()
+if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
 if section == "my_account": render_my_account_workspace(); st.stop()
 if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
 
