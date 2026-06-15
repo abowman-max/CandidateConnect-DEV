@@ -17681,8 +17681,194 @@ with st.sidebar:
 active = active_filters()
 section = st.session_state.get("left_section")
 
+
+def _cc_v2_safe_int(value, default=0):
+    try:
+        return int(value or default)
+    except Exception:
+        return default
+
+
+def _cc_v2_count_list(value):
+    try:
+        if isinstance(value, dict):
+            return len(value)
+        if isinstance(value, list):
+            return len(value)
+    except Exception:
+        pass
+    return 0
+
+
+def _cc_v2_load_saved_universe_count():
+    try:
+        saved = load_persistent_saved_universes()
+        return _cc_v2_count_list(saved)
+    except Exception:
+        return 0
+
+
+def _cc_v2_campaign_id():
+    try:
+        u = current_user() or {}
+        cid = u.get("campaign_id") or u.get("campaign") or u.get("Campaign") or ""
+        return str(cid).strip()
+    except Exception:
+        return ""
+
+
+def _cc_v2_activity_counts():
+    campaign_id = _cc_v2_campaign_id()
+    saved_universes = _cc_v2_load_saved_universe_count()
+
+    programs = 0
+    mobile_results = 0
+    followups = 0
+
+    if campaign_id:
+        try:
+            store = load_outreach_programs_store(campaign_id) or {}
+            programs = len(store.get("programs", []) or [])
+        except Exception:
+            programs = 0
+
+        try:
+            mobile_store = load_mobile_results_store(campaign_id) or {}
+            rows = _mobile_result_rows(mobile_store)
+            mobile_results = len(rows or [])
+            for r in rows or []:
+                if str(r.get("follow_up") or r.get("needs_follow_up") or "").lower() in {"1", "true", "yes", "y"}:
+                    followups += 1
+        except Exception:
+            mobile_results = 0
+            followups = 0
+
+    return {
+        "saved_universes": saved_universes,
+        "programs": programs,
+        "mobile_results": mobile_results,
+        "followups": followups,
+    }
+
+
+def _cc_v2_dashboard_card(title, value, note="", icon=""):
+    st.markdown(
+        f"""
+        <div class="cc-home-card">
+          <div style="font-size:14px;font-weight:900;color:#5f6978;">{html.escape(str(icon))} {html.escape(str(title))}</div>
+          <div style="font-size:34px;font-weight:1000;color:#071d3a;line-height:1.1;margin-top:6px;">{html.escape(str(value))}</div>
+          <div style="font-size:13px;color:#5f6978;margin-top:4px;">{html.escape(str(note))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _cc_v2_quick_action(label, section_value, view_value, key, allowed=True):
+    if not allowed:
+        st.button(label, width="stretch", key=f"{key}_disabled", disabled=True)
+        return
+    if st.button(label, width="stretch", key=key):
+        cc634_set_section(section_value)
+        st.session_state["view"] = view_value
+        st.rerun()
+
+
 def render_enhanced_home():
-    render_statewide_snapshot()
+    st.markdown("## Dashboard")
+    st.caption("Campaign command center: snapshot, activity, quick actions, and alerts.")
+
+    scoped_active = enforce_security_scope({})
+    summary = None
+    err = None
+    try:
+        summary, err = quick_counts({})
+    except Exception as e:
+        err = e
+
+    if not summary:
+        try:
+            total = int(manifest.get("total_rows", 0)) if isinstance(manifest, dict) else 0
+        except Exception:
+            total = 0
+        summary = {"total": total, "r": 0, "d": 0, "o": 0}
+
+    total = _cc_v2_safe_int(summary.get("total"))
+    r = _cc_v2_safe_int(summary.get("r"))
+    d = _cc_v2_safe_int(summary.get("d"))
+    o = _cc_v2_safe_int(summary.get("o"))
+
+    boundary = "Statewide" if is_super_admin() else campaign_dataset_status_label()
+    st.markdown(
+        f"""
+        <div class="cc-info-card">
+            <b>Current working dataset:</b> {html.escape(str(boundary))}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Campaign Snapshot")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: _cc_v2_dashboard_card("Total Voters", f"{total:,}", "Current scoped dataset", "👥")
+    with c2: _cc_v2_dashboard_card("Republican", f"{r:,}", pct(r, total) + " of voters", "🐘")
+    with c3: _cc_v2_dashboard_card("Democrat", f"{d:,}", pct(d, total) + " of voters", "🫏")
+    with c4: _cc_v2_dashboard_card("Other / Unaffiliated", f"{o:,}", pct(o, total) + " of voters", "●")
+
+    st.markdown("### Activity Snapshot")
+    activity = _cc_v2_activity_counts()
+    a1, a2, a3, a4 = st.columns(4)
+    with a1: _cc_v2_dashboard_card("Saved Universes", f"{activity.get('saved_universes', 0):,}", "Built in Create Universe", "🎯")
+    with a2: _cc_v2_dashboard_card("Programs", f"{activity.get('programs', 0):,}", "Grassroots/GOTV source engine", "📣")
+    with a3: _cc_v2_dashboard_card("Mobile Results", f"{activity.get('mobile_results', 0):,}", "Synced field records", "📱")
+    with a4: _cc_v2_dashboard_card("Follow-Ups", f"{activity.get('followups', 0):,}", "Needs next action", "✅")
+
+    st.markdown("### Quick Actions")
+    q1, q2, q3, q4, q5 = st.columns(5)
+    with q1: _cc_v2_quick_action("Create Universe", "create_universe", "targeting", "dash_v2_create_universe", user_can("create_universe"))
+    with q2: _cc_v2_quick_action("Voter Lookup", "voter_lookup", "dashboard", "dash_v2_voter_lookup", user_can("voter_lookup"))
+    with q3: _cc_v2_quick_action("Grassroots", "voter_outreach", "outreach", "dash_v2_grassroots", True)
+    with q4: _cc_v2_quick_action("Mail Ballot", "mail_ballot_center", "dashboard", "dash_v2_mail_ballot", user_can("mail_ballot_center"))
+    with q5: _cc_v2_quick_action("Area Intelligence", "area_intelligence", "dashboard", "dash_v2_area_intel", user_can("area_intelligence"))
+
+    st.markdown("### District Snapshot")
+    left, right = st.columns([1.0, 1.25])
+    with left:
+        try:
+            render_party_chart(summary, "Voters by Party")
+        except Exception:
+            st.info("Party chart unavailable for this dataset.")
+        try:
+            gdf = duckdb_count_cube_group_filtered(json.dumps(scoped_active, sort_keys=True), json.dumps({}, sort_keys=True), "Gender", 8)
+            if not gdf.empty and "Voters" in gdf.columns:
+                gf = {str(row.get("label", "")).upper(): int(row.get("Voters", 0) or 0) for _, row in gdf.iterrows()}
+                gs = {"total": sum(gf.values()), "f": gf.get("F", 0), "m": gf.get("M", 0), "u": sum(v for k, v in gf.items() if k not in {"F", "M"})}
+                render_gender_chart(gs, "Voters by Gender")
+        except Exception:
+            st.info("Gender chart unavailable for this dataset.")
+    with right:
+        try:
+            render_home_age_card(total, scoped_active)
+        except Exception:
+            st.info("Age quick-count data is unavailable.")
+        try:
+            render_home_geo_table(summary, scoped_active)
+        except Exception:
+            st.info("Geography quick-count data is unavailable.")
+
+    st.markdown("### Alerts")
+    alerts = []
+    if activity.get("saved_universes", 0) == 0:
+        alerts.append("No saved universes yet. Start with Create Universe.")
+    if activity.get("programs", 0) == 0:
+        alerts.append("No grassroots/GOTV programs yet. Build one after saving a universe.")
+    if err and not (r or d or o):
+        alerts.append("Quick-count party numbers were unavailable; dashboard used manifest totals only.")
+    if not alerts:
+        alerts.append("No urgent setup alerts detected.")
+
+    for alert in alerts:
+        st.info(alert)
 
 # Route protection. If a user lands on a page they do not have permission for,
 # send them back to the dashboard instead of rendering unauthorized tools.
