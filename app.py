@@ -1475,11 +1475,12 @@ div[data-testid="stElementToolbar"] svg * {
 }
 
 
-/* === Phase 1.2B help icon render fix ===
-   Streamlit help icons can render as a filled SVG. If every svg/path is forced
-   to black, the icon becomes a black dot. Hide the native SVG and draw a simple
-   consistent question mark instead. */
-[data-testid="stTooltipHoverTarget"] {
+/* === Phase 1.2C help icon scoped render fix ===
+   IMPORTANT: This is scoped only to Streamlit widget labels.
+   Do not style every stTooltipHoverTarget globally, because BaseWeb select
+   option labels can inherit that target and collapse dropdown text into
+   first-letter + question-mark artifacts. */
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] {
     width: 18px !important;
     min-width: 18px !important;
     height: 18px !important;
@@ -1500,15 +1501,15 @@ div[data-testid="stElementToolbar"] svg * {
     -webkit-text-fill-color: #000000 !important;
     overflow: visible !important;
 }
-[data-testid="stTooltipHoverTarget"] svg,
-[data-testid="stTooltipHoverTarget"] svg *,
-[data-testid="stTooltipHoverTarget"] path,
-[data-testid="stTooltipHoverTarget"] circle {
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] svg,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] svg *,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] path,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] circle {
     display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
 }
-[data-testid="stTooltipHoverTarget"]::after {
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]::after {
     content: "?" !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -1528,12 +1529,12 @@ div[data-testid="stElementToolbar"] svg * {
     opacity: 1 !important;
     text-shadow: none !important;
 }
-[data-testid="stTooltipHoverTarget"]:hover,
-[data-testid="stTooltipHoverTarget"]:focus,
-[data-testid="stTooltipHoverTarget"]:focus-visible,
-[data-testid="stTooltipHoverTarget"]:hover::after,
-[data-testid="stTooltipHoverTarget"]:focus::after,
-[data-testid="stTooltipHoverTarget"]:focus-visible::after {
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:hover,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:focus,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:focus-visible,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:hover::after,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:focus::after,
+[data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"]:focus-visible::after {
     background: #efe8d8 !important;
     background-color: #efe8d8 !important;
     color: #000000 !important;
@@ -1542,6 +1543,18 @@ div[data-testid="stElementToolbar"] svg * {
     box-shadow: none !important;
     outline: none !important;
     opacity: 1 !important;
+}
+
+/* Keep select dropdown option text untouched and readable. */
+[role="option"],
+[role="option"] *,
+div[data-baseweb="menu"] *,
+div[data-baseweb="popover"] [role="listbox"] * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
 }
 
 /* Keep popover/help text readable when the user clicks or hovers the new ?. */
@@ -1558,13 +1571,11 @@ div[data-baseweb="popover"] {
     opacity: 1 !important;
 }
 div[data-testid="stTooltipContent"] *,
-div[role="tooltip"] *,
-div[data-baseweb="popover"] * {
+div[role="tooltip"] * {
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
     opacity: 1 !important;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
