@@ -2865,15 +2865,6 @@ def campaign_boundary_filters() -> dict:
         return {}
 
 
-def option_filters_for_field(current_filters: dict | None, field: str) -> dict:
-    """Filters to use when populating one dropdown's options.
-
-    Drop the field being populated so users can change it, then re-apply the
-    campaign boundary so downstream geo lists never escape the campaign.
-    """
-    f = dict(current_filters or {})
-    f.pop(field, None)
-    return with_campaign_boundary(f)
 
 
 
@@ -6828,18 +6819,6 @@ def render_voter_lookup_workspace():
 
 
 
-def safe_filtered_df(active: dict | None, max_rows: int = EXPORT_ROW_LIMIT) -> pd.DataFrame:
-    active = enforce_security_scope(active or {})
-    special = active_special_filters() if "active_special_filters" in globals() else {}
-    try:
-        df = duckdb_detail_filtered_df(active, special, int(max_rows))
-    except Exception as exc:
-        st.warning(f"Could not prepare filtered voter file: {exc}")
-        return pd.DataFrame()
-    try:
-        return normalize_download_df(df)
-    except Exception:
-        return df
 
 
 def _mb_total_from_summary(summary: dict | None) -> int:
