@@ -17774,10 +17774,144 @@ def _cc_v2_quick_action(label, section_value, view_value, key, allowed=True):
         st.rerun()
 
 
-def render_enhanced_home():
-    st.markdown("## Dashboard")
-    st.caption("Campaign command center: snapshot, activity, quick actions, and alerts.")
+def _cc_v2_text_bool(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "checked", "x"}
 
+
+def _cc_v2_result_label(row: dict) -> str:
+    row = row or {}
+    for k in ["result", "contact_result", "support", "support_level", "contact_status", "status", "outcome", "disposition"]:
+        v = str(row.get(k) or "").strip().lower()
+        if v:
+            return v
+    return ""
+
+
+def _cc_v2_campaign_dashboard_stats(total: int = 0) -> dict:
+    campaign_id = _cc_v2_campaign_id()
+    stats = {
+        "households_contacted": 0,
+        "favorable": 0,
+        "unfavorable": 0,
+        "undecided": 0,
+        "not_home": 0,
+        "volunteers": 0,
+        "followups": 0,
+        "election_day_workers": 0,
+        "precincts": 0,
+        "holes_pct": 0,
+        "programs": 0,
+        "mobile_results": 0,
+        "saved_universes": 0,
+        "active_programs": 0,
+    }
+    try:
+        base_activity = _cc_v2_activity_counts() or {}
+        for k in ["saved_universes", "programs", "mobile_results", "followups"]:
+            stats[k] = int(base_activity.get(k, 0) or 0)
+    except Exception:
+        pass
+    rows = []
+    if campaign_id:
+        try:
+            mobile_store = load_mobile_results_store(campaign_id) or {}
+            rows = _mobile_result_rows(mobile_store) or []
+        except Exception:
+            rows = []
+        try:
+            people = (load_team_people_store(campaign_id) or {}).get("people", []) or []
+            stats["volunteers"] = len(people)
+            for person in people:
+                role_text = " ".join([str(person.get(k) or "") for k in ["role", "roles", "notes", "team_role"]]).lower()
+                if any(term in role_text for term in ["poll", "election", "judge", "observer", "driver"]):
+                    stats["election_day_workers"] += 1
+        except Exception:
+            pass
+        try:
+            store = load_outreach_programs_store(campaign_id) or {}
+            programs = store.get("programs", []) or []
+            stats["active_programs"] = sum(1 for pr in programs if str(pr.get("status") or "active").strip().lower() not in {"complete", "completed", "closed", "inactive", "archived"})
+        except Exception:
+            pass
+    contacted_households = set()
+    precincts = set()
+    assigned = 0
+    completed = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        hh = row.get("household_key") or row.get("household_id") or row.get("address_key") or row.get("address") or row.get("Address") or row.get("street_address") or row.get("full_address")
+        if hh:
+            contacted_households.add(str(hh))
+        label = _cc_v2_result_label(row)
+        if any(x in label for x in ["fav", "support", "yes", "positive"]):
+            stats["favorable"] += 1
+        elif any(x in label for x in ["unfav", "against", "oppose", "no", "negative"]):
+            stats["unfavorable"] += 1
+        elif any(x in label for x in ["undec", "persuad", "maybe", "unsure"]):
+            stats["undecided"] += 1
+        elif any(x in label for x in ["not home", "nh", "no answer"]):
+            stats["not_home"] += 1
+        if _cc_v2_text_bool(row.get("follow_up") or row.get("needs_follow_up") or row.get("yard_sign") or row.get("mb_interest") or row.get("volunteer")):
+            stats["followups"] += 1
+        precinct = row.get("Precinct") or row.get("precinct") or row.get("PRE") or row.get("precinct_name")
+        if precinct:
+            precincts.add(str(precinct))
+        try:
+            assigned += int(row.get("assigned_total") or row.get("assigned") or 0)
+            completed += int(row.get("completed") or row.get("completed_total") or 0)
+        except Exception:
+            pass
+    stats["households_contacted"] = len(contacted_households) if contacted_households else len(rows)
+    if precincts:
+        stats["precincts"] = len(precincts)
+    else:
+        try:
+            stats["precincts"] = len(field_options(filter_options, "Precinct", enforce_security_scope({})) or [])
+        except Exception:
+            stats["precincts"] = 0
+    if assigned > 0:
+        stats["holes_pct"] = max(0, min(100, round(((assigned - completed) / assigned) * 100)))
+    elif total > 0 and stats["households_contacted"] > 0:
+        stats["holes_pct"] = max(0, min(100, round(100 - ((stats["households_contacted"] / total) * 100))))
+    return stats
+
+
+def _cc_v2_next_general_election_day(today=None):
+    today = today or datetime.now()
+    year = today.year
+    def first_tuesday_after_first_monday(y):
+        d = datetime(y, 11, 1)
+        while d.weekday() != 0:
+            d += timedelta(days=1)
+        return d + timedelta(days=1)
+    election = first_tuesday_after_first_monday(year)
+    if today.date() > election.date():
+        election = first_tuesday_after_first_monday(year + 1)
+    return election
+
+
+def _cc_v2_nav_link(label, section_value, view_value, key, allowed=True):
+    if not allowed:
+        return
+    if st.button(label, width="stretch", key=key):
+        cc634_set_section(section_value)
+        st.session_state["view"] = view_value
+        st.rerun()
+
+
+def _cc_v2_metric_cell(icon, label, value, note=""):
+    st.markdown(f'''
+        <div class="cc-dash-metric-cell">
+          <div class="cc-dash-icon">{html.escape(str(icon))}</div>
+          <div class="cc-dash-label">{html.escape(str(label))}</div>
+          <div class="cc-dash-value">{html.escape(str(value))}</div>
+          <div class="cc-dash-note">{html.escape(str(note))}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+
+def render_enhanced_home():
     scoped_active = enforce_security_scope({})
     summary = None
     err = None
@@ -17785,7 +17919,6 @@ def render_enhanced_home():
         summary, err = quick_counts({})
     except Exception as e:
         err = e
-
     if not summary:
         try:
             total = int(manifest.get("total_rows", 0)) if isinstance(manifest, dict) else 0
@@ -17794,42 +17927,161 @@ def render_enhanced_home():
         summary = {"total": total, "r": 0, "d": 0, "o": 0}
 
     total = _cc_v2_safe_int(summary.get("total"))
-    r = _cc_v2_safe_int(summary.get("r"))
-    d = _cc_v2_safe_int(summary.get("d"))
-    o = _cc_v2_safe_int(summary.get("o"))
+    stats = _cc_v2_campaign_dashboard_stats(total)
+    contacted_pct = pct(stats.get("households_contacted", 0), total) if total else "0%"
+    contacted_total = max(1, int(stats.get("households_contacted", 0) or 0))
+    fav_pct = pct(stats.get("favorable", 0), contacted_total)
+    unfav_pct = pct(stats.get("unfavorable", 0), contacted_total)
+    undec_pct = pct(stats.get("undecided", 0), contacted_total)
 
-    boundary = "Statewide" if is_super_admin() else campaign_dataset_status_label()
-    st.markdown(
-        f"""
-        <div class="cc-info-card">
-            <b>Current working dataset:</b> {html.escape(str(boundary))}
+    election = _cc_v2_next_general_election_day()
+    days = max(0, (election.date() - datetime.now().date()).days)
+    election_caption = election.strftime("%b %d, %Y") + " · Polls open 7:00 AM"
+
+    st.markdown("""
+        <style>
+        .cc-dash-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+        .cc-dash-title h1{margin:0;color:#071d3a;font-size:42px;line-height:1.05;font-weight:1000;}
+        .cc-dash-title p{margin:8px 0 0 0;color:#5f6978;font-size:17px;}
+        .cc-election-pill{min-width:230px;background:rgba(255,255,255,.48);border:1px solid rgba(150,120,80,.25);border-radius:12px;padding:14px 16px;box-shadow:0 8px 22px rgba(7,29,58,.07);display:flex;gap:12px;align-items:center;}
+        .cc-election-icon{font-size:30px;color:#b01019;}
+        .cc-election-kicker{color:#b01019;font-size:13px;font-weight:1000;text-transform:uppercase;letter-spacing:.02em;}
+        .cc-election-days{color:#071d3a;font-size:25px;font-weight:1000;line-height:1.05;}
+        .cc-election-note{color:#5f6978;font-size:12px;margin-top:3px;}
+        .cc-dash-ribbon{background:rgba(255,255,255,.42);border:1px solid rgba(150,120,80,.25);border-radius:14px;box-shadow:0 10px 26px rgba(7,29,58,.07);padding:18px 14px;margin:6px 0 22px 0;}
+        .cc-dash-metric-cell{min-height:118px;text-align:center;border-right:1px solid rgba(7,29,58,.12);padding:2px 10px;}
+        div[data-testid="column"]:last-child .cc-dash-metric-cell{border-right:0;}
+        .cc-dash-icon{font-size:25px;margin-bottom:5px;}
+        .cc-dash-label{font-size:13px;color:#071d3a;font-weight:850;min-height:34px;display:flex;align-items:center;justify-content:center;}
+        .cc-dash-value{font-size:27px;line-height:1.05;color:#071d3a;font-weight:1000;margin-top:6px;}
+        .cc-dash-note{font-size:12px;color:#5f6978;margin-top:6px;}
+        .cc-dash-panel{background:rgba(255,255,255,.38);border:1px solid rgba(150,120,80,.25);border-radius:14px;box-shadow:0 8px 22px rgba(7,29,58,.06);padding:18px 18px 14px 18px;margin-bottom:16px;min-height:270px;}
+        .cc-panel-title{display:flex;align-items:center;gap:9px;color:#071d3a;font-size:20px;font-weight:1000;margin-bottom:14px;text-transform:uppercase;}
+        .cc-panel-row{display:flex;justify-content:space-between;border-bottom:1px solid rgba(7,29,58,.09);padding:8px 0;font-size:15px;color:#071d3a;}
+        .cc-panel-row b{font-weight:1000;}
+        .cc-panel-action{margin-top:14px;color:#b01019;font-weight:1000;font-size:14px;}
+        .cc-alert-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(7,29,58,.09);padding:10px 0;font-size:14px;color:#071d3a;}
+        .cc-alert-link{color:#b01019;font-weight:900;white-space:nowrap;}
+        .cc-dash-tip{background:rgba(255,255,255,.35);border:1px solid rgba(150,120,80,.22);border-radius:12px;padding:12px 16px;color:#5f6978;margin-top:8px;}
+        @media (max-width: 1200px){.cc-dash-title-row{display:block}.cc-election-pill{margin-top:12px}.cc-dash-metric-cell{border-right:0;border-bottom:1px solid rgba(7,29,58,.08)}}
+        </style>
+        """, unsafe_allow_html=True)
+
+    st.markdown(f'''
+        <div class="cc-dash-title-row">
+          <div class="cc-dash-title">
+            <h1>Dashboard</h1>
+            <p>Campaign command center: where we are, what needs attention, and where to go next.</p>
+          </div>
+          <div class="cc-election-pill">
+            <div class="cc-election-icon">🗓️</div>
+            <div>
+              <div class="cc-election-kicker">Election Day</div>
+              <div class="cc-election-days">{days:,} days</div>
+              <div class="cc-election-note">{html.escape(election_caption)}</div>
+            </div>
+          </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        ''', unsafe_allow_html=True)
 
-    st.markdown("### Campaign Snapshot")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: _cc_v2_dashboard_card("Total Voters", f"{total:,}", "Current scoped dataset", "👥")
-    with c2: _cc_v2_dashboard_card("Republican", f"{r:,}", pct(r, total) + " of voters", "🐘")
-    with c3: _cc_v2_dashboard_card("Democrat", f"{d:,}", pct(d, total) + " of voters", "🫏")
-    with c4: _cc_v2_dashboard_card("Other / Unaffiliated", f"{o:,}", pct(o, total) + " of voters", "●")
+    st.markdown('<div class="cc-dash-ribbon">', unsafe_allow_html=True)
+    cols = st.columns(9)
+    ribbon = [
+        ("🏘️", "Households Contacted", f"{stats.get('households_contacted',0):,}", f"{contacted_pct} of universe"),
+        ("👍", "Favorable", f"{stats.get('favorable',0):,}", f"{fav_pct} of contacted"),
+        ("👎", "Unfavorable", f"{stats.get('unfavorable',0):,}", f"{unfav_pct} of contacted"),
+        ("❓", "Undecided", f"{stats.get('undecided',0):,}", f"{undec_pct} of contacted"),
+        ("👥", "Volunteers", f"{stats.get('volunteers',0):,}", "In campaign contacts"),
+        ("✅", "Follow Ups", f"{stats.get('followups',0):,}", "Open / pending"),
+        ("🗳️", "Election Day Workers", f"{stats.get('election_day_workers',0):,}", "Tagged workers"),
+        ("📍", "Precincts", f"{stats.get('precincts',0):,}", "In campaign"),
+        ("◔", "% with Holes", f"{stats.get('holes_pct',0):,}%", "Needs coverage"),
+    ]
+    for col, item in zip(cols, ribbon):
+        with col:
+            _cc_v2_metric_cell(*item)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("### Activity Snapshot")
-    activity = _cc_v2_activity_counts()
-    a1, a2, a3, a4 = st.columns(4)
-    with a1: _cc_v2_dashboard_card("Saved Universes", f"{activity.get('saved_universes', 0):,}", "Built in Create Universe", "🎯")
-    with a2: _cc_v2_dashboard_card("Programs", f"{activity.get('programs', 0):,}", "Grassroots/GOTV source engine", "📣")
-    with a3: _cc_v2_dashboard_card("Mobile Results", f"{activity.get('mobile_results', 0):,}", "Synced field records", "📱")
-    with a4: _cc_v2_dashboard_card("Follow-Ups", f"{activity.get('followups', 0):,}", "Needs next action", "✅")
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        st.markdown(f'''
+            <div class="cc-dash-panel">
+              <div class="cc-panel-title">📬 Mail Ballot</div>
+              <div class="cc-panel-row"><span>Current Universe</span><b>{html.escape(str(st.session_state.get('current_universe_label','None')))}</b></div>
+              <div class="cc-panel-row"><span>MB Results / Synced</span><b>{stats.get('mobile_results',0):,}</b></div>
+              <div class="cc-panel-row"><span>Follow Ups</span><b>{stats.get('followups',0):,}</b></div>
+              <div class="cc-panel-row"><span>Base Dataset</span><b>{html.escape(str('Statewide' if is_super_admin() else campaign_dataset_status_label()))}</b></div>
+              <div class="cc-panel-action">Go to Mail Ballot Center ›</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        _cc_v2_nav_link("Open Mail Ballot", "mail_ballot_center", "dashboard", "dash_open_mb", user_can("mail_ballot_center"))
+    with p2:
+        st.markdown(f'''
+            <div class="cc-dash-panel">
+              <div class="cc-panel-title">📣 Grassroots / GOTV</div>
+              <div class="cc-panel-row"><span>Active Programs</span><b>{stats.get('active_programs',0):,}</b></div>
+              <div class="cc-panel-row"><span>Programs Total</span><b>{stats.get('programs',0):,}</b></div>
+              <div class="cc-panel-row"><span>Households Contacted</span><b>{stats.get('households_contacted',0):,}</b></div>
+              <div class="cc-panel-row"><span>Undecided</span><b>{stats.get('undecided',0):,}</b></div>
+              <div class="cc-panel-action">Review active lists and next contact pass ›</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        _cc_v2_nav_link("Open Grassroots", "voter_outreach", "outreach", "dash_open_grassroots", True)
+    with p3:
+        st.markdown(f'''
+            <div class="cc-dash-panel">
+              <div class="cc-panel-title">🗳️ Election Day</div>
+              <div class="cc-panel-row"><span>Days Until Election</span><b>{days:,}</b></div>
+              <div class="cc-panel-row"><span>Election Workers</span><b>{stats.get('election_day_workers',0):,}</b></div>
+              <div class="cc-panel-row"><span>Precincts</span><b>{stats.get('precincts',0):,}</b></div>
+              <div class="cc-panel-row"><span>Coverage Holes</span><b>{stats.get('holes_pct',0):,}%</b></div>
+              <div class="cc-panel-action">Build poll coverage plan ›</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        _cc_v2_nav_link("Open Election Day", "election_day", "election_day", "dash_open_ed", True)
+    with p4:
+        st.markdown(f'''
+            <div class="cc-dash-panel">
+              <div class="cc-panel-title">✅ Follow Ups</div>
+              <div class="cc-panel-row"><span>Open Follow Ups</span><b>{stats.get('followups',0):,}</b></div>
+              <div class="cc-panel-row"><span>Favorable</span><b>{stats.get('favorable',0):,}</b></div>
+              <div class="cc-panel-row"><span>Unfavorable</span><b>{stats.get('unfavorable',0):,}</b></div>
+              <div class="cc-panel-row"><span>Not Home</span><b>{stats.get('not_home',0):,}</b></div>
+              <div class="cc-panel-action">Prioritize next action list ›</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        _cc_v2_nav_link("Open Follow Ups", "voter_outreach", "outreach", "dash_open_followups", True)
 
-    st.markdown("### Quick Actions")
-    q1, q2, q3, q4, q5 = st.columns(5)
-    with q1: _cc_v2_quick_action("Create Universe", "create_universe", "targeting", "dash_v2_create_universe", user_can("create_universe"))
-    with q2: _cc_v2_quick_action("Voter Lookup", "voter_lookup", "dashboard", "dash_v2_voter_lookup", user_can("voter_lookup"))
-    with q3: _cc_v2_quick_action("Grassroots", "voter_outreach", "outreach", "dash_v2_grassroots", True)
-    with q4: _cc_v2_quick_action("Mail Ballot", "mail_ballot_center", "dashboard", "dash_v2_mail_ballot", user_can("mail_ballot_center"))
-    with q5: _cc_v2_quick_action("Area Intelligence", "area_intelligence", "dashboard", "dash_v2_area_intel", user_can("area_intelligence"))
+    lower_left, lower_right = st.columns([1.15, 1.0])
+    alerts = []
+    if stats.get("saved_universes", 0) == 0:
+        alerts.append(("⚠️", "No saved universes yet. Start with Create Universe.", "Create Universe"))
+    if stats.get("programs", 0) == 0:
+        alerts.append(("⚠️", "No grassroots/GOTV programs yet. Build one after saving a universe.", "Grassroots"))
+    if stats.get("holes_pct", 0) >= 15:
+        alerts.append(("⚠️", f"{stats.get('holes_pct',0)}% of the universe appears to have coverage holes.", "Area Intelligence"))
+    if err:
+        alerts.append(("ℹ️", "Some quick-count data was unavailable; using available campaign data.", "Review"))
+    if not alerts:
+        alerts.append(("✅", "No urgent setup alerts detected.", "Good"))
+    with lower_left:
+        st.markdown('<div class="cc-dash-panel"><div class="cc-panel-title">🔔 Campaign Alerts</div>', unsafe_allow_html=True)
+        for icon, msg, link in alerts[:5]:
+            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(icon)} {html.escape(msg)}</span><span class="cc-alert-link">{html.escape(link)}</span></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with lower_right:
+        st.markdown('<div class="cc-dash-panel"><div class="cc-panel-title">↺ Recent Activity</div>', unsafe_allow_html=True)
+        recent = [
+            ("Mobile results synced", f"{stats.get('mobile_results',0):,} records"),
+            ("Active programs", f"{stats.get('active_programs',0):,}"),
+            ("Saved universes", f"{stats.get('saved_universes',0):,}"),
+            ("Follow-ups needing action", f"{stats.get('followups',0):,}"),
+        ]
+        for left, right in recent:
+            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(left)}</span><span>{html.escape(right)}</span></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="cc-dash-tip">💡 Tip: Use the red buttons inside each card to jump into the work area that needs attention. District Snapshot remains below for voter-file composition and geography.</div>', unsafe_allow_html=True)
 
     st.markdown("### District Snapshot")
     left, right = st.columns([1.0, 1.25])
@@ -17855,20 +18107,6 @@ def render_enhanced_home():
             render_home_geo_table(summary, scoped_active)
         except Exception:
             st.info("Geography quick-count data is unavailable.")
-
-    st.markdown("### Alerts")
-    alerts = []
-    if activity.get("saved_universes", 0) == 0:
-        alerts.append("No saved universes yet. Start with Create Universe.")
-    if activity.get("programs", 0) == 0:
-        alerts.append("No grassroots/GOTV programs yet. Build one after saving a universe.")
-    if err and not (r or d or o):
-        alerts.append("Quick-count party numbers were unavailable; dashboard used manifest totals only.")
-    if not alerts:
-        alerts.append("No urgent setup alerts detected.")
-
-    for alert in alerts:
-        st.info(alert)
 
 # Route protection. If a user lands on a page they do not have permission for,
 # send them back to the dashboard instead of rendering unauthorized tools.
