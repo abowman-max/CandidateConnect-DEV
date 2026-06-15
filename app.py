@@ -17963,6 +17963,16 @@ def render_enhanced_home():
         .cc-alert-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(7,29,58,.09);padding:10px 0;font-size:14px;color:#071d3a;}
         .cc-alert-link{color:#b01019;font-weight:900;white-space:nowrap;}
         .cc-dash-tip{background:rgba(255,255,255,.35);border:1px solid rgba(150,120,80,.22);border-radius:12px;padding:12px 16px;color:#5f6978;margin-top:8px;}
+        /* Dashboard jump links: make card actions look like text links, not large red bars. */
+        .main div[data-testid="stButton"] > button{
+            background:transparent!important;border:0!important;box-shadow:none!important;color:#b01019!important;
+            padding:0!important;min-height:0!important;height:auto!important;justify-content:flex-start!important;
+            text-align:left!important;font-weight:1000!important;font-size:14px!important;
+        }
+        .main div[data-testid="stButton"] > button:hover,
+        .main div[data-testid="stButton"] > button:focus{
+            background:transparent!important;border:0!important;color:#8e0d14!important;text-decoration:underline!important;
+        }
         @media (max-width: 1200px){.cc-dash-title-row{display:block}.cc-election-pill{margin-top:12px}.cc-dash-metric-cell{border-right:0;border-bottom:1px solid rgba(7,29,58,.08)}}
         </style>
         """, unsafe_allow_html=True)
@@ -18011,10 +18021,9 @@ def render_enhanced_home():
               <div class="cc-panel-row"><span>MB Results / Synced</span><b>{stats.get('mobile_results',0):,}</b></div>
               <div class="cc-panel-row"><span>Follow Ups</span><b>{stats.get('followups',0):,}</b></div>
               <div class="cc-panel-row"><span>Base Dataset</span><b>{html.escape(str('Statewide' if is_super_admin() else campaign_dataset_status_label()))}</b></div>
-              <div class="cc-panel-action">Go to Mail Ballot Center ›</div>
             </div>
             ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Open Mail Ballot", "mail_ballot_center", "dashboard", "dash_open_mb", user_can("mail_ballot_center"))
+        _cc_v2_nav_link("Go to Mail Ballot Center ›", "mail_ballot_center", "dashboard", "dash_open_mb", user_can("mail_ballot_center"))
     with p2:
         st.markdown(f'''
             <div class="cc-dash-panel">
@@ -18023,10 +18032,9 @@ def render_enhanced_home():
               <div class="cc-panel-row"><span>Programs Total</span><b>{stats.get('programs',0):,}</b></div>
               <div class="cc-panel-row"><span>Households Contacted</span><b>{stats.get('households_contacted',0):,}</b></div>
               <div class="cc-panel-row"><span>Undecided</span><b>{stats.get('undecided',0):,}</b></div>
-              <div class="cc-panel-action">Review active lists and next contact pass ›</div>
             </div>
             ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Open Grassroots", "voter_outreach", "outreach", "dash_open_grassroots", True)
+        _cc_v2_nav_link("Review active lists and next contact pass ›", "voter_outreach", "outreach", "dash_open_grassroots", True)
     with p3:
         st.markdown(f'''
             <div class="cc-dash-panel">
@@ -18035,10 +18043,9 @@ def render_enhanced_home():
               <div class="cc-panel-row"><span>Election Workers</span><b>{stats.get('election_day_workers',0):,}</b></div>
               <div class="cc-panel-row"><span>Precincts</span><b>{stats.get('precincts',0):,}</b></div>
               <div class="cc-panel-row"><span>Coverage Holes</span><b>{stats.get('holes_pct',0):,}%</b></div>
-              <div class="cc-panel-action">Build poll coverage plan ›</div>
             </div>
             ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Open Election Day", "election_day", "election_day", "dash_open_ed", True)
+        _cc_v2_nav_link("Build poll coverage plan ›", "election_day", "election_day", "dash_open_ed", True)
     with p4:
         st.markdown(f'''
             <div class="cc-dash-panel">
@@ -18047,10 +18054,9 @@ def render_enhanced_home():
               <div class="cc-panel-row"><span>Favorable</span><b>{stats.get('favorable',0):,}</b></div>
               <div class="cc-panel-row"><span>Unfavorable</span><b>{stats.get('unfavorable',0):,}</b></div>
               <div class="cc-panel-row"><span>Not Home</span><b>{stats.get('not_home',0):,}</b></div>
-              <div class="cc-panel-action">Prioritize next action list ›</div>
             </div>
             ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Open Follow Ups", "voter_outreach", "outreach", "dash_open_followups", True)
+        _cc_v2_nav_link("Prioritize next action list ›", "voter_outreach", "outreach", "dash_open_followups", True)
 
     lower_left, lower_right = st.columns([1.15, 1.0])
     alerts = []
@@ -18081,32 +18087,9 @@ def render_enhanced_home():
             st.markdown(f'<div class="cc-alert-row"><span>{html.escape(left)}</span><span>{html.escape(right)}</span></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="cc-dash-tip">💡 Tip: Use the red buttons inside each card to jump into the work area that needs attention. District Snapshot remains below for voter-file composition and geography.</div>', unsafe_allow_html=True)
+    # District Snapshot removed from Dashboard v2B to keep the dashboard focused on campaign action.
+    # Composition/geography remain available in Create Universe and Area Intelligence.
 
-    st.markdown("### District Snapshot")
-    left, right = st.columns([1.0, 1.25])
-    with left:
-        try:
-            render_party_chart(summary, "Voters by Party")
-        except Exception:
-            st.info("Party chart unavailable for this dataset.")
-        try:
-            gdf = duckdb_count_cube_group_filtered(json.dumps(scoped_active, sort_keys=True), json.dumps({}, sort_keys=True), "Gender", 8)
-            if not gdf.empty and "Voters" in gdf.columns:
-                gf = {str(row.get("label", "")).upper(): int(row.get("Voters", 0) or 0) for _, row in gdf.iterrows()}
-                gs = {"total": sum(gf.values()), "f": gf.get("F", 0), "m": gf.get("M", 0), "u": sum(v for k, v in gf.items() if k not in {"F", "M"})}
-                render_gender_chart(gs, "Voters by Gender")
-        except Exception:
-            st.info("Gender chart unavailable for this dataset.")
-    with right:
-        try:
-            render_home_age_card(total, scoped_active)
-        except Exception:
-            st.info("Age quick-count data is unavailable.")
-        try:
-            render_home_geo_table(summary, scoped_active)
-        except Exception:
-            st.info("Geography quick-count data is unavailable.")
 
 # Route protection. If a user lands on a page they do not have permission for,
 # send them back to the dashboard instead of rendering unauthorized tools.
