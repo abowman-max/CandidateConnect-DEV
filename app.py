@@ -17956,12 +17956,15 @@ def render_enhanced_home():
         .cc-dash-value{font-size:27px;line-height:1.05;color:#071d3a;font-weight:1000;margin-top:6px;}
         .cc-dash-note{font-size:12px;color:#5f6978;margin-top:6px;}
         .cc-dash-panel{background:rgba(255,255,255,.38);border:1px solid rgba(150,120,80,.25);border-radius:14px;box-shadow:0 8px 22px rgba(7,29,58,.06);padding:18px 18px 14px 18px;margin-bottom:16px;min-height:270px;}
+        .cc-dash-panel-compact{min-height:0;padding:16px 18px 12px 18px;}
+        .cc-dash-panel-compact .cc-panel-title{margin-bottom:8px;}
         .cc-panel-title{display:flex;align-items:center;gap:9px;color:#071d3a;font-size:20px;font-weight:1000;margin-bottom:14px;text-transform:uppercase;}
         .cc-panel-row{display:flex;justify-content:space-between;border-bottom:1px solid rgba(7,29,58,.09);padding:8px 0;font-size:15px;color:#071d3a;}
         .cc-panel-row b{font-weight:1000;}
         .cc-panel-action{margin-top:14px;color:#b01019;font-weight:1000;font-size:14px;}
         .cc-alert-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(7,29,58,.09);padding:10px 0;font-size:14px;color:#071d3a;}
-        .cc-alert-link{color:#b01019;font-weight:900;white-space:nowrap;}
+        .cc-alert-link{color:#b01019!important;font-weight:900;white-space:nowrap;text-decoration:none;}
+        .cc-alert-link:hover,.cc-alert-link:focus{text-decoration:underline;color:#8e0d14!important;}
         .cc-dash-tip{background:rgba(255,255,255,.35);border:1px solid rgba(150,120,80,.22);border-radius:12px;padding:12px 16px;color:#5f6978;margin-top:8px;}
         .cc-card-link{display:inline-block;margin-top:16px;color:#b01019!important;font-weight:1000;font-size:14px;text-decoration:none;}
         .cc-card-link:hover,.cc-card-link:focus{color:#8e0d14!important;text-decoration:underline;}
@@ -18059,22 +18062,26 @@ def render_enhanced_home():
     lower_left, lower_right = st.columns([1.15, 1.0])
     alerts = []
     if stats.get("saved_universes", 0) == 0:
-        alerts.append(("⚠️", "No saved universes yet. Start with Create Universe.", "Create Universe"))
+        alerts.append(("⚠️", "No saved universes yet. Start with Create Universe.", "Create Universe ›", "?cc_section=create_universe"))
     if stats.get("programs", 0) == 0:
-        alerts.append(("⚠️", "No grassroots/GOTV programs yet. Build one after saving a universe.", "Grassroots"))
+        alerts.append(("⚠️", "No grassroots/GOTV programs yet. Build one after saving a universe.", "Open Grassroots ›", "?cc_section=voter_outreach"))
     if stats.get("holes_pct", 0) >= 15:
-        alerts.append(("⚠️", f"{stats.get('holes_pct',0)}% of the universe appears to have coverage holes.", "Area Intelligence"))
+        alerts.append(("⚠️", f"{stats.get('holes_pct',0)}% of the universe appears to have coverage holes.", "Open Area Intelligence ›", "?cc_section=area_intelligence"))
+    if stats.get("election_day_workers", 0) == 0:
+        alerts.append(("⚠️", "No Election Day workers are assigned yet.", "Open Election Day ›", "?cc_section=election_day"))
+    if stats.get("followups", 0) > 0:
+        alerts.append(("✅", f"{stats.get('followups',0):,} follow-ups need next action.", "Open Follow-Ups ›", "?cc_section=voter_outreach"))
     if err:
-        alerts.append(("ℹ️", "Some quick-count data was unavailable; using available campaign data.", "Review"))
+        alerts.append(("ℹ️", "Some quick-count data was unavailable; using available campaign data.", "Review ›", "#"))
     if not alerts:
-        alerts.append(("✅", "No urgent setup alerts detected.", "Good"))
+        alerts.append(("✅", "No urgent setup alerts detected.", "Good", "#"))
     with lower_left:
-        st.markdown('<div class="cc-dash-panel"><div class="cc-panel-title">🔔 Campaign Alerts</div>', unsafe_allow_html=True)
-        for icon, msg, link in alerts[:5]:
-            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(icon)} {html.escape(msg)}</span><span class="cc-alert-link">{html.escape(link)}</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-dash-panel cc-dash-panel-compact"><div class="cc-panel-title">🔔 Campaign Alerts</div>', unsafe_allow_html=True)
+        for icon, msg, label, href in alerts[:6]:
+            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(icon)} {html.escape(msg)}</span><a class="cc-alert-link" href="{html.escape(href)}">{html.escape(label)}</a></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     with lower_right:
-        st.markdown('<div class="cc-dash-panel"><div class="cc-panel-title">↺ Recent Activity</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cc-dash-panel cc-dash-panel-compact"><div class="cc-panel-title">↺ Recent Activity</div>', unsafe_allow_html=True)
         recent = [
             ("Mobile results synced", f"{stats.get('mobile_results',0):,} records"),
             ("Active programs", f"{stats.get('active_programs',0):,}"),
@@ -18082,7 +18089,7 @@ def render_enhanced_home():
             ("Follow-ups needing action", f"{stats.get('followups',0):,}"),
         ]
         for left, right in recent:
-            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(left)}</span><span>{html.escape(right)}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="cc-alert-row"><span>{html.escape(left)}</span><b>{html.escape(str(right))}</b></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     # District Snapshot removed from Dashboard v2B to keep the dashboard focused on campaign action.
