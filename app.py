@@ -17509,10 +17509,13 @@ cc634_restore_section()
 with st.sidebar:
     st.caption(f"Signed in: {current_username()} · {current_role()}")
     if is_campaign_scoped():
-        st.caption(f"Campaign: {current_user().get('campaign', '')}")
-        st.caption(campaign_dataset_status_label())
+        _cc_campaign_name = current_user().get('campaign', '')
+        st.caption(f"Campaign: {_cc_campaign_name}")
+        _cc_dataset_active = "active" in str(campaign_dataset_status_label() or "").lower()
+        st.caption("🟢 Campaign Dataset Active" if _cc_dataset_active else "⚪ Campaign Dataset Not Active")
     elif is_super_admin():
-        st.caption("Dataset: Statewide")
+        st.caption("Candidate Connect campaign app")
+        st.caption("Use Jedi for TSS statewide/support tools")
 
     # Candidate Connect v2 Phase 1 Navigation Shell
     # Navigation-only change. Existing engines are preserved and routed to their current working sections.
@@ -17538,10 +17541,15 @@ with st.sidebar:
 
     _cc_v2_nav_button("🏠 Dashboard", None, "dashboard", key="v2_nav_dashboard")
 
-    with st.expander("⚙️ Admin", expanded=_current_section in {"my_account", "account_admin", "campaign_organization"}):
+    _cc_is_campaign_admin = bool(is_campaign_scoped() and user_can("account_admin"))
+
+    with st.expander("⚙️ Admin", expanded=_current_section in {"my_account", "account_admin", "campaign_organization", "campaign_data_admin"}):
         _cc_v2_nav_button("👤 My Account", "my_account", "account", key="v2_nav_my_account")
-        _cc_v2_nav_button("👥 Campaign Contacts", "campaign_organization", "organization", key="v2_nav_campaign_contacts")
-        _cc_v2_nav_button("🔐 User Accounts / Data Admin", "account_admin", "security", key="v2_nav_account_admin", allowed=user_can("account_admin"))
+        _cc_v2_nav_button("👥 Campaign Contacts", "campaign_organization", "organization", key="v2_nav_campaign_contacts", allowed=is_campaign_scoped())
+        _cc_v2_nav_button("🔐 Campaign User Accounts", "account_admin", "security", key="v2_nav_account_admin", allowed=_cc_is_campaign_admin)
+        _cc_v2_nav_button("🗂️ Campaign Data Admin", "campaign_data_admin", "data_admin", key="v2_nav_campaign_data_admin", allowed=_cc_is_campaign_admin)
+        if is_super_admin() and not is_campaign_scoped():
+            st.caption("TSS/global tools have moved to Jedi.")
 
     with st.expander("🔎 Voter Lookup", expanded=_current_section in {"voter_lookup"}):
         _cc_v2_nav_button("🔎 Search / Household / Detail", "voter_lookup", "dashboard", key="v2_nav_voter_lookup", allowed=user_can("voter_lookup"))
@@ -17659,8 +17667,11 @@ with st.sidebar:
         st.markdown("### Election Day")
         st.caption("Poll coverage, worker scheduling, turnout tracking, and incident reporting will live here.")
     elif st.session_state.get("left_section") == "account_admin":
-        st.markdown("### Account Admin")
-        st.caption("Manage Candidate Connect accounts and campaign scopes.")
+        st.markdown("### Campaign User Accounts")
+        st.caption("Manage users for this campaign only.")
+    elif st.session_state.get("left_section") == "campaign_data_admin":
+        st.markdown("### Campaign Data Admin")
+        st.caption("Campaign dataset status, uploads, and schema readiness. TSS/global dataset controls live in Jedi.")
 
 
 
@@ -18096,15 +18107,62 @@ def render_enhanced_home():
     # Composition/geography remain available in Create Universe and Area Intelligence.
 
 
+
+def render_cc_campaign_data_admin_workspace(filter_options=None):
+    """Campaign-facing Data Admin screen for Candidate Connect.
+
+    This screen intentionally avoids statewide/TSS controls. Jedi will own those.
+    Candidate Connect only displays the active campaign dataset status and the exact
+    field names currently available to the campaign app.
+    """
+    st.markdown("## Campaign Data Admin")
+    st.caption("Campaign-contained dataset status and CC standard-field readiness.")
+
+    if not is_campaign_scoped():
+        st.info("Candidate Connect is campaign-facing. TSS/global dataset administration belongs in Jedi.")
+        return
+
+    status_text = str(campaign_dataset_status_label() or "")
+    active_flag = "active" in status_text.lower()
+    st.markdown(
+        f'<div class="cc-card"><h3>Dataset Status</h3><p>{"🟢 Active" if active_flag else "⚪ Not Active"}</p><p>{html.escape(status_text)}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Exact Field Names Currently Available")
+    st.caption("These are shown exactly as loaded. Candidate Connect should use clean app-ready fields, not guess variants or repair dirty structure.")
+    fields = []
+    try:
+        if filter_options is not None and hasattr(filter_options, "columns"):
+            fields = [str(c) for c in list(filter_options.columns)]
+    except Exception:
+        fields = []
+
+    if fields:
+        st.code("\n".join(fields), language="text")
+    else:
+        st.info("No field list is available from the loaded filter layer on this screen.")
+
+    st.markdown("### Data Contract")
+    st.markdown(
+        """
+- TSS voter data, MIB overlays, and mapped self-provided files must conform to the CC standard schema before app use.
+- Candidate Connect and Jedi consume clean datasets; they do not repair duplicate headers, alternate spellings, or structural data errors.
+- Self-provided voter files must map to CC standard fields and include PA State Voter ID for reliable matching.
+- MIB remains an overlay matched by voter ID; it must not overwrite or pollute the campaign base voter file.
+        """
+    )
+
 # Route protection. If a user lands on a page they do not have permission for,
 # send them back to the dashboard instead of rendering unauthorized tools.
 if section == "voter_lookup" and user_can("voter_lookup"): render_voter_lookup_workspace(); st.stop()
 if section == "mail_ballot_center" and user_can("mail_ballot_center"): render_mail_ballot_workspace(); st.stop()
 if section == "area_intelligence" and user_can("area_intelligence"): render_area_intelligence_workspace(); st.stop()
-if section == "campaign_organization": render_campaign_organization_workspace(); st.stop()
+if section == "campaign_organization" and is_campaign_scoped(): render_campaign_organization_workspace(); st.stop()
 if section == "voter_outreach": render_voter_outreach_workspace(); st.stop()
 if section == "election_day": render_election_day_workspace(); st.stop()
-if section == "account_admin" and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
+if section == "account_admin" and is_campaign_scoped() and user_can("account_admin"): render_account_admin_workspace(filter_options); st.stop()
+if section == "campaign_data_admin" and is_campaign_scoped() and user_can("account_admin"): render_cc_campaign_data_admin_workspace(filter_options); st.stop()
 if section == "my_account": render_my_account_workspace(); st.stop()
 if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
 
