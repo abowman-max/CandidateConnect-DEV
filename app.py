@@ -17963,16 +17963,10 @@ def render_enhanced_home():
         .cc-alert-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(7,29,58,.09);padding:10px 0;font-size:14px;color:#071d3a;}
         .cc-alert-link{color:#b01019;font-weight:900;white-space:nowrap;}
         .cc-dash-tip{background:rgba(255,255,255,.35);border:1px solid rgba(150,120,80,.22);border-radius:12px;padding:12px 16px;color:#5f6978;margin-top:8px;}
-        /* Dashboard jump links: make card actions look like text links, not large red bars. */
-        .main div[data-testid="stButton"] > button{
-            background:transparent!important;border:0!important;box-shadow:none!important;color:#b01019!important;
-            padding:0!important;min-height:0!important;height:auto!important;justify-content:flex-start!important;
-            text-align:left!important;font-weight:1000!important;font-size:14px!important;
-        }
-        .main div[data-testid="stButton"] > button:hover,
-        .main div[data-testid="stButton"] > button:focus{
-            background:transparent!important;border:0!important;color:#8e0d14!important;text-decoration:underline!important;
-        }
+        .cc-card-link{display:inline-block;margin-top:16px;color:#b01019!important;font-weight:1000;font-size:14px;text-decoration:none;}
+        .cc-card-link:hover,.cc-card-link:focus{color:#8e0d14!important;text-decoration:underline;}
+        .cc-status-dot{display:inline-block;width:10px;height:10px;border-radius:999px;background:#43a047;margin-right:8px;vertical-align:middle;}
+        .cc-status-dot.off{background:#9aa3ad;}
         @media (max-width: 1200px){.cc-dash-title-row{display:block}.cc-election-pill{margin-top:12px}.cc-dash-metric-cell{border-right:0;border-bottom:1px solid rgba(7,29,58,.08)}}
         </style>
         """, unsafe_allow_html=True)
@@ -18014,49 +18008,53 @@ def render_enhanced_home():
 
     p1, p2, p3, p4 = st.columns(4)
     with p1:
-        st.markdown(f'''
+        dataset_active = bool(is_super_admin() or campaign_dataset_status_label())
+        status_label = "Active" if dataset_active else "Inactive"
+        status_class = "" if dataset_active else " off"
+        mb_href = "?cc_section=mail_ballot_center" if user_can("mail_ballot_center") else "#"
+        st.markdown(f"""
             <div class="cc-dash-panel">
               <div class="cc-panel-title">📬 Mail Ballot</div>
               <div class="cc-panel-row"><span>Current Universe</span><b>{html.escape(str(st.session_state.get('current_universe_label','None')))}</b></div>
               <div class="cc-panel-row"><span>MB Results / Synced</span><b>{stats.get('mobile_results',0):,}</b></div>
               <div class="cc-panel-row"><span>Follow Ups</span><b>{stats.get('followups',0):,}</b></div>
-              <div class="cc-panel-row"><span>Base Dataset</span><b>{html.escape(str('Statewide' if is_super_admin() else campaign_dataset_status_label()))}</b></div>
+              <div class="cc-panel-row"><span>Dataset Status</span><b><span class="cc-status-dot{status_class}"></span>{status_label}</b></div>
+              <a class="cc-card-link" href="{mb_href}">Go to Mail Ballot Center ›</a>
             </div>
-            ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Go to Mail Ballot Center ›", "mail_ballot_center", "dashboard", "dash_open_mb", user_can("mail_ballot_center"))
+            """, unsafe_allow_html=True)
     with p2:
-        st.markdown(f'''
+        st.markdown(f"""
             <div class="cc-dash-panel">
               <div class="cc-panel-title">📣 Grassroots / GOTV</div>
               <div class="cc-panel-row"><span>Active Programs</span><b>{stats.get('active_programs',0):,}</b></div>
               <div class="cc-panel-row"><span>Programs Total</span><b>{stats.get('programs',0):,}</b></div>
               <div class="cc-panel-row"><span>Households Contacted</span><b>{stats.get('households_contacted',0):,}</b></div>
               <div class="cc-panel-row"><span>Undecided</span><b>{stats.get('undecided',0):,}</b></div>
+              <a class="cc-card-link" href="?cc_section=voter_outreach">Review active lists and next contact pass ›</a>
             </div>
-            ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Review active lists and next contact pass ›", "voter_outreach", "outreach", "dash_open_grassroots", True)
+            """, unsafe_allow_html=True)
     with p3:
-        st.markdown(f'''
+        st.markdown(f"""
             <div class="cc-dash-panel">
               <div class="cc-panel-title">🗳️ Election Day</div>
               <div class="cc-panel-row"><span>Days Until Election</span><b>{days:,}</b></div>
               <div class="cc-panel-row"><span>Election Workers</span><b>{stats.get('election_day_workers',0):,}</b></div>
               <div class="cc-panel-row"><span>Precincts</span><b>{stats.get('precincts',0):,}</b></div>
               <div class="cc-panel-row"><span>Coverage Holes</span><b>{stats.get('holes_pct',0):,}%</b></div>
+              <a class="cc-card-link" href="?cc_section=election_day">Build poll coverage plan ›</a>
             </div>
-            ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Build poll coverage plan ›", "election_day", "election_day", "dash_open_ed", True)
+            """, unsafe_allow_html=True)
     with p4:
-        st.markdown(f'''
+        st.markdown(f"""
             <div class="cc-dash-panel">
               <div class="cc-panel-title">✅ Follow Ups</div>
               <div class="cc-panel-row"><span>Open Follow Ups</span><b>{stats.get('followups',0):,}</b></div>
               <div class="cc-panel-row"><span>Favorable</span><b>{stats.get('favorable',0):,}</b></div>
               <div class="cc-panel-row"><span>Unfavorable</span><b>{stats.get('unfavorable',0):,}</b></div>
               <div class="cc-panel-row"><span>Not Home</span><b>{stats.get('not_home',0):,}</b></div>
+              <a class="cc-card-link" href="?cc_section=voter_outreach">Prioritize next action list ›</a>
             </div>
-            ''', unsafe_allow_html=True)
-        _cc_v2_nav_link("Prioritize next action list ›", "voter_outreach", "outreach", "dash_open_followups", True)
+            """, unsafe_allow_html=True)
 
     lower_left, lower_right = st.columns([1.15, 1.0])
     alerts = []
