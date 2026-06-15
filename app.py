@@ -1345,6 +1345,134 @@ div[data-testid="stSelectbox"] > div,
 div[data-testid="stMultiSelect"] > div {
     gap: 0 !important;
 }
+
+
+/* === Phase 1.2A universal hover/help-icon lock === */
+/* Sidebar nav hover must never become light background with white text. */
+[data-testid="stSidebar"] .stButton > button:hover,
+[data-testid="stSidebar"] .stButton > button:focus,
+[data-testid="stSidebar"] .stButton > button:focus-visible,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:hover,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:focus,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:focus-visible {
+    background: rgba(248,244,234,.72) !important;
+    background-color: rgba(248,244,234,.72) !important;
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    border-color: rgba(159,21,28,.24) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover *,
+[data-testid="stSidebar"] .stButton > button:focus *,
+[data-testid="stSidebar"] .stButton > button:focus-visible *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:hover *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:focus *,
+[data-testid="stSidebar"] div[data-testid="stDownloadButton"] > button:focus-visible * {
+    color: #071d3a !important;
+    -webkit-text-fill-color: #071d3a !important;
+    fill: #071d3a !important;
+    stroke: #071d3a !important;
+    text-shadow: none !important;
+}
+
+/* Universal help/tooltip/icon rule: black icon/text on main beige background; no hover color shift. */
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stTooltipHoverTarget"] *,
+button[aria-label="Help"],
+button[aria-label="Help"] *,
+button[aria-label*="help" i],
+button[aria-label*="help" i] *,
+button[title="Help"],
+button[title="Help"] *,
+button[title*="help" i],
+button[title*="help" i] *,
+[data-testid="stWidgetLabel"] [role="button"],
+[data-testid="stWidgetLabel"] [role="button"] * {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    fill: #000000 !important;
+    stroke: #000000 !important;
+    border-color: #efe8d8 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    opacity: 1 !important;
+}
+[data-testid="stTooltipHoverTarget"]:hover,
+[data-testid="stTooltipHoverTarget"]:focus,
+[data-testid="stTooltipHoverTarget"]:focus-visible,
+button[aria-label="Help"]:hover,
+button[aria-label="Help"]:focus,
+button[aria-label="Help"]:focus-visible,
+button[aria-label*="help" i]:hover,
+button[aria-label*="help" i]:focus,
+button[aria-label*="help" i]:focus-visible,
+button[title="Help"]:hover,
+button[title="Help"]:focus,
+button[title="Help"]:focus-visible,
+button[title*="help" i]:hover,
+button[title*="help" i]:focus,
+button[title*="help" i]:focus-visible,
+[data-testid="stWidgetLabel"] [role="button"]:hover,
+[data-testid="stWidgetLabel"] [role="button"]:focus,
+[data-testid="stWidgetLabel"] [role="button"]:focus-visible {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    fill: #000000 !important;
+    stroke: #000000 !important;
+    border-color: #efe8d8 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+[data-testid="stTooltipHoverTarget"] svg,
+[data-testid="stTooltipHoverTarget"] svg *,
+button[aria-label="Help"] svg,
+button[aria-label="Help"] svg *,
+button[aria-label*="help" i] svg,
+button[aria-label*="help" i] svg *,
+button[title="Help"] svg,
+button[title="Help"] svg *,
+button[title*="help" i] svg,
+button[title*="help" i] svg *,
+[data-testid="stWidgetLabel"] svg,
+[data-testid="stWidgetLabel"] svg * {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    fill: #000000 !important;
+    stroke: #000000 !important;
+    opacity: 1 !important;
+}
+
+/* Above-table/dataframe menus and icon buttons use the same stable help-icon treatment. */
+div[data-testid="stElementToolbar"],
+div[data-testid="stElementToolbar"] > div,
+div[data-testid="stElementToolbar"] [role="toolbar"],
+div[data-testid="stElementToolbar"] button,
+div[data-testid="stElementToolbar"] [role="button"],
+div[data-testid="stElementToolbar"] button:hover,
+div[data-testid="stElementToolbar"] [role="button"]:hover,
+div[data-testid="stElementToolbar"] button:focus,
+div[data-testid="stElementToolbar"] [role="button"]:focus {
+    background: #efe8d8 !important;
+    background-color: #efe8d8 !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    border-color: #efe8d8 !important;
+    box-shadow: none !important;
+}
+div[data-testid="stElementToolbar"] *,
+div[data-testid="stElementToolbar"] svg,
+div[data-testid="stElementToolbar"] svg * {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    fill: #000000 !important;
+    stroke: #000000 !important;
+    opacity: 1 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
