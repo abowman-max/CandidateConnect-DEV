@@ -18177,47 +18177,212 @@ if section == "campaign_data_admin" and is_campaign_scoped() and user_can("accou
 if section == "my_account": render_my_account_workspace(); st.stop()
 if section != "create_universe" or not user_can("create_universe"): render_enhanced_home(); st.stop()
 
-st.session_state["view"]="targeting"
+st.session_state["view"] = "targeting"
+
+# Candidate Connect v2 Phase 4A — Create Universe workflow wrapper.
+# IMPORTANT: This preserves the original filter widgets, count engine, saved-universe storage,
+# and output/PDF/export engine. The left sidebar remains the source of truth for filters.
+
+
+def _cc_v2_fmt_int(value):
+    try:
+        return f"{int(value or 0):,}"
+    except Exception:
+        return "0"
+
+
+def _cc_v2_summary_value(summary, key):
+    try:
+        return int((summary or {}).get(key, 0) or 0)
+    except Exception:
+        return 0
+
+
+def _cc_v2_filter_chips(active_dict, special_dict):
+    chips = []
+    for k, vals in (active_dict or {}).items():
+        vals = list(vals or [])
+        if not vals:
+            continue
+        shown = ", ".join(map(str, vals[:6]))
+        if len(vals) > 6:
+            shown += f" +{len(vals) - 6} more"
+        chips.append(f"<span class='cc-v2-chip'><b>{html.escape(str(DISPLAY_LABELS.get(k, k)))}:</b> {html.escape(shown)}</span>")
+
+    special_dict = special_dict or {}
+    if "RegistrationMonthsAgo" in special_dict:
+        chips.append(f"<span class='cc-v2-chip'><b>Newly Registered:</b> last {html.escape(str(special_dict['RegistrationMonthsAgo'].get('max', '')))} months</span>")
+    if "__PhoneReach" in special_dict:
+        chips.append(f"<span class='cc-v2-chip'><b>Phone Reach:</b> {html.escape(str(special_dict['__PhoneReach']))}</span>")
+    if "__ElectionFilters" in special_dict:
+        ef = special_dict.get("__ElectionFilters") or {}
+        bits = []
+        if ef.get("years"):
+            bits.append("Years " + ", ".join(map(str, ef.get("years", []))))
+        if ef.get("types"):
+            bits.append("Types " + ", ".join(map(str, ef.get("types", []))))
+        if ef.get("methods"):
+            bits.append("Methods " + ", ".join(map(str, ef.get("methods", []))))
+        if bits:
+            chips.append(f"<span class='cc-v2-chip'><b>Specific Elections:</b> {html.escape('; '.join(bits))}</span>")
+    for sf in ["V4A", "V4G", "V4P", "MB_Prob_Score"]:
+        if sf in special_dict:
+            rng = special_dict.get(sf) or {}
+            chips.append(f"<span class='cc-v2-chip'><b>{html.escape(str(DISPLAY_LABELS.get(sf, sf)))}:</b> {html.escape(str(rng.get('min', '')))}–{html.escape(str(rng.get('max', '')))}</span>")
+    return chips
+
+
+st.markdown(
+    """
+    <style>
+      .cc-v2-cu-card {background:#f8f4ea;border:1px solid #d6ccb8;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 6px 16px rgba(7,29,58,.07);}
+      .cc-v2-cu-card h3 {margin:0 0 8px 0;color:#071d3a;font-size:22px;font-weight:950;}
+      .cc-v2-cu-kicker {color:#b01622;font-weight:950;text-transform:uppercase;font-size:12px;letter-spacing:.03em;margin-bottom:8px;}
+      .cc-v2-cu-metric {background:#f8f4ea;border:1px solid #d6ccb8;border-radius:14px;padding:16px;min-height:104px;}
+      .cc-v2-cu-metric .label {color:#b01622;font-weight:950;text-transform:uppercase;font-size:12px;letter-spacing:.03em;}
+      .cc-v2-cu-metric .value {color:#071d3a;font-weight:950;font-size:30px;margin-top:10px;line-height:1;}
+      .cc-v2-cu-metric .sub {color:#5f6b7a;font-size:14px;margin-top:12px;font-weight:700;}
+      .cc-v2-chip {display:inline-block;background:#dce6e7;color:#071d3a;border-radius:999px;padding:7px 10px;margin:4px 5px 4px 0;font-size:13px;font-weight:800;}
+      .cc-v2-cu-link {color:#b01622;font-weight:950;text-decoration:none;}
+      .cc-v2-cu-small {color:#5f6b7a;font-size:14px;font-weight:700;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.markdown("## Create Universe")
-st.markdown("### Current Universe")
-special_active = active_special_filters()
-if active or special_active:
-    chips=[]
-    for k,vals in active.items(): chips.append(f"**{DISPLAY_LABELS.get(k,k)}:** {', '.join(map(str, vals[:6]))}{'…' if len(vals)>6 else ''}")
-    if "RegistrationMonthsAgo" in special_active: chips.append(f"**Newly Registered:** last {special_active['RegistrationMonthsAgo']['max']} months")
-    if "__PhoneReach" in special_active: chips.append(f"**Phone Reach:** {special_active['__PhoneReach']}")
-    if "__ElectionFilters" in special_active:
-        ef=special_active["__ElectionFilters"]; bits=[]
-        if ef.get("years"): bits.append("Years "+", ".join(map(str,ef.get("years",[]))))
-        if ef.get("types"): bits.append("Types "+", ".join(map(str,ef.get("types",[]))))
-        if ef.get("methods"): bits.append("Methods "+", ".join(map(str,ef.get("methods",[]))))
-        chips.append("**Specific Elections:** "+"; ".join(bits))
-    for sf in ["V4A","V4G","V4P","MB_Prob_Score"]:
-        if sf in special_active: chips.append(f"**{DISPLAY_LABELS.get(sf,sf)}:** {special_active[sf]['min']}–{special_active[sf]['max']}")
-    st.markdown(" &nbsp; | &nbsp; ".join(chips), unsafe_allow_html=True)
-else: st.info("No filters selected. Choose filters in the left pane.")
+st.caption("Build, save, manage, and output campaign universes using the existing campaign-scoped filter, count, saved-universe, and export engines.")
 
+_active = active_filters()
+_special_active = active_special_filters()
+_saved_universes = load_persistent_saved_universes()
+_quick_summary = st.session_state.get("quick_summary") or {}
+_current_label = st.session_state.get("current_universe_label", "None")
+_current_total = _cc_v2_summary_value(_quick_summary, "total")
 
-a1,a2,sp = st.columns([.85,.85,4.3])
-with a1:
-    if st.button("Save / Apply Current Universe", width="stretch"):
-        with st.spinner("Updating counts..."):
-            summary, mode, err = update_counts(active)
-        if err:
-            st.warning("Counts are unavailable for this filter combination.")
-            st.caption(str(err)[:500])
+m1, m2, m3, m4 = st.columns(4)
+with m1:
+    st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Current</div><div class='value'>{_cc_v2_fmt_int(_current_total)}</div><div class='sub'>voters in applied universe</div></div>", unsafe_allow_html=True)
+with m2:
+    st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Saved</div><div class='value'>{_cc_v2_fmt_int(len(_saved_universes or {}))}</div><div class='sub'>campaign universes</div></div>", unsafe_allow_html=True)
+with m3:
+    _filter_group_count = len(_active or {}) + (1 if _special_active else 0)
+    st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Filters</div><div class='value'>{_cc_v2_fmt_int(_filter_group_count)}</div><div class='sub'>active filter groups</div></div>", unsafe_allow_html=True)
+with m4:
+    st.markdown("<div class='cc-v2-cu-metric'><div class='label'>Outputs</div><div class='value'>● Ready</div><div class='sub'>role-based export access</div></div>", unsafe_allow_html=True)
+
+_build_tab, _saved_tab, _outputs_tab, _contract_tab = st.tabs(["1. Build Universe", "2. Saved Universes", "3. Outputs", "4. Data Contract"])
+
+with _build_tab:
+    left, right = st.columns([1.35, 1.0], gap="large")
+    with left:
+        st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Step 1</div><h3>Select filters in the left panel</h3><div class='cc-v2-cu-small'>The original filter widgets are preserved in the sidebar. Filter choices remain campaign-scoped and use the existing filter engine.</div></div>", unsafe_allow_html=True)
+        _chips = _cc_v2_filter_chips(_active, _special_active)
+        if _chips:
+            st.markdown("".join(_chips), unsafe_allow_html=True)
         else:
-            st.session_state["quick_summary"] = summary
-            st.session_state["count_mode"] = mode
-            save_current_universe(active, summary, source="Create Universe")
-            st.success(f"Current universe saved: {st.session_state.get('current_universe_label', 'Selected universe')}")
-with a2: st.button("Clear Filters", width="stretch", on_click=clear_filter_state)
-if st.session_state.get("quick_summary"):
-    st.caption("Counts updated. Use the Output Center tabs below for the overview, exports, and reports.")
+            st.info("No filters selected. Choose filters in the left panel.")
 
-_ = st.markdown("## Output Center")
-_ = render_output_buttons(active)
-_ = st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
+        st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Step 2</div><h3>Apply current universe</h3><div class='cc-v2-cu-small'>This calls the existing count engine and saves the current universe for Mail Ballot, Grassroots, GOTV, Election Day, and Reporting.</div></div>", unsafe_allow_html=True)
+        a1, a2 = st.columns(2)
+        with a1:
+            if st.button("Save / Apply Current Universe", width="stretch", key="phase4a_apply_current_universe"):
+                with st.spinner("Updating counts with the existing count engine..."):
+                    summary, mode, err = update_counts(_active)
+                if err:
+                    st.warning("Counts are unavailable for this filter combination.")
+                    st.caption(str(err)[:500])
+                else:
+                    st.session_state["quick_summary"] = summary
+                    st.session_state["count_mode"] = mode
+                    save_current_universe(_active, summary, source="Create Universe")
+                    st.success(f"Current universe saved: {st.session_state.get('current_universe_label', 'Selected universe')}")
+                    st.rerun()
+        with a2:
+            st.button("Clear Filters", width="stretch", key="phase4a_clear_filters", on_click=clear_filter_state)
+
+        st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Step 3</div><h3>Name and save for reuse</h3><div class='cc-v2-cu-small'>Saved universes use the existing saved-universe store. The type label helps other modules find the right universe later.</div></div>", unsafe_allow_html=True)
+        _save_name = st.text_input("Universe name", key="phase4a_save_universe_name", placeholder="Example: High Propensity Persuasion")
+        _universe_type = st.selectbox("Universe type", ["Universal", "Mail Ballot", "Grassroots", "GOTV", "Election Day"], key="phase4a_universe_type")
+        if st.button("Save Named Universe", width="stretch", key="phase4a_save_named_universe"):
+            if str(_save_name).strip():
+                saved = load_persistent_saved_universes()
+                saved[str(_save_name).strip()] = {
+                    "filters": _active,
+                    "special": _special_active,
+                    "type": _universe_type,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                    "source": "Create Universe v2",
+                }
+                persist_saved_universes(saved)
+                st.success("Saved universe.")
+                st.rerun()
+            else:
+                st.warning("Enter a universe name first.")
+
+    with right:
+        st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Current Universe</div>", unsafe_allow_html=True)
+        st.markdown(f"### {html.escape(str(_current_label))}")
+        _summary = st.session_state.get("quick_summary") or {"total": 0, "r": 0, "d": 0, "o": 0}
+        st.markdown(f"Total voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('total', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Republican&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('r', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Democrat&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('d', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Other / Unaffiliated&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('o', 0))}**", unsafe_allow_html=True)
+        if st.session_state.get("count_mode"):
+            st.caption(f"Count mode: {st.session_state.get('count_mode')}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Workflow</div><h3>Recommended next steps</h3><ul><li>Build filters in the left panel.</li><li>Apply the universe to update counts.</li><li>Save it with a clear name and type.</li><li>Generate outputs in the Outputs tab.</li><li>Reuse saved universes in Mail Ballot, Grassroots, GOTV, and Election Day.</li></ul></div>", unsafe_allow_html=True)
+
+with _saved_tab:
+    st.markdown("### Saved Universe Manager")
+    saved = load_persistent_saved_universes()
+    if not saved:
+        st.info("No saved universes yet. Build filters, then save a named universe.")
+    else:
+        rows = []
+        for name, payload in sorted(saved.items()):
+            payload = payload or {}
+            filters = payload.get("filters") or {}
+            special = payload.get("special") or {}
+            rows.append({
+                "Universe": name,
+                "Type": payload.get("type", "Universal"),
+                "Filter Groups": len(filters or {}) + (1 if special else 0),
+                "Created": payload.get("created_at", ""),
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        choice = st.selectbox("Select saved universe", [""] + sorted(saved.keys()), key="phase4a_saved_universe_choice")
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("Load Selected Universe", width="stretch", key="phase4a_load_selected_universe") and choice:
+                load_saved_universe_into_widgets(saved.get(choice, {}))
+                st.success("Loaded saved universe into the sidebar filters.")
+                st.rerun()
+        with b2:
+            if st.button("Delete Selected Universe", width="stretch", key="phase4a_delete_selected_universe") and choice:
+                _ = saved.pop(choice, None)
+                persist_saved_universes(saved)
+                st.success("Deleted saved universe.")
+                st.rerun()
+
+with _outputs_tab:
+    st.markdown("### Output Center")
+    st.caption("This is the existing output/export/PDF engine. No PDF rewrites were made in Phase 4A.")
+    _ = render_output_buttons(_active)
+    st.caption(f"Rendered at {datetime.now().isoformat(timespec='seconds')}")
+
+with _contract_tab:
+    st.markdown("### Data Contract")
+    st.markdown(
+        """
+- Candidate Connect uses the exact app-ready fields produced by the pipeline or mapped during user upload.
+- This screen does not guess field-name variants and does not repair duplicate/misnamed fields.
+- TSS voter data, MIB daily data, and mapped self-provided data must conform to the CC standard schema before use.
+- MIB remains an overlay matched by voter ID; it must not overwrite or pollute the campaign base voter file.
+- Missing self-provided fields should disable dependent features with warnings rather than forcing app-side structure fixes.
+        """
+    )
 
 # Absolute final UI safety lock: keep real action/download buttons red with white text,
 # while keeping tabs/toggles/read-only labels navy and readable across Chrome/Safari.
