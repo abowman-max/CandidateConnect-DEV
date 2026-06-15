@@ -1797,6 +1797,13 @@ def _count_cube_expanded_values(field: str, vals) -> list[str]:
         elif field == "MB_App_Status":
             # Application status is not a yes/no field, but keep common capitalization variants.
             expanded.extend([v, v.title(), u])
+        elif field in {"HasMobile", "HasLandline", "HasEmail"}:
+            if u in yes:
+                expanded.extend([v, "Y", "Yes", "YES", "True", "TRUE", "1"])
+            elif u in no:
+                expanded.extend([v, "", "N", "No", "NO", "False", "FALSE", "0"])
+            else:
+                expanded.append(v)
         else:
             expanded.append(v)
 
@@ -17603,28 +17610,30 @@ with st.sidebar:
             st.selectbox("Vote History Type", ["All Elections","General Elections","Primary Elections"], key=special_key("vote_score_type"))
             st.slider("Vote History",0,4,(0,4),1,key=special_key("vote_history_score_range"))
             years, etypes, methods = election_options()
-            st.multiselect("Election Year", years, key=special_key("election_years"))
-            st.multiselect("Election Type", etypes, key=special_key("election_types"))
-            st.multiselect("Vote Method", methods, key=special_key("election_methods"))
-        with st.expander("Mail Ballot", expanded=False):
-            for field in ["MB_App", "MB_App_Status", "MB_Sent", "MB_Status"]:
-                st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
-            st.slider("Mail Ballot Probability Score",0,4,(0,4),1,key=special_key("mb_prob_score_range"))
+            if years or etypes:
+                st.multiselect("Election Year", years, key=special_key("election_years"))
+                st.multiselect("Election Type", etypes, key=special_key("election_types"))
+                st.multiselect("Vote Method", methods, key=special_key("election_methods"))
+            else:
+                st.caption("Specific election filters are unavailable until election-history fields are present in the CC standard dataset.")
+        # Mail ballot filters intentionally live in Mail Ballot Center in v2.
+        # Do not duplicate them in Create Universe.
         with st.expander("Contact Filters", expanded=False):
             st.selectbox("Mobile / Landline Reach", ["No phone filter","Mobile only","Landline only","Mobile OR landline","Mobile AND landline","No mobile or landline"], key=special_key("phone_reach_mode"))
-            for field in ["HasEmail","HasApplicantPhone"]:
+            for field in ["HasEmail"]:
                 st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
         tag_opts=field_options(filter_options,"Tags",active_filters())
         if tag_opts:
             with st.expander("Tags", expanded=False): st.multiselect("Tags", tag_opts, key=filter_key("Tags"))
         with st.expander("Saved Universes", expanded=False):
-            saved=load_persistent_saved_universes(); name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
+            saved={str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}; name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
             if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
                 if str(name).strip():
                     saved[str(name).strip()]={"filters":active_filters(),"special":active_special_filters()}; persist_saved_universes(saved); st.success("Saved.")
                 else: st.warning("Enter a universe name first.")
             if saved:
-                choice=st.selectbox("Load saved universe", [""]+sorted(saved.keys()), key=special_key("load_universe_choice"))
+                _saved_names = [x for x in sorted(saved.keys()) if str(x).strip()]
+                choice=st.selectbox("Load saved universe", [""]+_saved_names, key=special_key("load_universe_choice"))
                 ca,cb=st.columns(2)
                 with ca:
                     if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice: load_saved_universe_into_widgets(saved.get(choice,{}))
@@ -18319,7 +18328,7 @@ st.caption("Build, save, manage, and output campaign universes using the existin
 
 _active = active_filters()
 _special_active = active_special_filters()
-_saved_universes = load_persistent_saved_universes()
+_saved_universes = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
 _quick_summary = st.session_state.get("quick_summary") or {}
 _current_label = st.session_state.get("current_universe_label", "None")
 
@@ -18383,7 +18392,7 @@ with _build_tab:
         _universe_type = st.selectbox("Universe type", ["Universal", "Mail Ballot", "Grassroots", "GOTV", "Election Day"], key="phase4a_universe_type")
         if st.button("Save Named Universe", width="stretch", key="phase4a_save_named_universe"):
             if str(_save_name).strip():
-                saved = load_persistent_saved_universes()
+                saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
                 saved[str(_save_name).strip()] = {
                     "filters": _active,
                     "special": _special_active,
@@ -18419,7 +18428,7 @@ with _build_tab:
 
 with _saved_tab:
     st.markdown("### Saved Universe Manager")
-    saved = load_persistent_saved_universes()
+    saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
     if not saved:
         st.info("No saved universes yet. Build filters, then save a named universe.")
     else:
