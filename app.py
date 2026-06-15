@@ -1052,8 +1052,7 @@ svg[aria-label="Help"],
     opacity: 1 !important;
 }
 div[data-testid="stTooltipContent"],
-div[role="tooltip"],
-[data-baseweb="popover"] {
+div[role="tooltip"] {
     background: #ffffff !important;
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
@@ -1061,8 +1060,7 @@ div[role="tooltip"],
     box-shadow: 0 8px 24px rgba(7,29,58,.18) !important;
 }
 div[data-testid="stTooltipContent"] *,
-div[role="tooltip"] *,
-[data-baseweb="popover"] * {
+div[role="tooltip"] * {
     color: #071d3a !important;
     -webkit-text-fill-color: #071d3a !important;
     opacity: 1 !important;
@@ -18250,6 +18248,72 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Phase 4A.1: focused filter control repair. This is intentionally scoped to Streamlit
+# select/multiselect widgets so it does not alter dashboard cards or action buttons.
+st.markdown(
+    """
+    <style>
+      /* Keep multiselect chips readable and stop the white internal input layer from covering selected values. */
+      div[data-testid="stMultiSelect"] div[data-baseweb="select"],
+      .stMultiSelect div[data-baseweb="select"] {
+          height: auto !important;
+          max-height: none !important;
+          min-height: 36px !important;
+          overflow: visible !important;
+      }
+      div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
+      .stMultiSelect div[data-baseweb="select"] > div {
+          height: auto !important;
+          max-height: none !important;
+          min-height: 34px !important;
+          align-items: center !important;
+          flex-wrap: wrap !important;
+          overflow: visible !important;
+          padding-top: 3px !important;
+          padding-bottom: 3px !important;
+      }
+      div[data-testid="stMultiSelect"] span[data-baseweb="tag"],
+      .stMultiSelect span[data-baseweb="tag"] {
+          height: 20px !important;
+          max-height: 20px !important;
+          min-height: 20px !important;
+          line-height: 18px !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          overflow: visible !important;
+          z-index: 2 !important;
+      }
+      div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *,
+      .stMultiSelect span[data-baseweb="tag"] * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          overflow: visible !important;
+          text-overflow: clip !important;
+          white-space: nowrap !important;
+      }
+      div[data-testid="stMultiSelect"] input,
+      .stMultiSelect input {
+          min-width: 18px !important;
+          width: auto !important;
+          background: transparent !important;
+          z-index: 1 !important;
+      }
+      /* Dropdown menus are menus, not help popovers. Keep option text full-width and readable. */
+      div[data-baseweb="popover"] [role="listbox"],
+      div[data-baseweb="popover"] [role="option"],
+      div[data-baseweb="popover"] [role="option"] * {
+          background: #ffffff !important;
+          color: #071d3a !important;
+          -webkit-text-fill-color: #071d3a !important;
+          overflow: visible !important;
+          text-overflow: clip !important;
+          white-space: normal !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.markdown("## Create Universe")
 st.caption("Build, save, manage, and output campaign universes using the existing campaign-scoped filter, count, saved-universe, and export engines.")
 
@@ -18258,7 +18322,20 @@ _special_active = active_special_filters()
 _saved_universes = load_persistent_saved_universes()
 _quick_summary = st.session_state.get("quick_summary") or {}
 _current_label = st.session_state.get("current_universe_label", "None")
-_current_total = _cc_v2_summary_value(_quick_summary, "total")
+
+# Phase 4A.1: show a live count preview for the filters currently selected in the sidebar.
+# This does not save or apply the universe; the Save / Apply button still controls that.
+_preview_summary = None
+_preview_mode = None
+_preview_err = None
+try:
+    if _active or _special_active:
+        _preview_summary, _preview_mode, _preview_err = update_counts(_active)
+except Exception as _preview_exception:
+    _preview_summary, _preview_mode, _preview_err = None, None, _preview_exception
+
+_display_summary = _preview_summary if _preview_summary else _quick_summary
+_current_total = _cc_v2_summary_value(_display_summary, "total")
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
@@ -18323,13 +18400,19 @@ with _build_tab:
     with right:
         st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Current Universe</div>", unsafe_allow_html=True)
         st.markdown(f"### {html.escape(str(_current_label))}")
-        _summary = st.session_state.get("quick_summary") or {"total": 0, "r": 0, "d": 0, "o": 0}
+        _summary = _display_summary or {"total": 0, "r": 0, "d": 0, "o": 0}
+        if _preview_summary:
+            st.caption("Live preview from selected filters. Click Save / Apply to make this the current universe.")
+        elif _preview_err:
+            st.caption("Live preview unavailable for this selection. Click Save / Apply to run the existing engine.")
         st.markdown(f"Total voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('total', 0))}**", unsafe_allow_html=True)
         st.markdown(f"Republican&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('r', 0))}**", unsafe_allow_html=True)
         st.markdown(f"Democrat&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('d', 0))}**", unsafe_allow_html=True)
         st.markdown(f"Other / Unaffiliated&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('o', 0))}**", unsafe_allow_html=True)
-        if st.session_state.get("count_mode"):
-            st.caption(f"Count mode: {st.session_state.get('count_mode')}")
+        if _preview_mode:
+            st.caption(f"Preview count mode: {_preview_mode}")
+        elif st.session_state.get("count_mode"):
+            st.caption(f"Applied count mode: {st.session_state.get('count_mode')}")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='cc-v2-cu-card'><div class='cc-v2-cu-kicker'>Workflow</div><h3>Recommended next steps</h3><ul><li>Build filters in the left panel.</li><li>Apply the universe to update counts.</li><li>Save it with a clear name and type.</li><li>Generate outputs in the Outputs tab.</li><li>Reuse saved universes in Mail Ballot, Grassroots, GOTV, and Election Day.</li></ul></div>", unsafe_allow_html=True)
