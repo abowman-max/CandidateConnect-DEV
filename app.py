@@ -1584,7 +1584,7 @@ inject_clean_theme_css()
 
 
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
-VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
+VOTER_FIELDS = ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
 
 DISPLAY_LABELS = {
@@ -1847,8 +1847,8 @@ def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
     special = special or {}
     for field, rule in special.items():
         if field == "__PhoneReach":
-            mobile = "LOWER(CAST(\"HasMobile\" AS VARCHAR)) = 'yes'"
-            landline = "LOWER(CAST(\"HasLandline\" AS VARCHAR)) = 'yes'"
+            mobile = "UPPER(TRIM(CAST(\"HasMobile\" AS VARCHAR))) IN ('Y','YES','TRUE','T','1','MOBILE')"
+            landline = "UPPER(TRIM(CAST(\"HasLandline\" AS VARCHAR))) IN ('Y','YES','TRUE','T','1','LANDLINE')"
             mode = str(rule)
             if mode == "Mobile only":
                 clauses.append(f"({mobile})")
@@ -5112,26 +5112,63 @@ def render_account_admin_workspace(filter_options=None):
             st.error(f"Could not restore security file: {e}")
 
 def load_persistent_saved_universes():
-    """Initialize session saved universes from local state, then URL query params.
+    """Initialize session saved universes from durable state.
 
-    Super Admin sees the global saved universe list. Campaign-scoped users see
-    only the saved universes for their assigned campaign/account boundary.
+    Phase 4A.3 keeps the original campaign saved-universe store as the source of truth,
+    but also merges legacy saved-universe sections that were created by earlier builds
+    so existing campaign universes do not disappear after the v2 redesign.
     """
     section = saved_universe_state_section()
     session_key = f"saved_universes::{section}"
+
     if session_key not in st.session_state:
-        state_saved = (_load_state().get(section) or {})
-        if state_saved:
-            st.session_state[session_key] = _json_safe_saved_universes(state_saved)
-        else:
+        state = _load_state() or {}
+        merged = {}
+
+        # Primary/current section first.
+        primary = state.get(section) or {}
+        if isinstance(primary, dict):
+            merged.update(_json_safe_saved_universes(primary))
+
+        # Legacy/global section used by older builds.
+        legacy_global = state.get("saved_universes") or {}
+        if isinstance(legacy_global, dict):
+            for k, v in _json_safe_saved_universes(legacy_global).items():
+                merged.setdefault(k, v)
+
+        # Campaign users may have been stored under a previous campaign slug/name.
+        if not is_super_admin():
+            try:
+                campaign_name = str((current_user() or {}).get("campaign") or "").strip()
+                campaign_id = str((current_user() or {}).get("campaign_id") or "").strip()
+                possible_sections = {
+                    f"saved_universes_{_security_slug(campaign_name)}" if campaign_name else "",
+                    f"saved_universes_{_security_slug(campaign_id)}" if campaign_id else "",
+                    f"saved_universes_{_campaign_slug(campaign_name)}" if campaign_name else "",
+                    f"saved_universes_{_campaign_slug(campaign_id)}" if campaign_id else "",
+                }
+                for sec in possible_sections:
+                    if not sec or sec == section:
+                        continue
+                    payload = state.get(sec) or {}
+                    if isinstance(payload, dict):
+                        for k, v in _json_safe_saved_universes(payload).items():
+                            merged.setdefault(k, v)
+            except Exception:
+                pass
+
+        # Super Admin legacy URL persistence only.
+        if not merged:
             try:
                 raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "") if is_super_admin() else ""
             except Exception:
                 raw = ""
-            st.session_state[session_key] = decode_saved_universes(raw)
+            merged = decode_saved_universes(raw)
+
+        st.session_state[session_key] = merged
+
     st.session_state["saved_universes"] = st.session_state.setdefault(session_key, {})
     return st.session_state["saved_universes"]
-
 
 def persist_saved_universes(saved):
     """Persist saved universes into local state and the browser URL."""
@@ -5228,7 +5265,13 @@ def clear_filter_state():
 
 def active_filters() -> dict:
     out = {}
+    # Phase 4A.3: Create Universe no longer owns Mail Ballot-specific filters.
+    # Ignore any stale session values from older builds so hidden MB filters cannot
+    # silently drive counts to zero. Mail Ballot Center retains its own workflow.
+    create_universe_hidden = {"MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasApplicantPhone"}
     for f in ALL_FILTER_FIELDS:
+        if st.session_state.get("left_section") == "create_universe" and f in create_universe_hidden:
+            continue
         vals = selected(f)
         if vals:
             out[f] = vals
@@ -5413,7 +5456,7 @@ def active_special_filters() -> dict:
         special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
 
     mb_prob = st.session_state.get(special_key("mb_prob_score_range"), (0, 4))
-    if mb_prob != (0, 4):
+    if st.session_state.get("left_section") != "create_universe" and mb_prob != (0, 4):
         special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
 
     phone_mode = st.session_state.get(special_key("phone_reach_mode"), "No phone filter")
@@ -5423,7 +5466,10 @@ def active_special_filters() -> dict:
     election_years = st.session_state.get(special_key("election_years"), [])
     election_types = st.session_state.get(special_key("election_types"), [])
     election_methods = st.session_state.get(special_key("election_methods"), [])
-    if election_years or election_types or election_methods:
+    # Phase 4A.3: Create Universe does not apply specific election filters until
+    # exact standard election-history fields are validated. This prevents stale
+    # hidden values from forcing the universe to zero.
+    if st.session_state.get("left_section") != "create_universe" and (election_years or election_types or election_methods):
         special["__ElectionFilters"] = {
             "years": list(election_years or []),
             "types": list(election_types or []),
@@ -5439,8 +5485,9 @@ def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
             return out
 
         if field == "__PhoneReach":
-            mobile = out["HasMobile"].astype(str).str.lower().eq("yes") if "HasMobile" in out.columns else pd.Series(False, index=out.index)
-            landline = out["HasLandline"].astype(str).str.lower().eq("yes") if "HasLandline" in out.columns else pd.Series(False, index=out.index)
+            _yes_tokens = {"y", "yes", "true", "t", "1", "mobile", "landline"}
+            mobile = out["HasMobile"].astype(str).str.strip().str.lower().isin(_yes_tokens) if "HasMobile" in out.columns else pd.Series(False, index=out.index)
+            landline = out["HasLandline"].astype(str).str.strip().str.lower().isin(_yes_tokens) if "HasLandline" in out.columns else pd.Series(False, index=out.index)
             mode = str(rule)
             if mode == "Mobile only":
                 out = out[mobile]
@@ -17609,13 +17656,9 @@ with st.sidebar:
         with st.expander("Vote History", expanded=False):
             st.selectbox("Vote History Type", ["All Elections","General Elections","Primary Elections"], key=special_key("vote_score_type"))
             st.slider("Vote History",0,4,(0,4),1,key=special_key("vote_history_score_range"))
-            years, etypes, methods = election_options()
-            if years or etypes:
-                st.multiselect("Election Year", years, key=special_key("election_years"))
-                st.multiselect("Election Type", etypes, key=special_key("election_types"))
-                st.multiselect("Vote Method", methods, key=special_key("election_methods"))
-            else:
-                st.caption("Specific election filters are unavailable until election-history fields are present in the CC standard dataset.")
+            # Phase 4A.3: keep election-year/type/method filters out of Create Universe
+            # until the exact CC standard election-history fields are validated.
+            st.caption("Specific election-year/type/method filters are held for the CC standard schema pass.")
         # Mail ballot filters intentionally live in Mail Ballot Center in v2.
         # Do not duplicate them in Create Universe.
         with st.expander("Contact Filters", expanded=False):
