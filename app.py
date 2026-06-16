@@ -1584,7 +1584,7 @@ inject_clean_theme_css()
 
 
 GEO_FIELDS = ["County", "Municipality", "Precinct", "USC", "STS", "STH", "School District", "School Region"]
-VOTER_FIELDS = ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
+VOTER_FIELDS = ["Party", "Gender", "Age_Range", "V4A", "V4G", "V4P", "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasMobile", "HasLandline", "HasEmail", "HasApplicantPhone", "Tags"]
 ALL_FILTER_FIELDS = GEO_FIELDS + VOTER_FIELDS
 
 DISPLAY_LABELS = {
@@ -1847,8 +1847,8 @@ def count_cube_where_sql(active: dict, special: dict | None = None) -> str:
     special = special or {}
     for field, rule in special.items():
         if field == "__PhoneReach":
-            mobile = "UPPER(TRIM(CAST(\"HasMobile\" AS VARCHAR))) IN ('Y','YES','TRUE','T','1','MOBILE')"
-            landline = "UPPER(TRIM(CAST(\"HasLandline\" AS VARCHAR))) IN ('Y','YES','TRUE','T','1','LANDLINE')"
+            mobile = "LOWER(CAST(\"HasMobile\" AS VARCHAR)) = 'yes'"
+            landline = "LOWER(CAST(\"HasLandline\" AS VARCHAR)) = 'yes'"
             mode = str(rule)
             if mode == "Mobile only":
                 clauses.append(f"({mobile})")
@@ -5112,63 +5112,26 @@ def render_account_admin_workspace(filter_options=None):
             st.error(f"Could not restore security file: {e}")
 
 def load_persistent_saved_universes():
-    """Initialize session saved universes from durable state.
+    """Initialize session saved universes from local state, then URL query params.
 
-    Phase 4A.3 keeps the original campaign saved-universe store as the source of truth,
-    but also merges legacy saved-universe sections that were created by earlier builds
-    so existing campaign universes do not disappear after the v2 redesign.
+    Super Admin sees the global saved universe list. Campaign-scoped users see
+    only the saved universes for their assigned campaign/account boundary.
     """
     section = saved_universe_state_section()
     session_key = f"saved_universes::{section}"
-
     if session_key not in st.session_state:
-        state = _load_state() or {}
-        merged = {}
-
-        # Primary/current section first.
-        primary = state.get(section) or {}
-        if isinstance(primary, dict):
-            merged.update(_json_safe_saved_universes(primary))
-
-        # Legacy/global section used by older builds.
-        legacy_global = state.get("saved_universes") or {}
-        if isinstance(legacy_global, dict):
-            for k, v in _json_safe_saved_universes(legacy_global).items():
-                merged.setdefault(k, v)
-
-        # Campaign users may have been stored under a previous campaign slug/name.
-        if not is_super_admin():
-            try:
-                campaign_name = str((current_user() or {}).get("campaign") or "").strip()
-                campaign_id = str((current_user() or {}).get("campaign_id") or "").strip()
-                possible_sections = {
-                    f"saved_universes_{_security_slug(campaign_name)}" if campaign_name else "",
-                    f"saved_universes_{_security_slug(campaign_id)}" if campaign_id else "",
-                    f"saved_universes_{_campaign_slug(campaign_name)}" if campaign_name else "",
-                    f"saved_universes_{_campaign_slug(campaign_id)}" if campaign_id else "",
-                }
-                for sec in possible_sections:
-                    if not sec or sec == section:
-                        continue
-                    payload = state.get(sec) or {}
-                    if isinstance(payload, dict):
-                        for k, v in _json_safe_saved_universes(payload).items():
-                            merged.setdefault(k, v)
-            except Exception:
-                pass
-
-        # Super Admin legacy URL persistence only.
-        if not merged:
+        state_saved = (_load_state().get(section) or {})
+        if state_saved:
+            st.session_state[session_key] = _json_safe_saved_universes(state_saved)
+        else:
             try:
                 raw = st.query_params.get(SAVED_UNIVERSES_PARAM, "") if is_super_admin() else ""
             except Exception:
                 raw = ""
-            merged = decode_saved_universes(raw)
-
-        st.session_state[session_key] = merged
-
+            st.session_state[session_key] = decode_saved_universes(raw)
     st.session_state["saved_universes"] = st.session_state.setdefault(session_key, {})
     return st.session_state["saved_universes"]
+
 
 def persist_saved_universes(saved):
     """Persist saved universes into local state and the browser URL."""
@@ -5265,13 +5228,7 @@ def clear_filter_state():
 
 def active_filters() -> dict:
     out = {}
-    # Phase 4A.3: Create Universe no longer owns Mail Ballot-specific filters.
-    # Ignore any stale session values from older builds so hidden MB filters cannot
-    # silently drive counts to zero. Mail Ballot Center retains its own workflow.
-    create_universe_hidden = {"MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasApplicantPhone"}
     for f in ALL_FILTER_FIELDS:
-        if st.session_state.get("left_section") == "create_universe" and f in create_universe_hidden:
-            continue
         vals = selected(f)
         if vals:
             out[f] = vals
@@ -5445,6 +5402,18 @@ def vote_score_field_from_selection() -> str:
 def active_special_filters() -> dict:
     special = {}
 
+    # Phase 4A.4: Create Universe v2 must not carry stale/hidden special filters.
+    # Mail-ballot, newly-registered, contact-reach, and specific-election widgets
+    # are not part of Create Universe until the final CC standard data contract is
+    # verified.  Keeping their old session values here was causing valid universes
+    # to count as zero.
+    if st.session_state.get("left_section") == "create_universe":
+        vh_range = st.session_state.get(special_key("vote_history_score_range"), (0, 4))
+        vh_field = vote_score_field_from_selection() if "vote_score_field_from_selection" in globals() else "V4A"
+        if vh_range != (0, 4):
+            special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
+        return special
+
     # Newly registered slider, expressed against RegistrationMonthsAgo from Step 8 v18.
     new_reg_months = st.session_state.get(special_key("new_reg_months"), 0)
     if new_reg_months and int(new_reg_months) > 0:
@@ -5456,7 +5425,7 @@ def active_special_filters() -> dict:
         special[vh_field] = {"min": int(vh_range[0]), "max": int(vh_range[1])}
 
     mb_prob = st.session_state.get(special_key("mb_prob_score_range"), (0, 4))
-    if st.session_state.get("left_section") != "create_universe" and mb_prob != (0, 4):
+    if mb_prob != (0, 4):
         special["MB_Prob_Score"] = {"min": int(mb_prob[0]), "max": int(mb_prob[1])}
 
     phone_mode = st.session_state.get(special_key("phone_reach_mode"), "No phone filter")
@@ -5466,10 +5435,7 @@ def active_special_filters() -> dict:
     election_years = st.session_state.get(special_key("election_years"), [])
     election_types = st.session_state.get(special_key("election_types"), [])
     election_methods = st.session_state.get(special_key("election_methods"), [])
-    # Phase 4A.3: Create Universe does not apply specific election filters until
-    # exact standard election-history fields are validated. This prevents stale
-    # hidden values from forcing the universe to zero.
-    if st.session_state.get("left_section") != "create_universe" and (election_years or election_types or election_methods):
+    if election_years or election_types or election_methods:
         special["__ElectionFilters"] = {
             "years": list(election_years or []),
             "types": list(election_types or []),
@@ -5485,9 +5451,8 @@ def apply_special_filters(df: pd.DataFrame, special: dict) -> pd.DataFrame:
             return out
 
         if field == "__PhoneReach":
-            _yes_tokens = {"y", "yes", "true", "t", "1", "mobile", "landline"}
-            mobile = out["HasMobile"].astype(str).str.strip().str.lower().isin(_yes_tokens) if "HasMobile" in out.columns else pd.Series(False, index=out.index)
-            landline = out["HasLandline"].astype(str).str.strip().str.lower().isin(_yes_tokens) if "HasLandline" in out.columns else pd.Series(False, index=out.index)
+            mobile = out["HasMobile"].astype(str).str.lower().eq("yes") if "HasMobile" in out.columns else pd.Series(False, index=out.index)
+            landline = out["HasLandline"].astype(str).str.lower().eq("yes") if "HasLandline" in out.columns else pd.Series(False, index=out.index)
             mode = str(rule)
             if mode == "Mobile only":
                 out = out[mobile]
@@ -17540,6 +17505,66 @@ st.markdown(f'''<div class="cc-global-header">
 </div>
 ''', unsafe_allow_html=True)
 
+
+# Phase 4A.4 Create Universe safety helpers.
+def _cc_v2_clear_removed_create_universe_filter_state():
+    """Remove stale values for Create Universe filters intentionally removed from v2.
+
+    These fields either belong in Mail Ballot Center or require final data-contract
+    verification before they can safely drive campaign counts.  Leaving old widget
+    values in session_state made valid filter combinations count as zero.
+    """
+    removed_fields = [
+        "CalculatedParty", "HH-Party",
+        "MB_App", "MB_App_Status", "MB_Sent", "MB_Status", "MB_PERM", "HasApplicantPhone",
+        "HasMobile", "HasLandline", "HasEmail",
+    ]
+    removed_special = [
+        "new_reg_months", "mb_prob_score_range", "phone_reach_mode",
+        "election_years", "election_types", "election_methods",
+    ]
+    for field in removed_fields:
+        st.session_state.pop(filter_key(field), None)
+    for name in removed_special:
+        st.session_state.pop(special_key(name), None)
+
+
+def _cc_v2_saved_universe_visible_for_current_campaign(name: str, payload: dict) -> bool:
+    """Return True only when a saved universe is safe to show in this campaign.
+
+    This prevents saved universes from another campaign/user from surfacing in CC.
+    For old records without campaign metadata, visibility is validated by applying
+    the current campaign hard scope and requiring a non-zero scoped count.
+    """
+    if not is_campaign_scoped():
+        return False
+    if not isinstance(payload, dict):
+        return False
+    current_campaign = str(current_user().get("campaign") or "").strip()
+    payload_campaign = str(payload.get("campaign") or payload.get("campaign_name") or "").strip()
+    if payload_campaign and current_campaign and payload_campaign != current_campaign:
+        return False
+    filters = payload.get("filters") or {}
+    if not isinstance(filters, dict):
+        return False
+    try:
+        scoped_filters = enforce_security_scope(filters)
+        summary = duckdb_count_cube_summary(
+            json.dumps(count_safe_filters(scoped_filters), sort_keys=True),
+            json.dumps({}, sort_keys=True),
+        )
+        return int((summary or {}).get("total") or 0) > 0
+    except Exception:
+        # Fail closed. A campaign-facing app should not show possibly cross-campaign records.
+        return False
+
+
+def _cc_v2_campaign_saved_universes() -> dict:
+    raw = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+    if not is_campaign_scoped():
+        return {}
+    return {k: v for k, v in raw.items() if _cc_v2_saved_universe_visible_for_current_campaign(k, v or {})}
+
 # Require login before loading the full data/filter layer.
 render_security_gate()
 
@@ -17648,31 +17673,27 @@ with st.sidebar:
         with st.expander("Geography", expanded=False):
             for field in GEO_FIELDS:
                 st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
+        _cc_v2_clear_removed_create_universe_filter_state()
         with st.expander("Voter Details", expanded=False):
-            for field in ["Party", "Gender", "Age_Range", "CalculatedParty", "HH-Party"]:
+            for field in ["Party", "Gender", "Age_Range"]:
                 opts = field_options(filter_options, field, active_filters())
                 if opts: st.multiselect(DISPLAY_LABELS.get(field, field), options=opts, key=filter_key(field))
-            st.slider("Newly Registered Within Last N Months",0,24,0,1,key=special_key("new_reg_months"))
+            st.caption("Calculated Party, Household Party, Newly Registered, and Contact filters are held out until the final CC standard data contract is verified.")
         with st.expander("Vote History", expanded=False):
             st.selectbox("Vote History Type", ["All Elections","General Elections","Primary Elections"], key=special_key("vote_score_type"))
             st.slider("Vote History",0,4,(0,4),1,key=special_key("vote_history_score_range"))
-            # Phase 4A.3: keep election-year/type/method filters out of Create Universe
-            # until the exact CC standard election-history fields are validated.
-            st.caption("Specific election-year/type/method filters are held for the CC standard schema pass.")
-        # Mail ballot filters intentionally live in Mail Ballot Center in v2.
-        # Do not duplicate them in Create Universe.
-        with st.expander("Contact Filters", expanded=False):
-            st.selectbox("Mobile / Landline Reach", ["No phone filter","Mobile only","Landline only","Mobile OR landline","Mobile AND landline","No mobile or landline"], key=special_key("phone_reach_mode"))
-            for field in ["HasEmail"]:
-                st.multiselect(DISPLAY_LABELS.get(field, field), options=field_options(filter_options, field, active_filters()), key=filter_key(field))
+            st.caption("Specific election year/type/method filters are held out until election-history fields are validated in the CC standard dataset.")
+        # Mail Ballot and contact-reach filters intentionally live outside Create Universe in v2
+        # until their exact standardized fields are validated.
         tag_opts=field_options(filter_options,"Tags",active_filters())
         if tag_opts:
             with st.expander("Tags", expanded=False): st.multiselect("Tags", tag_opts, key=filter_key("Tags"))
         with st.expander("Saved Universes", expanded=False):
-            saved={str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}; name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
+            saved=_cc_v2_campaign_saved_universes(); name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
             if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
                 if str(name).strip():
-                    saved[str(name).strip()]={"filters":active_filters(),"special":active_special_filters()}; persist_saved_universes(saved); st.success("Saved.")
+                    full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+                    full_saved[str(name).strip()]={"filters":active_filters(),"special":active_special_filters(),"campaign":str(current_user().get("campaign") or ""),"saved_by":current_username(),"created_at":datetime.now().isoformat(timespec="seconds")}; persist_saved_universes(full_saved); st.success("Saved.")
                 else: st.warning("Enter a universe name first.")
             if saved:
                 _saved_names = [x for x in sorted(saved.keys()) if str(x).strip()]
@@ -17682,7 +17703,8 @@ with st.sidebar:
                     if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice: load_saved_universe_into_widgets(saved.get(choice,{}))
                 with cb:
                     if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
-                        _ = saved.pop(choice,None); persist_saved_universes(saved); st.rerun()
+                        full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+                        _ = full_saved.pop(choice,None); persist_saved_universes(full_saved); st.rerun()
             else: st.caption("No saved universes saved yet.")
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
@@ -18371,7 +18393,7 @@ st.caption("Build, save, manage, and output campaign universes using the existin
 
 _active = active_filters()
 _special_active = active_special_filters()
-_saved_universes = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+_saved_universes = _cc_v2_campaign_saved_universes()
 _quick_summary = st.session_state.get("quick_summary") or {}
 _current_label = st.session_state.get("current_universe_label", "None")
 
@@ -18435,11 +18457,13 @@ with _build_tab:
         _universe_type = st.selectbox("Universe type", ["Universal", "Mail Ballot", "Grassroots", "GOTV", "Election Day"], key="phase4a_universe_type")
         if st.button("Save Named Universe", width="stretch", key="phase4a_save_named_universe"):
             if str(_save_name).strip():
-                saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+                saved = _cc_v2_campaign_saved_universes()
                 saved[str(_save_name).strip()] = {
                     "filters": _active,
                     "special": _special_active,
                     "type": _universe_type,
+                    "campaign": str(current_user().get("campaign") or ""),
+                    "saved_by": current_username(),
                     "created_at": datetime.now().isoformat(timespec="seconds"),
                     "source": "Create Universe v2",
                 }
@@ -18471,7 +18495,7 @@ with _build_tab:
 
 with _saved_tab:
     st.markdown("### Saved Universe Manager")
-    saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+    saved = _cc_v2_campaign_saved_universes()
     if not saved:
         st.info("No saved universes yet. Build filters, then save a named universe.")
     else:
@@ -18496,8 +18520,9 @@ with _saved_tab:
                 st.rerun()
         with b2:
             if st.button("Delete Selected Universe", width="stretch", key="phase4a_delete_selected_universe") and choice:
-                _ = saved.pop(choice, None)
-                persist_saved_universes(saved)
+                full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+                _ = full_saved.pop(choice, None)
+                persist_saved_universes(full_saved)
                 st.success("Deleted saved universe.")
                 st.rerun()
 
