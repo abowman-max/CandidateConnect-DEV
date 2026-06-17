@@ -17644,7 +17644,7 @@ with st.sidebar:
 
     with st.expander("🎯 Create Universe", expanded=_current_section in {"create_universe"}):
         _cc_v2_nav_button("🎯 Build Universe", "create_universe", "targeting", key="v2_nav_create_universe", allowed=user_can("create_universe"))
-        st.caption("Saved Universes and Outputs are still inside the current Create Universe engine for Phase 1.")
+        st.caption("Filters live here. Saved Universes and Outputs are in the main panel.")
 
     with st.expander("📬 Mail Ballot", expanded=_current_section in {"mail_ballot_center"}):
         _cc_v2_nav_button("📬 Mail Ballot Center", "mail_ballot_center", "dashboard", key="v2_nav_mail_ballot", allowed=user_can("mail_ballot_center"))
@@ -17688,24 +17688,8 @@ with st.sidebar:
         tag_opts=field_options(filter_options,"Tags",active_filters())
         if tag_opts:
             with st.expander("Tags", expanded=False): st.multiselect("Tags", tag_opts, key=filter_key("Tags"))
-        with st.expander("Saved Universes", expanded=False):
-            saved=_cc_v2_campaign_saved_universes(); name=st.text_input("Save current filters as", key=special_key("save_universe_name"))
-            if st.button("Save Universe", key=special_key("save_universe_button"), width="stretch"):
-                if str(name).strip():
-                    full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
-                    full_saved[str(name).strip()]={"filters":active_filters(),"special":active_special_filters(),"campaign":str(current_user().get("campaign") or ""),"saved_by":current_username(),"created_at":datetime.now().isoformat(timespec="seconds")}; persist_saved_universes(full_saved); st.success("Saved.")
-                else: st.warning("Enter a universe name first.")
-            if saved:
-                _saved_names = [x for x in sorted(saved.keys()) if str(x).strip()]
-                choice=st.selectbox("Load saved universe", [""]+_saved_names, key=special_key("load_universe_choice"))
-                ca,cb=st.columns(2)
-                with ca:
-                    if st.button("Load", key=special_key("load_universe_button"), width="stretch") and choice: load_saved_universe_into_widgets(saved.get(choice,{}))
-                with cb:
-                    if st.button("Delete", key=special_key("delete_universe_button"), width="stretch") and choice:
-                        full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
-                        _ = full_saved.pop(choice,None); persist_saved_universes(full_saved); st.rerun()
-            else: st.caption("No saved universes saved yet.")
+        # Saved Universe save/load controls moved to the main Create Universe panel in Phase 4B.
+        # This keeps the left panel focused only on filters and prevents duplicate state paths.
     elif st.session_state.get("left_section") == "voter_lookup":
         st.markdown("### Voter Lookup")
         st.caption("Search the full statewide active voter file by name, address, PA ID, phone, or email.")
@@ -18270,6 +18254,65 @@ def _cc_v2_summary_value(summary, key):
         return 0
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _cc_v2_household_count_for_filters(active_json: str, special_json: str) -> int | None:
+    """Count distinct households for the current campaign-scoped filter set.
+
+    This is a read-only count helper for the Create Universe panel. It does not
+    rewrite data and it does not invent alternate data structures. It first uses
+    the standardized household key if present, then known legacy app keys only so
+    older DEV campaign shards can still display a household count during the v2
+    transition.
+    """
+    try:
+        active = enforce_security_scope(json.loads(active_json or "{}"))
+        special = json.loads(special_json or "{}")
+        urls = index_urls_from_manifest()
+        if not urls:
+            return None
+        where = count_cube_where_sql(active, special)
+        con = duckdb.connect(database=":memory:")
+        try:
+            try:
+                con.execute("INSTALL httpfs; LOAD httpfs;")
+            except Exception:
+                try:
+                    con.execute("LOAD httpfs;")
+                except Exception:
+                    pass
+            cols_df = con.execute(f"DESCRIBE SELECT * FROM read_parquet({urls!r}, union_by_name=true) LIMIT 0").df()
+            cols = {str(c).strip() for c in cols_df.get("column_name", [])}
+            household_col = None
+            for candidate in ["HH_LOOKUP_KEY", "HouseholdID", "HH_ID", "household_key"]:
+                if candidate in cols:
+                    household_col = candidate
+                    break
+            if not household_col:
+                return None
+            q = f"""
+                SELECT COUNT(DISTINCT NULLIF(TRIM(CAST({sql_ident(household_col)} AS VARCHAR)), '')) AS households
+                FROM read_parquet({urls!r}, union_by_name=true)
+                {where}
+            """
+            val = con.execute(q).fetchone()[0]
+            return int(val or 0)
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+
+def _cc_v2_household_count_display(active_dict: dict, special_dict: dict) -> str:
+    val = _cc_v2_household_count_for_filters(
+        json.dumps(count_safe_filters(active_dict or {}), sort_keys=True),
+        json.dumps(special_dict or {}, sort_keys=True),
+    )
+    return "Unavailable" if val is None else _cc_v2_fmt_int(val)
+
+
 def _cc_v2_filter_chips(active_dict, special_dict):
     chips = []
     for k, vals in (active_dict or {}).items():
@@ -18413,7 +18456,8 @@ _current_total = _cc_v2_summary_value(_display_summary, "total")
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
-    st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Current</div><div class='value'>{_cc_v2_fmt_int(_current_total)}</div><div class='sub'>voters in applied universe</div></div>", unsafe_allow_html=True)
+    _current_households = _cc_v2_household_count_display(_active, _special_active) if (_active or _special_active) else "0"
+    st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Current</div><div class='value'>{_cc_v2_fmt_int(_current_total)}</div><div class='sub'>voters · {_current_households} households</div></div>", unsafe_allow_html=True)
 with m2:
     st.markdown(f"<div class='cc-v2-cu-metric'><div class='label'>Saved</div><div class='value'>{_cc_v2_fmt_int(len(_saved_universes or {}))}</div><div class='sub'>campaign universes</div></div>", unsafe_allow_html=True)
 with m3:
@@ -18457,8 +18501,8 @@ with _build_tab:
         _universe_type = st.selectbox("Universe type", ["Universal", "Mail Ballot", "Grassroots", "GOTV", "Election Day"], key="phase4a_universe_type")
         if st.button("Save Named Universe", width="stretch", key="phase4a_save_named_universe"):
             if str(_save_name).strip():
-                saved = _cc_v2_campaign_saved_universes()
-                saved[str(_save_name).strip()] = {
+                full_saved = {str(k).strip(): v for k, v in (load_persistent_saved_universes() or {}).items() if str(k).strip()}
+                full_saved[str(_save_name).strip()] = {
                     "filters": _active,
                     "special": _special_active,
                     "type": _universe_type,
@@ -18467,7 +18511,7 @@ with _build_tab:
                     "created_at": datetime.now().isoformat(timespec="seconds"),
                     "source": "Create Universe v2",
                 }
-                persist_saved_universes(saved)
+                persist_saved_universes(full_saved)
                 st.success("Saved universe.")
                 st.rerun()
             else:
@@ -18481,10 +18525,12 @@ with _build_tab:
             st.caption("Live preview from selected filters. Click Save / Apply to make this the current universe.")
         elif _preview_err:
             st.caption("Live preview unavailable for this selection. Click Save / Apply to run the existing engine.")
+        _households_display = _cc_v2_household_count_display(_active, _special_active) if (_active or _special_active) else "0"
         st.markdown(f"Total voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('total', 0))}**", unsafe_allow_html=True)
-        st.markdown(f"Republican&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('r', 0))}**", unsafe_allow_html=True)
-        st.markdown(f"Democrat&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('d', 0))}**", unsafe_allow_html=True)
-        st.markdown(f"Other / Unaffiliated&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('o', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Total households&nbsp;&nbsp; **{_households_display}**", unsafe_allow_html=True)
+        st.markdown(f"Republican voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('r', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Democrat voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('d', 0))}**", unsafe_allow_html=True)
+        st.markdown(f"Other / Unaffiliated voters&nbsp;&nbsp; **{_cc_v2_fmt_int(_summary.get('o', 0))}**", unsafe_allow_html=True)
         if _preview_mode:
             st.caption(f"Preview count mode: {_preview_mode}")
         elif st.session_state.get("count_mode"):
